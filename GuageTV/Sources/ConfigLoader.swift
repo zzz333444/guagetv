@@ -1,35 +1,94 @@
 import Foundation
 
-/// Parsed subset of a TVBox interface config (the JSON a user pastes/imports).
+/// TVBox interface config — full field coverage for the mainstream format.
+/// Unknown/variable fields are tolerated on purpose: real-world configs are
+/// messy (comments, trailing commas, mixed ext types) and must never fail
+/// to load just because one site uses an extra key.
 struct TVBoxConfig: Decodable {
     var spider: String?
+    var wallpaper: String?
+    var logo: String?
+    var home: String?            // WebHome page URL, if the config ships one
     var sites: [Site]
     var lives: [Live]?
     var parses: [Parse]?
+    var flags: [String]?
+    var ads: [String]?           // ad-host blocklist rules from the config
+    var doh: [Doh]?
 
     struct Site: Decodable, Identifiable {
         var key: String
         var name: String
-        var type: Int            // 0=XML, 1=JSON, 3=Spider(py/js), 4=drpy
-        var api: String          // for type 3 this is the .py/.js file name or URL
+        var type: Int            // 0=XML CMS, 1=JSON CMS, 3=Spider(py/js/jar), 4=drpy(JS)
+        var api: String
         var searchable: Int?
         var quickSearch: Int?
         var filterable: Int?
-        var ext: JSONValue?      // string or object depending on the source
+        var changeable: Int?
+        var playerType: Int?     // -1 default, 0 system, 1 ijk, 2 exo, 10 mx, 11 reex
+        var ext: JSONValue?      // string or object, source-defined
         var jar: String?
+        var categories: [String]?
+        var click: String?
+        var playUrl: String?
+        var style: Style?
+        var timeout: Int?
+        var header: [String: String]?
         var id: String { key }
+
+        struct Style: Decodable {
+            var type: String?    // "rect" / "list" / "oval"
+            var ratio: Double?
+        }
+
+        enum Kind { case cmsXML, cmsJSON, spiderPY, spiderJS, spiderJAR, drpyJS, unknown }
+
+        /// Which runtime this site needs. iOS has no JVM, so .jar spiders are
+        /// the one mainstream kind this shell can never execute (Apple forbids
+        /// it platform-wide); they are listed but marked unsupported in the UI.
+        var kind: Kind {
+            let a = api.lowercased()
+            switch type {
+            case 0: return .cmsXML
+            case 1: return .cmsJSON
+            case 4: return .drpyJS
+            case 3:
+                if a.hasSuffix(".py") || a.contains("py/") { return .spiderPY }
+                if a.hasSuffix(".js") || a.contains("js/") || a.hasPrefix("csp_js") { return .spiderJS }
+                if a.hasSuffix(".jar") || a.hasPrefix("csp_") { return .spiderJAR }
+                return .unknown
+            default: return .unknown
+            }
+        }
     }
 
     struct Live: Decodable {
         var name: String
         var url: String
-        var type: Int?
+        var type: Int?           // 0=m3u/txt list, 1=JSON, 2=EPG-aware
+        var epg: String?
+        var logo: String?
+        var ua: String?
+        var groups: String?
+        var channels: [Channel]?
+
+        struct Channel: Decodable {
+            var name: String
+            var urls: [String]
+        }
     }
 
     struct Parse: Decodable {
         var name: String
         var url: String
-        var type: Int?
+        var type: Int?           // 0=web sniff, 1=JSON API, 2=aggregate
+        var ext: JSONValue?
+    }
+
+    struct Doh: Decodable {
+        var name: String
+        var url: String
+        var ips: [String]?
     }
 }
 
@@ -38,6 +97,8 @@ enum JSONValue: Decodable {
     case string(String)
     case object([String: JSONValue])
     case array([JSONValue])
+    case number(Double)
+    case bool(Bool)
     case other
 
     init(from decoder: Decoder) throws {
@@ -45,6 +106,8 @@ enum JSONValue: Decodable {
         if let s = try? c.decode(String.self) { self = .string(s); return }
         if let o = try? c.decode([String: JSONValue].self) { self = .object(o); return }
         if let a = try? c.decode([JSONValue].self) { self = .array(a); return }
+        if let n = try? c.decode(Double.self) { self = .number(n); return }
+        if let b = try? c.decode(Bool.self) { self = .bool(b); return }
         self = .other
     }
 
@@ -55,7 +118,7 @@ enum JSONValue: Decodable {
 }
 
 enum ConfigLoader {
-    /// TVBox configs in the wild often contain // comments and trailing commas.
+    /// Real configs often contain // comments and trailing commas.
     static func cleaned(_ raw: Data) -> Data {
         guard var s = String(data: raw, encoding: .utf8) else { return raw }
         s = s.replacingOccurrences(of: #"(?m)^\s*//.*$"#, with: "", options: .regularExpression)

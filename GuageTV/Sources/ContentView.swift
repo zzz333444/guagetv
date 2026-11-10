@@ -1,64 +1,65 @@
 import SwiftUI
 
-/// Stage 0 home: import a TVBox config by URL, list its sites.
-/// Py-backed sites (type 3) will light up once the Python runtime is wired
-/// in stage 1; type 0/1 (XML/JSON CMS) sites can be browsed natively later.
+/// App shell — Rex's floating glass pill tab bar:
+/// 发现 / 我的 / 资源库 / 设置 in one frosted capsule, search as a separate
+/// floating circle button on the right.
 struct ContentView: View {
-    @State private var configURL = ""
     @State private var config: TVBoxConfig?
-    @State private var status = "粘贴 TVBox 配置地址，点导入"
+    @State private var tab = 0
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    TextField("https://…/config.json", text: $configURL)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    Button("导入") { Task { await load() } }
-                        .buttonStyle(.borderedProminent)
-                }
-                .padding(.horizontal)
-
-                Text(status)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                List(config?.sites ?? []) { site in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(site.name)
-                            Text(site.api)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Text(site.type == 3 ? "PY" : "CMS\(site.type)")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
-                    }
+        ZStack(alignment: .bottom) {
+            Group {
+                switch tab {
+                case 0: DiscoverView(config: config)
+                case 1: ProfileView()
+                case 2: LibraryView(config: config) { tab = 3 }
+                default: SettingsView(config: $config)
                 }
             }
-            .navigationTitle("呱壳")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            floatingBar
+                .padding(.horizontal, 18)
+                .padding(.bottom, 10)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var floatingBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 2) {
+                tabButton(index: 0, icon: "house.fill", label: "发现")
+                tabButton(index: 1, icon: "person.fill", label: "我的")
+                tabButton(index: 2, icon: "externaldrive.fill", label: "资源库")
+                tabButton(index: 3, icon: "gearshape.fill", label: "设置")
+            }
+            .padding(6)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+
+            Button { tab = 0 } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Theme.glassStroke, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+            }
         }
     }
 
-    private func load() async {
-        guard let url = URL(string: configURL.trimmingCharacters(in: .whitespaces)) else {
-            status = "地址格式不对"
-            return
-        }
-        status = "加载中…"
-        do {
-            let cfg = try await ConfigLoader.load(url: url)
-            config = cfg
-            status = "已加载 \(cfg.sites.count) 个站点"
-        } catch {
-            status = "加载失败：\(error.localizedDescription)"
+    private func tabButton(index: Int, icon: String, label: String) -> some View {
+        Button { tab = index } label: {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 19))
+                Text(label).font(.system(size: 10))
+            }
+            .foregroundStyle(tab == index ? .white : .white.opacity(0.55))
+            .frame(width: 62, height: 46)
+            .background(tab == index ? Color.white.opacity(0.14) : Color.clear, in: Capsule())
         }
     }
 }
