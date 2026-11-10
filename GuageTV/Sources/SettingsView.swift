@@ -84,7 +84,11 @@ struct SettingsView: View {
     }
 
     private func load() async {
-        guard let url = URL(string: configURL.trimmingCharacters(in: .whitespaces)) else {
+        var text = configURL.trimmingCharacters(in: .whitespaces)
+        if !text.hasPrefix("http://") && !text.hasPrefix("https://") {
+            text = "https://" + text
+        }
+        guard let url = URL(string: text) else {
             status = "地址格式不对"
             return
         }
