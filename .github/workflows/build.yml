@@ -1,0 +1,40 @@
+name: build-unsigned-ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build unsigned .app
+        run: |
+          xcodebuild build \
+            -project GuageTV.xcodeproj \
+            -scheme GuageTV \
+            -sdk iphoneos \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            -derivedDataPath build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/GuageTV.app Payload/
+          zip -r GuageTV-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GuageTV-unsigned-ipa
+          path: GuageTV-unsigned.ipa
