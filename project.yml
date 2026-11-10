@@ -11,9 +11,17 @@ targets:
       - GuageTV/Sources
       - path: GuageTV/Python
         type: folder
+    info:
+      path: GuageTV/Info.plist
+      properties:
+        CFBundleDisplayName: 呱壳
+        UILaunchScreen: {}
+        # TVBox configs, CMS APIs and media streams are very often plain
+        # HTTP; without this, App Transport Security blocks every load
+        # (the "requires the use of a secure connection" import error).
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     settings:
-      INFOPLIST_KEY_CFBundleDisplayName: 呱壳
-      GENERATE_INFOPLIST_FILE: YES
       TARGETED_DEVICE_FAMILY: "1,2"
     # Stage 1: add Python.xcframework (python-apple-support) as an embedded
     # framework here, plus the libpython / ssl / crypto dylibs it ships.
