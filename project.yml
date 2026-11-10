@@ -1,0 +1,19 @@
+name: GuageTV
+options:
+  bundleIdPrefix: com.guage
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  GuageTV:
+    type: application
+    platform: iOS
+    sources:
+      - GuageTV/Sources
+      - path: GuageTV/Python
+        type: folder
+    settings:
+      INFOPLIST_KEY_CFBundleDisplayName: 呱壳
+      GENERATE_INFOPLIST_FILE: YES
+      TARGETED_DEVICE_FAMILY: "1,2"
+    # Stage 1: add Python.xcframework (python-apple-support) as an embedded
+    # framework here, plus the libpython / ssl / crypto dylibs it ships.
