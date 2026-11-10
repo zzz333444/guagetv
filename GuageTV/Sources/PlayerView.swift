@@ -19,8 +19,11 @@ struct PlayerView: View {
     }
 
     private func makePlayer(url: URL) -> AVPlayer {
+        // NOTE: the AVURLAssetHTTPHeaderFieldsKey constant is not exposed in
+        // the iOS 26 SDK's Swift interface; its literal string value is the
+        // documented key and works on every version.
         let asset = AVURLAsset(url: url, options: [
-            AVURLAssetHTTPHeaderFieldsKey: header
+            "AVURLAssetHTTPHeaderFieldsKey": header
         ])
         return AVPlayer(playerItem: AVPlayerItem(asset: asset))
     }
