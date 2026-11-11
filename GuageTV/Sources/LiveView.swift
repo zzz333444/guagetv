@@ -134,25 +134,57 @@ struct LiveView: View {
 
     private func programmeSheet(_ entry: ProgrammeSheetItem) -> some View {
         NavigationStack {
-            List(entry.list) { programme in
-                HStack(spacing: 10) {
-                    Text("\(timeText(programme.start))–\(timeText(programme.end))")
-                        .font(.caption.monospacedDigit()).foregroundStyle(Theme.textDim)
-                    Text(programme.title).font(.subheadline)
-                        .foregroundStyle(programme.contains(Date()) ? Theme.accent : Theme.text)
-                    if programme.contains(Date()) {
-                        Spacer()
-                        Text("正在播").font(.caption2.weight(.bold)).foregroundStyle(Theme.accent)
+            List {
+                ForEach(dayGroups(entry.list), id: \.day) { group in
+                    Section {
+                        ForEach(group.items) { programme in
+                            programmeRow(programme)
+                        }
+                    } header: {
+                        Text(dayLabel(group.day)).foregroundStyle(Theme.section)
                     }
                 }
-                .listRowBackground(Color.clear)
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg)
-            .navigationTitle("\(entry.channel) · 今日节目")
+            .navigationTitle("\(entry.channel) · 节目单")
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func programmeRow(_ programme: EPGProgramme) -> some View {
+        HStack(spacing: 10) {
+            Text("\(timeText(programme.start))–\(timeText(programme.end))")
+                .font(.caption.monospacedDigit()).foregroundStyle(Theme.textDim)
+            Text(programme.title).font(.subheadline)
+                .foregroundStyle(programme.contains(Date()) ? Theme.accent : Theme.text)
+            if programme.contains(Date()) {
+                Spacer()
+                Text("正在播").font(.caption2.weight(.bold)).foregroundStyle(Theme.accent)
+            }
+        }
+        .listRowBackground(Color.clear)
+    }
+
+
+    /// Programmes grouped by broadcast day, days in order.
+    private func dayGroups(_ list: [EPGProgramme]) -> [(day: Date, items: [EPGProgramme])] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: list) { cal.startOfDay(for: $0.start) }
+        return grouped.keys.sorted().map { day in
+            (day: day, items: (grouped[day] ?? []).sorted { $0.start < $1.start })
+        }
+    }
+
+    private func dayLabel(_ day: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(day) { return "今天" }
+        if cal.isDateInTomorrow(day) { return "明天" }
+        if cal.isDateInYesterday(day) { return "昨天" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M月d日 EEE"
+        return formatter.string(from: day)
     }
 
     // MARK: data

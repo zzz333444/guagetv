@@ -9,41 +9,69 @@ struct HistoryView: View {
     @State private var playEntry: HistoryStore.Entry?
     @State private var confirmClear = false
 
+    @State private var segment = 0
+
+    /// History shows only entries that were actually played (they
+    /// carry an episode URL); favourites include detail-page stubs
+    /// filed before the first play.
+    private var shownEntries: [HistoryStore.Entry] {
+        segment == 0
+            ? history.entries.filter { !$0.episodeURL.isEmpty }
+            : history.favourites
+    }
+
     var body: some View {
         NavigationStack {
-            Group {
-                if history.entries.isEmpty {
+            VStack(spacing: 0) {
+                Picker("分段", selection: $segment) {
+                    Text("历史").tag(0)
+                    Text("收藏").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                if shownEntries.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "clock.arrow.circlepath")
+                        Image(systemName: segment == 0 ? "clock.arrow.circlepath" : "heart")
                             .font(.largeTitle).foregroundStyle(Theme.textDim)
-                        Text("还没有浏览记录")
+                        Text(segment == 0 ? "还没有浏览记录" : "还没有收藏")
                             .font(.headline).foregroundStyle(Theme.text)
-                        Text("看过的剧会出现在这里，下次点开直接续播")
+                        Text(segment == 0 ? "看过的剧会出现在这里，下次点开直接续播" : "在详情页点爱心，喜欢的剧会收进这里")
                             .font(.subheadline).foregroundStyle(Theme.textDim)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        ForEach(history.entries) { entry in
+                        ForEach(shownEntries) { entry in
                             row(entry)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
                         }
                         .onDelete { offsets in
-                            let ids = offsets.map { history.entries[$0].id }
-                            ids.forEach { history.remove(id: $0) }
+                            let picked = offsets.map { shownEntries[$0] }
+                            if segment == 0 {
+                                picked.forEach { history.remove(id: $0.id) }
+                            } else {
+                                picked.forEach { entry in
+                                    if entry.episodeURL.isEmpty {
+                                        history.remove(id: entry.id)
+                                    } else {
+                                        history.setFavourite(stub: entry, on: false)
+                                    }
+                                }
+                            }
                         }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                 }
             }
-            .background(AmbientBackground(imageURL: history.entries.first?.pic))
-            .navigationTitle("浏览记录")
+            .background(AmbientBackground(imageURL: shownEntries.first?.pic))
+            .navigationTitle("记录")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                if !history.entries.isEmpty {
+                if segment == 0 && !history.entries.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("清空") { confirmClear = true }
                             .foregroundStyle(.red.opacity(0.9))

@@ -71,12 +71,35 @@ final class CMSClient {
 
     // MARK: Protocol
 
-    func home() async throws -> (classes: [(String, String)], list: [VodItem]) {
+    func home() async throws -> (classes: [(String, String)], list: [VodItem],
+                                 filters: [String: [CMSFilterGroup]]) {
         let r = try await fetch(params: ["ac": "list", "pg": "1"])
         let classes = (r["class"] as? [[String: Any]] ?? []).map {
             (String(describing: $0["type_id"] ?? ""), String(describing: $0["type_name"] ?? ""))
         }
-        return (classes, Self.mapList(r))
+        return (classes, Self.mapList(r), Self.mapFilters(r["filters"]))
+    }
+
+    /// TVBox filter payload: {"<type_id>": [{"key","name","value":
+    /// [{"n","v"}]}]} — the groups a category page can narrow by
+    /// (年份 / 地区 / 语言 / 排序 …). Missing on most采集站.
+    static func mapFilters(_ raw: Any?) -> [String: [CMSFilterGroup]] {
+        guard let byType = raw as? [String: [[String: Any]]] else { return [:] }
+        var out: [String: [CMSFilterGroup]] = [:]
+        for (tid, groups) in byType {
+            out[tid] = groups.compactMap { g in
+                guard let key = g["key"] as? String, !key.isEmpty else { return nil }
+                let options = (g["value"] as? [[String: Any]] ?? []).map {
+                    CMSFilterOption(name: String(describing: $0["n"] ?? ""),
+                                    value: String(describing: $0["v"] ?? ""))
+                }
+                guard !options.isEmpty else { return nil }
+                return CMSFilterGroup(key: key,
+                                      name: (g["name"] as? String) ?? key,
+                                      options: options)
+            }
+        }
+        return out
     }
 
     func category(tid: String, page: Int) async throws -> [VodItem] {
@@ -84,9 +107,12 @@ final class CMSClient {
     }
 
     /// Raw list call; tid nil = the site's home feed (latest updates).
-    func list(tid: String?, page: Int) async throws -> [VodItem] {
+    /// filters carries the category filter selections (key → value);
+    /// empty values are the "全部" choice and are not sent.
+    func list(tid: String?, page: Int, filters: [String: String] = [:]) async throws -> [VodItem] {
         var params = ["ac": "list", "pg": String(page)]
         if let tid, !tid.isEmpty { params["t"] = tid }
+        for (key, value) in filters where !value.isEmpty { params[key] = value }
         let r = try await fetch(params: params)
         return Self.mapList(r)
     }
@@ -205,4 +231,19 @@ private extension String {
         }
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+
+/// One selectable value inside a category filter group.
+struct CMSFilterOption {
+    let name: String
+    let value: String
+}
+
+/// One filter group on a category page （年份 / 地区 / 排序 …).
+struct CMSFilterGroup: Identifiable {
+    let key: String
+    let name: String
+    let options: [CMSFilterOption]
+    var id: String { key }
 }

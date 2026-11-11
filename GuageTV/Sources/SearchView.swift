@@ -42,6 +42,46 @@ struct SearchView: View {
         }
     }
 
+    /// 最近搜索 — stored locally, newest first, capped at 10.
+    @State private var recentsList: [String] =
+        UserDefaults.standard.stringArray(forKey: "searchRecents.v1") ?? []
+
+    private var recents: [String] { recentsList }
+
+    private func saveRecent(_ kw: String) {
+        var list = recents.filter { $0 != kw }
+        list.insert(kw, at: 0)
+        recentsList = Array(list.prefix(10))
+        UserDefaults.standard.set(recentsList, forKey: "searchRecents.v1")
+    }
+
+    @ViewBuilder
+    private var recentsView: some View {
+        if recents.isEmpty {
+            hint("跨已导入的 CMS / py / JS 站点一起搜")
+        } else {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("最近搜索").font(.headline).foregroundStyle(Theme.text)
+                        Spacer()
+                        Button("清空") {
+                            recentsList = []
+                            UserDefaults.standard.removeObject(forKey: "searchRecents.v1")
+                        }
+                        .font(.caption).foregroundStyle(Theme.textDim)
+                    }
+                    FlowChips(words: recents) { word in
+                        keyword = word
+                        Task { await run() }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+            }
+        }
+    }
+
     private var searchBar: some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
@@ -74,6 +114,8 @@ struct SearchView: View {
         } else if searched && results.isEmpty {
             hint(failureNote.isEmpty ? "没有搜到结果" : "没有搜到结果\n\(failureNote)")
         } else if !searched {
+            recentsView
+        } else if false {
             hint("跨已导入的 CMS / py / JS 站点一起搜")
         } else {
             ScrollView(showsIndicators: false) {
@@ -156,6 +198,7 @@ struct SearchView: View {
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
+        saveRecent(kw)
         searching = true
         searched = false
         results = []
@@ -237,6 +280,29 @@ struct SearchView: View {
             return PySiteBrowseView.mapItems(result["list"])
         } catch {
             return nil
+        }
+    }
+}
+
+
+/// Wrapping chip row for the recent-search words (simple flow:
+/// horizontal scroll per line is overkill — a scrollable wrap via
+/// LazyVGrid with adaptive columns reads fine).
+private struct FlowChips: View {
+    let words: [String]
+    let onTap: (String) -> Void
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(words, id: \.self) { word in
+                Text(word)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Theme.glass, in: Capsule())
+                    .foregroundStyle(Theme.text)
+                    .onTapGesture { onTap(word) }
+            }
         }
     }
 }

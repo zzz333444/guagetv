@@ -89,6 +89,12 @@ struct SiteBrowseView: View {
     @State private var classes: [(String, String)] = []
     @State private var items: [VodItem] = []
     @State private var selectedTid = ""
+    @State private var allFilters: [String: [CMSFilterGroup]] = [:]
+    @State private var selectedFilters: [String: String] = [:]
+
+    private var currentFilterGroups: [CMSFilterGroup] {
+        allFilters[selectedTid] ?? []
+    }
     @State private var page = 1
     @State private var loading = true
     @State private var loadingMore = false
@@ -117,8 +123,55 @@ struct SiteBrowseView: View {
     private var cmsBody: some View {
         VStack(spacing: 0) {
             if !classes.isEmpty { classChips }
+            if !currentFilterGroups.isEmpty { filterRows }
             content
         }
+    }
+
+    /// One chip row per filter group the site declares for this
+    /// category （年份 / 地区 / 语言 / 排序）. Picking a value reloads
+    /// page 1 with it as a query parameter.
+    private var filterRows: some View {
+        VStack(spacing: 2) {
+            ForEach(currentFilterGroups) { group in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Text(group.name)
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.section)
+                            .frame(width: 34, alignment: .leading)
+                        ForEach(group.options, id: \.value) { option in
+                            let active = (selectedFilters[group.key] ?? "") == option.value
+                            Text(option.name)
+                                .font(.caption.weight(active ? .semibold : .regular))
+                                .padding(.horizontal, 11).padding(.vertical, 5)
+                                .background(active ? Color.white : Theme.glass, in: Capsule())
+                                .foregroundStyle(active ? .black : Theme.text.opacity(0.85))
+                                .onTapGesture {
+                                    selectedFilters[group.key] = option.value
+                                    Task { await reloadWithFilters() }
+                                }
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+    }
+
+    private func reloadWithFilters() async {
+        page = 1
+        loading = true
+        errorText = nil
+        do {
+            items = try await client.list(tid: selectedTid.isEmpty ? nil : selectedTid,
+                                          page: 1, filters: selectedFilters)
+            canLoadMore = items.count >= 10
+            Task { await backfillPosters() }
+        } catch {
+            errorText = "加载失败：\(error.localizedDescription)"
+        }
+        loading = false
     }
 
     private var classChips: some View {
@@ -229,6 +282,7 @@ struct SiteBrowseView: View {
             let home = try await client.home()
             classes = home.classes
             items = home.list
+            allFilters = home.filters
             selectedTid = ""
             page = 1
             canLoadMore = home.list.count >= 10
@@ -241,11 +295,12 @@ struct SiteBrowseView: View {
 
     private func selectClass(_ tid: String) async {
         selectedTid = tid
+        selectedFilters = [:]
         page = 1
         loading = true
         errorText = nil
         do {
-            items = try await client.list(tid: tid.isEmpty ? nil : tid, page: 1)
+            items = try await client.list(tid: tid.isEmpty ? nil : tid, page: 1, filters: selectedFilters)
             canLoadMore = items.count >= 10
             Task { await backfillPosters() }
         } catch {
@@ -269,7 +324,7 @@ struct SiteBrowseView: View {
         guard canLoadMore, !loadingMore else { return }
         loadingMore = true
         do {
-            let next = try await client.list(tid: selectedTid.isEmpty ? nil : selectedTid, page: page + 1)
+            let next = try await client.list(tid: selectedTid.isEmpty ? nil : selectedTid, page: page + 1, filters: selectedFilters)
             page += 1
             items += next
             canLoadMore = next.count >= 10

@@ -22,6 +22,8 @@ struct DiscoverView: View {
     @State private var feedLineID = ""
     @State private var feedConfig: TVBoxConfig?
     @State private var showLinePicker = false
+    @ObservedObject private var history = HistoryStore.shared
+    @State private var cwPlayEntry: HistoryStore.Entry?
 
     /// First CMS site of the HOME line feeds the Discover page (the
     /// home line is chosen with the 编辑 button and may differ from
@@ -37,6 +39,7 @@ struct DiscoverView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
                     hero
+                    continueWatchingRow
                     ForEach(displaySections) { section in
                         posterRow(title: section.title, items: section.items)
                     }
@@ -47,6 +50,12 @@ struct DiscoverView: View {
             .background(AmbientBackground(imageURL: displayHero.first?.pic))
             .overlay(alignment: .bottomLeading) { editButton }
             .sheet(isPresented: $showLinePicker) { linePicker }
+            .fullScreenCover(item: $cwPlayEntry) { entry in
+                PlayerView(
+                    episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
+                    startIndex: 0, header: entry.playHeader, title: entry.name,
+                    historyID: entry.id, resumeAt: entry.positionSeconds)
+            }
             .onAppear {
                 if feedLineID.isEmpty {
                     feedLineID = ConfigLibrary.homeLineID()
@@ -55,6 +64,41 @@ struct DiscoverView: View {
             }
         }
         .task(id: activeSite?.id ?? "") { await loadFeed() }
+    }
+
+    /// 继续观看 — straight from HistoryStore: unfinished episodes,
+    /// newest first, tap resumes in place.
+    @ViewBuilder
+    private var continueWatchingRow: some View {
+        if !history.continueWatching.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("继续观看").font(.title3.bold()).foregroundStyle(Theme.text)
+                    .padding(.horizontal, 18)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(history.continueWatching) { entry in
+                            VStack(alignment: .leading, spacing: 6) {
+                                PosterImage(urlString: entry.pic)
+                                    .frame(width: 92, height: 138)
+                                    .posterFrame()
+                                Text(entry.name).font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.text).lineLimit(1)
+                                Text(entry.episodeName).font(.caption2)
+                                    .foregroundStyle(Theme.textDim).lineLimit(1)
+                                if entry.durationSeconds > 0 {
+                                    ProgressView(value: min(entry.positionSeconds / entry.durationSeconds, 1))
+                                        .tint(Theme.accent)
+                                }
+                            }
+                            .frame(width: 92)
+                            .contentShape(Rectangle())
+                            .onTapGesture { cwPlayEntry = entry }
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                }
+            }
+        }
     }
 
     private var editButton: some View {

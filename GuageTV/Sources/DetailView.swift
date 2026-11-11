@@ -42,6 +42,11 @@ struct DetailView: View {
             .padding(.bottom, 40)
         }
         .background(AmbientBackground(imageURL: detail.pic))
+        .onAppear {
+            if let seed = historySeed {
+                isFav = HistoryStore.shared.isFavourite(siteKey: seed.siteKey, vodId: seed.vodId)
+            }
+        }
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
                        header: sel.playHeader ?? header, title: detail.name,
@@ -88,9 +93,33 @@ struct DetailView: View {
                 metaLine("主演", detail.actor)
             }
             Spacer()
+            if historySeed != nil {
+                Button { toggleFavourite() } label: {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .font(.title3)
+                        .foregroundStyle(isFav ? Color.red : Theme.textDim)
+                        .frame(width: 40, height: 40)
+                        .background(Theme.glass, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
+    }
+
+    @State private var isFav = false
+
+    private func toggleFavourite() {
+        guard let seed = historySeed else { return }
+        let target = !isFav
+        let stub = HistoryStore.Entry(
+            vodId: seed.vodId, siteKey: seed.siteKey, name: detail.name, pic: detail.pic,
+            episodeName: "", episodeURL: "", positionSeconds: 0, durationSeconds: 0,
+            watchedSeconds: 0, updatedAt: Date(), isFavourite: target,
+            lineID: seed.lineID, siteName: seed.siteName)
+        HistoryStore.shared.setFavourite(stub: stub, on: target)
+        isFav = target
     }
 
     private func metaLine(_ label: String, _ value: String) -> some View {

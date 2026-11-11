@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.11 · 画中画与刷新"
+    static let buildLabel = "v1.12 · 收藏与筛选"
 
     var body: some View {
         NavigationStack {
@@ -107,6 +107,22 @@ struct SettingsView: View {
                                     } label: {
                                         Image(systemName: "trash").foregroundStyle(.red.opacity(0.85))
                                     }
+                                }
+                                .contextMenu {
+                                    Button {
+                                        if let source = ConfigLibrary.sourceURL(id: entry.id) {
+                                            UIPasteboard.general.string = source
+                                            status = "已复制 \(entry.name) 的地址"
+                                        }
+                                    } label: { Label("复制地址", systemImage: "doc.on.doc") }
+                                    Button { refreshEntry(entry) } label: {
+                                        Label("刷新", systemImage: "arrow.clockwise")
+                                    }
+                                    Button(role: .destructive) {
+                                        config = ConfigLibrary.remove(id: entry.id)
+                                        entries = ConfigLibrary.entries()
+                                        status = "已删除 \(entry.name)"
+                                    } label: { Label("删除", systemImage: "trash") }
                                 }
                             }
                         }
@@ -349,6 +365,8 @@ struct DocumentPicker: UIViewControllerRepresentable {
 /// the player itself always stays dark).
 struct AppearanceSettingsView: View {
     @AppStorage("themeMode.v1") private var themeMode = "dark"
+    @AppStorage("tabShowRecords") private var showRecordsTab = true
+    @AppStorage("tabShowLibrary") private var showLibraryTab = true
 
     var body: some View {
         SettingsPage(title: "外观与交互") {
@@ -362,6 +380,17 @@ struct AppearanceSettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     Text("播放器始终用深色，不受这里影响。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("底部导航栏").font(.headline).foregroundStyle(Theme.text)
+                    Toggle("显示「记录」", isOn: $showRecordsTab)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("显示「资源库」", isOn: $showLibraryTab)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("「发现」和「设置」固定显示。关掉正在看的页会自动回到发现。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }

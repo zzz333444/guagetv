@@ -130,6 +130,25 @@ final class HistoryStore: ObservableObject {
         save()
     }
 
+    func isFavourite(siteKey: String, vodId: String) -> Bool {
+        entries.first { $0.siteKey == siteKey && $0.vodId == vodId }?.isFavourite ?? false
+    }
+
+    /// Favourite from a detail page: flips the flag on the history
+    /// entry when one exists; otherwise files the supplied stub (a
+    /// detail-page snapshot with no playback yet) so the favourite
+    /// survives before the first play.
+    func setFavourite(stub: Entry, on: Bool) {
+        if let i = entries.firstIndex(where: { $0.id == stub.id }) {
+            entries[i].isFavourite = on
+        } else if on {
+            var fresh = stub
+            fresh.isFavourite = true
+            entries.insert(fresh, at: 0)
+        }
+        save()
+    }
+
     var favourites: [Entry] { entries.filter(\.isFavourite) }
     var watchlist: [Entry] { entries.filter(\.isWatchlist) }
     var continueWatching: [Entry] {

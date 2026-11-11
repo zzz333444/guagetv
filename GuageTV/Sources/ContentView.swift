@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var showSearch = false
     /// 外观与交互 choice: "system" follows the phone, else forced.
     @AppStorage("themeMode.v1") private var themeMode = "dark"
+    @AppStorage("tabShowRecords") private var showRecordsTab = true
+    @AppStorage("tabShowLibrary") private var showLibraryTab = true
 
     private var colorScheme: ColorScheme? {
         switch themeMode {
@@ -41,6 +43,9 @@ struct ContentView: View {
                 .padding(.bottom, 10)
         }
         .preferredColorScheme(colorScheme)
+        .onAppear { clampTab() }
+        .onChange(of: showRecordsTab) { _ in clampTab() }
+        .onChange(of: showLibraryTab) { _ in clampTab() }
         .sheet(isPresented: $showSearch) {
             SearchView(config: config)
         }
@@ -50,8 +55,8 @@ struct ContentView: View {
         HStack(spacing: 10) {
             HStack(spacing: 2) {
                 tabButton(index: 0, icon: "house.fill", label: "发现")
-                tabButton(index: 1, icon: "clock.fill", label: "记录")
-                tabButton(index: 2, icon: "externaldrive.fill", label: "资源库")
+                if showRecordsTab { tabButton(index: 1, icon: "clock.fill", label: "记录") }
+                if showLibraryTab { tabButton(index: 2, icon: "externaldrive.fill", label: "资源库") }
                 tabButton(index: 3, icon: "gearshape.fill", label: "设置")
             }
             .padding(6)
@@ -69,6 +74,13 @@ struct ContentView: View {
                     .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
             }
         }
+    }
+
+    /// A hidden tab must not stay selected (its page would strand
+    /// the user on a view with no button back).
+    private func clampTab() {
+        if tab == 1 && !showRecordsTab { tab = 0 }
+        if tab == 2 && !showLibraryTab { tab = 0 }
     }
 
     private func tabButton(index: Int, icon: String, label: String) -> some View {
