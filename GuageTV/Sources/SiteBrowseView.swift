@@ -218,6 +218,7 @@ struct SiteBrowseView: View {
             selectedTid = ""
             page = 1
             canLoadMore = home.list.count >= 10
+            Task { await backfillPosters() }
         } catch {
             errorText = "加载失败：\(error.localizedDescription)"
         }
@@ -232,10 +233,22 @@ struct SiteBrowseView: View {
         do {
             items = try await client.list(tid: tid.isEmpty ? nil : tid, page: 1)
             canLoadMore = items.count >= 10
+            Task { await backfillPosters() }
         } catch {
             errorText = "加载失败：\(error.localizedDescription)"
         }
         loading = false
+    }
+
+    /// Fill posters for pic-less list items with one batched detail call.
+    private func backfillPosters() async {
+        let missing = items.filter { $0.pic.isEmpty }.map(\.id)
+        guard !missing.isEmpty else { return }
+        let map = await client.fetchPosterMap(ids: missing)
+        guard !map.isEmpty else { return }
+        for i in items.indices where items[i].pic.isEmpty {
+            if let pic = map[items[i].id] { items[i].pic = pic }
+        }
     }
 
     private func loadMore() async {
@@ -246,6 +259,7 @@ struct SiteBrowseView: View {
             page += 1
             items += next
             canLoadMore = next.count >= 10
+            Task { await backfillPosters() }
         } catch {
             canLoadMore = false
         }

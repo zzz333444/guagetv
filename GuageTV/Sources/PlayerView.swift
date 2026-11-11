@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import MediaPlayer
 import SwiftUI
 import UIKit
 
@@ -33,6 +34,15 @@ struct PlayerView: View {
     @State private var showEpisodes = false
     @State private var rotationLocked = false
     @State private var toast: String?
+    @State private var dragMode: DragMode?
+    @State private var dragStartTime: Double = 0
+    @State private var dragStartLevel: Double = 0
+    @State private var dragLevel: Double = 0
+    @State private var scrubTarget: Double = 0
+    @State private var hudVisible = false
+    @State private var hudGeneration = 0
+
+    private enum DragMode { case scrub, brightness, volume }
     @Environment(\.dismiss) private var dismiss
 
     init(urlString: String, header: [String: String] = [:], title: String = "") {
@@ -78,7 +88,12 @@ struct PlayerView: View {
                 Color.black.ignoresSafeArea()
                 engineLayer
                     .id(current.url + (isMPV ? "#mpv" : "#av"))
-                tapZones
+                gestureLayer(size: geo.size)
+                VolumeHost()
+                    .frame(width: 2, height: 2)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+                if hudVisible { hud }
                 if showChrome {
                     chrome(isLandscape: geo.size.width > geo.size.height)
                 }
@@ -118,7 +133,7 @@ struct PlayerView: View {
 
     // MARK: gestures
 
-    private var tapZones: some View {
+    private func gestureLayer(size: CGSize) -> some View {
         HStack(spacing: 0) {
             Color.clear
                 .contentShape(Rectangle())
@@ -131,6 +146,103 @@ struct PlayerView: View {
             withAnimation { showChrome.toggle() }
             if showChrome { scheduleChromeHide() }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 14)
+                .onChanged { value in handleDrag(value, size: size) }
+                .onEnded { _ in endDrag() }
+        )
+    }
+
+    /// One drag, three jobs (mainstream player behaviour): horizontal
+    /// scrubs, vertical on the left half is brightness, on the right
+    /// half volume. Direction locks on first clear movement; a HUD
+    /// shows the value only while adjusting — nothing stays on screen.
+    private func handleDrag(_ value: DragGesture.Value, size: CGSize) {
+        let dx = value.translation.width
+        let dy = value.translation.height
+        if dragMode == nil {
+            guard abs(dx) > 10 || abs(dy) > 10 else { return }
+            if abs(dx) > abs(dy) {
+                dragMode = .scrub
+                dragStartTime = currentTime
+                scrubTarget = currentTime
+            } else if value.startLocation.x < size.width / 2 {
+                dragMode = .brightness
+                dragStartLevel = Double(UIScreen.main.brightness)
+                dragLevel = dragStartLevel
+            } else {
+                dragMode = .volume
+                dragStartLevel = VolumeControl.current()
+                dragLevel = dragStartLevel
+            }
+            hudGeneration += 1
+            withAnimation { hudVisible = true }
+        }
+        switch dragMode {
+        case .scrub:
+            guard duration > 0 else { return }
+            let delta = Double(dx) / Double(size.width) * duration
+            scrubTarget = min(max(dragStartTime + delta, 0), duration)
+        case .brightness:
+            let level = min(max(dragStartLevel - Double(dy) / 220, 0.05), 1)
+            dragLevel = level
+            UIScreen.main.brightness = CGFloat(level)
+        case .volume:
+            let level = min(max(dragStartLevel - Double(dy) / 220, 0), 1)
+            dragLevel = level
+            VolumeControl.set(level)
+        case .none:
+            break
+        }
+    }
+
+    private func endDrag() {
+        if dragMode == .scrub, duration > 0 { seek(to: scrubTarget) }
+        dragMode = nil
+        hudGeneration += 1
+        let gen = hudGeneration
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            if gen == hudGeneration { withAnimation { hudVisible = false } }
+        }
+    }
+
+    @ViewBuilder
+    private var hud: some View {
+        VStack(spacing: 8) {
+            switch dragMode {
+            case .scrub:
+                Image(systemName: scrubTarget >= dragStartTime ? "goforward" : "gobackward")
+                    .font(.title3)
+                Text(timeLabel(scrubTarget))
+                    .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                let delta = Int(scrubTarget - dragStartTime)
+                Text(delta >= 0 ? "+\(delta) 秒" : "\(delta) 秒")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.75))
+            case .brightness:
+                hudBar(icon: "sun.max.fill", level: dragLevel)
+            case .volume:
+                hudBar(icon: dragLevel == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", level: dragLevel)
+            case .none:
+                EmptyView()
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 20).padding(.vertical, 14)
+        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func hudBar(icon: String, level: Double) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.title3)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.25)).frame(width: 110, height: 4)
+                Capsule().fill(Color.white).frame(width: 110 * level, height: 4)
+            }
+            Text("\(Int(level * 100))%")
+                .font(.system(size: 13, weight: .medium).monospacedDigit())
+        }
     }
 
     // MARK: chrome
@@ -141,7 +253,6 @@ struct PlayerView: View {
             Spacer()
             bottomBar
         }
-        .overlay(alignment: .leading) { BrightnessRail().padding(.leading, 10) }
         .transition(.opacity)
     }
 
@@ -499,33 +610,32 @@ private struct SeekBar: View {
     }
 }
 
-// MARK: - Brightness rail (left edge — reference layout)
+// MARK: - System volume bridge
 
-private struct BrightnessRail: View {
-    @State private var level: Double = Double(UIScreen.main.brightness)
+/// iOS has no public volume setter; the supported route is driving the
+/// slider inside an MPVolumeView kept in the view hierarchy.
+private enum VolumeControl {
+    static var view: MPVolumeView?
 
-    var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "sun.max.fill")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.8))
-            ZStack(alignment: .bottom) {
-                Capsule().fill(Color.white.opacity(0.2))
-                Capsule().fill(Color.white.opacity(0.85))
-                    .frame(height: max(8, 110 * level))
-            }
-            .frame(width: 5, height: 110)
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 8)
-        .background(.ultraThinMaterial, in: Capsule())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { drag in
-                    let f = 1 - min(max(drag.location.y / 130, 0), 1)
-                    level = 0.1 + 0.9 * f
-                    UIScreen.main.brightness = CGFloat(level)
-                }
-        )
+    static func current() -> Double {
+        Double(AVAudioSession.sharedInstance().outputVolume)
     }
+
+    static func set(_ value: Double) {
+        guard let slider = view?.subviews.compactMap({ $0 as? UISlider }).first
+        else { return }
+        slider.value = Float(value)
+        slider.sendActions(for: .valueChanged)
+    }
+}
+
+private struct VolumeHost: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView()
+        view.clipsToBounds = true
+        VolumeControl.view = view
+        return view
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }

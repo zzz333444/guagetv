@@ -60,6 +60,26 @@ struct DiscoverView: View {
             }
         }
         liveSections = secs
+        // Poster backfill: many采集站 lists carry no vod_pic at all.
+        let missing = (liveHero + secs.flatMap(\.items))
+            .filter { $0.pic.isEmpty }.map(\.id)
+        if !missing.isEmpty {
+            let map = await client.fetchPosterMap(ids: missing)
+            if !map.isEmpty {
+                func fill(_ list: [VodItem]) -> [VodItem] {
+                    list.map { item in
+                        guard item.pic.isEmpty, let pic = map[item.id] else { return item }
+                        var copy = item
+                        copy.pic = pic
+                        return copy
+                    }
+                }
+                liveHero = fill(liveHero)
+                liveSections = liveSections.map {
+                    DiscoverSection(title: $0.title, items: fill($0.items))
+                }
+            }
+        }
     }
 
     // MARK: Hero carousel

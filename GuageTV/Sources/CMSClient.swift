@@ -96,6 +96,26 @@ final class CMSClient {
         return Self.mapList(r)
     }
 
+    /// Poster backfill for the many采集站 whose LIST responses omit
+    /// vod_pic entirely (verified live: dyttzyapi and ukuapi lists carry
+    /// no picture field at all, detail responses do). ONE batched detail
+    /// call (ids=a,b,c) returns every poster for the page.
+    func fetchPosterMap(ids: [String]) async -> [String: String] {
+        let wanted = Array(ids.prefix(40)).filter { !$0.isEmpty }
+        guard !wanted.isEmpty,
+              let obj = try? await fetch(params: ["ac": "detail",
+                                                  "ids": wanted.joined(separator: ",")]),
+              let list = obj["list"] as? [[String: Any]] else { return [:] }
+        var map: [String: String] = [:]
+        for row in list {
+            let id = String(describing: row["vod_id"] ?? "")
+            if let pic = row["vod_pic"] as? String, !pic.isEmpty {
+                map[id] = pic
+            }
+        }
+        return map
+    }
+
     func detail(id: String) async throws -> VodDetail? {
         let r = try await fetch(params: ["ac": "detail", "ids": id])
         guard let first = (r["list"] as? [[String: Any]])?.first else { return nil }
