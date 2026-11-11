@@ -7,8 +7,19 @@ import SwiftUI
 struct HistoryView: View {
     @StateObject private var history = HistoryStore.shared
     @StateObject private var downloads = DownloadManager.shared
-    @State private var playEntry: HistoryStore.Entry?
-    @State private var dlPlayItem: DownloadManager.Item?
+    /// ONE item-cover only: stacking two .fullScreenCover(item:) on
+    /// the same view crashed the tab on open (v1.13 regression).
+    private enum PlayRoute: Identifiable {
+        case history(HistoryStore.Entry)
+        case download(DownloadManager.Item)
+        var id: String {
+            switch self {
+            case .history(let e): return "h|" + e.id
+            case .download(let i): return "d|" + i.id
+            }
+        }
+    }
+    @State private var playRoute: PlayRoute?
     @State private var confirmClear = false
     @State private var checkingUpdates = false
 
@@ -110,17 +121,19 @@ struct HistoryView: View {
                     }
                 }
             }
-            .fullScreenCover(item: $dlPlayItem) { item in
-                if let local = DownloadManager.shared.localURLString(item) {
-                    PlayerView(episodes: [PlayerView.EpisodeRef(name: item.episodeName, url: local)],
-                               startIndex: 0, header: [:], title: item.vodName, pic: item.pic)
+            .fullScreenCover(item: $playRoute) { route in
+                switch route {
+                case .history(let entry):
+                    PlayerView(
+                        episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
+                        startIndex: 0, header: entry.playHeader, title: entry.name,
+                        historyID: entry.id, resumeAt: entry.positionSeconds)
+                case .download(let item):
+                    if let local = DownloadManager.shared.localURLString(item) {
+                        PlayerView(episodes: [PlayerView.EpisodeRef(name: item.episodeName, url: local)],
+                                   startIndex: 0, header: [:], title: item.vodName, pic: item.pic)
+                    }
                 }
-            }
-            .fullScreenCover(item: $playEntry) { entry in
-                PlayerView(
-                    episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
-                    startIndex: 0, header: entry.playHeader, title: entry.name,
-                    historyID: entry.id, resumeAt: entry.positionSeconds)
             }
         }
     }
@@ -163,7 +176,7 @@ struct HistoryView: View {
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
         .contentShape(Rectangle())
         .onTapGesture {
-            if !entry.episodeURL.isEmpty { playEntry = entry }
+            if !entry.episodeURL.isEmpty { playRoute = .history(entry) }
         }
     }
 
@@ -228,7 +241,7 @@ struct HistoryView: View {
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
         .contentShape(Rectangle())
         .onTapGesture {
-            if item.state == "done" { dlPlayItem = item }
+            if item.state == "done" { playRoute = .download(item) }
         }
     }
 

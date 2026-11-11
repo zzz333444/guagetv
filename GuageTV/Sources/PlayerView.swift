@@ -37,6 +37,7 @@ struct PlayerView: View {
     @State private var showChrome = true
     @State private var chromeGeneration = 0
     @State private var showEpisodes = false
+    @State private var showSkipSheet = false
     @State private var rotationLocked = false
     @State private var toast: String?
     @State private var dragMode: DragMode?
@@ -340,6 +341,14 @@ struct PlayerView: View {
             speedPill
             Spacer()
             HStack(spacing: 2) {
+                Button { showSkipSheet = true; pokeChrome() } label: {
+                    Image(systemName: "goforward.plus")
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 40, height: 40)
+                }
+                .sheet(isPresented: $showSkipSheet) {
+                    SkipSettingsSheet()
+                }
                 Button { saveSnapshot() } label: {
                     Image(systemName: "camera")
                         .foregroundStyle(Theme.text)
@@ -972,5 +981,38 @@ extension NativeController: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerDidStopPictureInPicture(
         _ pictureInPictureController: AVPictureInPictureController) {
         isPiPActive = false
+    }
+}
+
+/// In-player skip settings: same AppStorage keys as 设置 → 播放，
+/// so values stay in sync. 片尾 reads the value on every tick
+/// (applies immediately); 片头 applies from the next episode (or
+/// when the playhead is dragged back before the intro end).
+private struct SkipSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
+    @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                SkipSecondsEditor(title: "片头跳过", seconds: $skipIntroSeconds)
+                SkipSecondsEditor(title: "片尾跳过", seconds: $skipOutroSeconds)
+                Text("滑杆精确到 1 秒。片尾设置即时生效；片头设置从下一集起生效。")
+                    .font(.footnote).foregroundStyle(Theme.textDim)
+                Spacer()
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AmbientBackground(imageURL: nil))
+            .navigationTitle("跳过片头片尾")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }.foregroundStyle(Theme.text)
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }

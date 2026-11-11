@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.13 · 下载与追剧"
+    static let buildLabel = "v1.14 · 分组与修复"
 
     var body: some View {
         NavigationStack {
@@ -456,7 +456,6 @@ struct PlaySettingsView: View {
     @AppStorage("enginePreference") private var engine = "auto"
     @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
     @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
-    private let skipOptions = [0, 30, 60, 90, 120, 180]
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -476,8 +475,8 @@ struct PlaySettingsView: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("跳过片头片尾").font(.headline).foregroundStyle(Theme.text)
-                    skipPicker(title: "片头跳过", selection: $skipIntroSeconds)
-                    skipPicker(title: "片尾跳过", selection: $skipOutroSeconds)
+                    SkipSecondsEditor(title: "片头跳过", seconds: $skipIntroSeconds)
+                    SkipSecondsEditor(title: "片尾跳过", seconds: $skipOutroSeconds)
                     Text("每集开始自动快进片头设定的秒数；片尾剩余不足设定秒数时自动切下一集。0 = 关闭。续播时以续播位置为准，不再叠加跳片头。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
@@ -485,20 +484,6 @@ struct PlaySettingsView: View {
         }
     }
 
-    private func skipPicker(title: String, selection: Binding<Int>) -> some View {
-        HStack {
-            Text(title).font(.subheadline).foregroundStyle(Theme.text)
-            Spacer()
-            Picker(title, selection: selection) {
-                ForEach(skipOptions, id: \.self) { seconds in
-                    Text(seconds == 0 ? "关" : "\(seconds) 秒").tag(seconds)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .tint(Theme.accent)
-        }
-    }
 }
 
 /// 音画： video fill mode for the mpv surface.
@@ -567,6 +552,41 @@ struct SubtitleSettingsView: View {
                     }
                     Text("对 ASS/SRT 等字幕生效，下次播放时应用。原生引擎的字幕大小跟随系统设置。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+}
+
+/// Per-second skip editor: a 0–300 s slider (1 s steps) plus preset
+/// chips. Used by 播放 settings and by the in-player skip sheet, both
+/// bound to the same AppStorage keys, so a change anywhere applies
+/// everywhere (outro checks read the value live).
+struct SkipSecondsEditor: View {
+    let title: String
+    @Binding var seconds: Int
+    private let presets = [0, 30, 60, 90, 120, 180]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.subheadline).foregroundStyle(Theme.text)
+                Spacer()
+                Text(seconds == 0 ? "关" : "\(seconds) 秒")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                    .monospacedDigit()
+            }
+            Slider(value: Binding(get: { Double(seconds) },
+                                  set: { seconds = Int($0.rounded()) }),
+                   in: 0...300, step: 1)
+                .tint(Theme.accent)
+            HStack(spacing: 8) {
+                ForEach(presets, id: \.self) { preset in
+                    Button(preset == 0 ? "关" : "\(preset)") { seconds = preset }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(seconds == preset ? Theme.accent : Theme.glass, in: Capsule())
+                        .foregroundStyle(seconds == preset ? .white : Theme.text)
                 }
             }
         }

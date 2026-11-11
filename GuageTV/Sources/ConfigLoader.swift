@@ -372,6 +372,84 @@ enum ConfigLibrary {
     /// Discover home-line and history may point at non-active lines).
     static func load(id: String) -> TVBoxConfig? { loadEntry(id: id) }
 
+    // MARK: groups （资源库分组）
+
+    /// User-named groups for the Library. Membership lives in a
+    /// separate entryID → groupID map so the line index format never
+    /// changes. Single-file py imports form an automatic group.
+    struct Group: Codable, Identifiable {
+        var id: String
+        var name: String
+    }
+
+    static let pyAutoGroupID = "auto.pyfiles"
+    static let noGroupID = "none"
+    private static let groupsKey = "configGroups.v1"
+    private static let assignKey = "configEntryGroups.v1"
+
+    static func groups() -> [Group] {
+        guard let data = UserDefaults.standard.data(forKey: groupsKey),
+              let list = try? JSONDecoder().decode([Group].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    private static func saveGroups(_ list: [Group]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: groupsKey)
+        }
+    }
+
+    @discardableResult
+    static func addGroup(name: String) -> Group {
+        let group = Group(id: UUID().uuidString, name: name)
+        saveGroups(groups() + [group])
+        return group
+    }
+
+    static func renameGroup(id: String, name: String) {
+        var list = groups()
+        guard let i = list.firstIndex(where: { $0.id == id }) else { return }
+        list[i].name = name
+        saveGroups(list)
+    }
+
+    static func removeGroup(id: String) {
+        saveGroups(groups().filter { $0.id != id })
+        var map = groupAssignments()
+        for key in map.keys where map[key] == id { map[key] = nil }
+        saveAssignments(map)
+    }
+
+    static func groupAssignments() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: assignKey) as? [String: String] ?? [:]
+    }
+
+    private static func saveAssignments(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: assignKey)
+    }
+
+    /// groupID: a custom group id, pyAutoGroupID, or noGroupID.
+    static func setGroup(entryID: String, groupID: String) {
+        var map = groupAssignments()
+        map[entryID] = groupID
+        saveAssignments(map)
+    }
+
+    static func isPyFileEntry(_ entry: Entry) -> Bool {
+        entry.sourceURL.hasPrefix("py-import://")
+    }
+
+    /// Where a line is displayed: its manual assignment wins; an
+    /// unassigned py-file line falls into the automatic py group;
+    /// anything else unassigned returns nil （未分组）.
+    static func effectiveGroupID(for entry: Entry) -> String? {
+        if let assigned = groupAssignments()[entry.id] {
+            return assigned == noGroupID ? nil : assigned
+        }
+        return isPyFileEntry(entry) ? pyAutoGroupID : nil
+    }
+
     static func sourceURL(id: String) -> String? {
         entries().first { $0.id == id }?.sourceURL
     }
