@@ -119,10 +119,16 @@ final class CMSClient {
     func detail(id: String) async throws -> VodDetail? {
         let r = try await fetch(params: ["ac": "detail", "ids": id])
         guard let first = (r["list"] as? [[String: Any]])?.first else { return nil }
+        return Self.mapDetail(first, fallbackID: id)
+    }
+
+    /// Shared detail-dict → VodDetail mapping (CMS responses and Python
+    /// spider detailContent results have the same shape).
+    static func mapDetail(_ first: [String: Any], fallbackID: String) -> VodDetail {
         let parsed = VodDetail.parsePlay(from: first["vod_play_from"] as? String ?? "",
                                          url: first["vod_play_url"] as? String ?? "")
         return VodDetail(
-            id: String(describing: first["vod_id"] ?? id),
+            id: String(describing: first["vod_id"] ?? fallbackID),
             name: first["vod_name"] as? String ?? "",
             pic: first["vod_pic"] as? String ?? "",
             remarks: first["vod_remarks"] as? String ?? "",

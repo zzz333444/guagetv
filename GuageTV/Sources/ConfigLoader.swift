@@ -36,6 +36,9 @@ struct TVBoxConfig: Decodable {
         var header: [String: String]?
         var id: String { key }
 
+        /// The site's ext field in the string form Spider.init expects.
+        var extJSONString: String { ext?.serializedString ?? "" }
+
         struct Style: Decodable {
             var type: String?    // "rect" / "list" / "oval"
             var ratio: Double?
@@ -93,6 +96,35 @@ struct TVBoxConfig: Decodable {
 }
 
 /// Loose JSON value for fields whose shape varies between sources.
+extension JSONValue {
+    /// The ext payload as spiders expect it: the string itself for
+    /// string exts, JSON text for object/array exts.
+    var serializedString: String {
+        switch self {
+        case .string(let value): return value
+        case .number(let value):
+            return value == value.rounded() ? String(Int(value)) : String(value)
+        case .bool(let value): return value ? "true" : "false"
+        case .other: return ""
+        case .object, .array:
+            guard let data = try? JSONSerialization.data(withJSONObject: plainObject)
+            else { return "" }
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+
+    var plainObject: Any {
+        switch self {
+        case .string(let value): return value
+        case .number(let value): return value
+        case .bool(let value): return value
+        case .other: return NSNull()
+        case .array(let values): return values.map(\.plainObject)
+        case .object(let dict): return dict.mapValues(\.plainObject)
+        }
+    }
+}
+
 enum JSONValue: Decodable {
     case string(String)
     case object([String: JSONValue])

@@ -9,7 +9,7 @@ struct SettingsView: View {
     @State private var status = "还没有导入配置"
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.01 · 封面定版"
+    static let buildLabel = "v1.02 · Python"
 
     var body: some View {
         NavigationStack {
@@ -64,6 +64,7 @@ struct SettingsView: View {
 
                     group(title: "应用") {
                         row(icon: "info.circle", title: "关于呱壳", value: Self.buildLabel)
+                        row(icon: "chevron.left.forwardslash.chevron.right", title: "Python 运行时", value: PythonRuntime.shared.statusText)
                     }
                 }
                 .padding(.horizontal, 18)
