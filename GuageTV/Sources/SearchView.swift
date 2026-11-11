@@ -180,7 +180,7 @@ struct SearchView: View {
         do {
             let ruleRef = try JSSiteBrowseView.resolveRuleRef(site)
             try await JSBridge.shared.loadRule(reference: ruleRef)
-            let result = try await JSBridge.shared.search(key: keyword, quick: false, pg: "1")
+            let result = try await JSBridge.shared.search(key: keyword, pg: 1)
             return PySiteBrowseView.mapItems(result["list"])
         } catch {
             return nil

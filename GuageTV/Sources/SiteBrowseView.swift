@@ -55,10 +55,10 @@ struct DetailLoaderView: View {
         Group {
             if let detail {
                 DetailView(detail: detail, header: site.header ?? [:],
-                           parses: parses,
                            historySeed: HistorySeed(
                                lineID: lineID ?? ConfigLibrary.activeID() ?? "",
-                               siteKey: site.key, siteName: site.name, vodId: item.id))
+                               siteKey: site.key, siteName: site.name, vodId: item.id),
+                           parses: parses)
             } else if failed {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle").font(.title3)
