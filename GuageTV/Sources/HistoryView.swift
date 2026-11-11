@@ -124,17 +124,18 @@ private struct HistoryDetailDestination: View {
 
     var body: some View {
         Group {
-            if let site {
+            if let resolved {
                 let item = VodItem(id: entry.vodId, name: entry.name, pic: entry.pic,
                                    remarks: "", year: "", score: "")
-                switch site.kind {
+                switch resolved.site.kind {
                 case .cmsJSON, .cmsXML:
-                    DetailLoaderView(site: site, item: item, lineID: entry.lineID)
+                    DetailLoaderView(site: resolved.site, item: item, lineID: entry.lineID, parses: resolved.parses)
                 case .spiderPY:
-                    PyDetailLoaderView(site: site, item: item)
+                    PyDetailLoaderView(site: resolved.site, item: item, parses: resolved.parses)
                 case .spiderJS, .drpyJS:
-                    JSDetailLoaderView(site: site, item: item,
-                                       ruleRef: (try? JSSiteBrowseView.resolveRuleRef(site)) ?? "")
+                    JSDetailLoaderView(site: resolved.site, item: item,
+                                       ruleRef: (try? JSSiteBrowseView.resolveRuleRef(resolved.site)) ?? "",
+                                       parses: resolved.parses)
                 default:
                     message("该站点类型暂不支持直接打开")
                 }
@@ -147,10 +148,12 @@ private struct HistoryDetailDestination: View {
         .preferredColorScheme(.dark)
     }
 
-    private var site: TVBoxConfig.Site? {
+    private var resolved: (site: TVBoxConfig.Site, parses: [TVBoxConfig.Parse])? {
         let lineID = entry.lineID.isEmpty ? (ConfigLibrary.activeID() ?? "") : entry.lineID
-        guard let config = ConfigLibrary.load(id: lineID) else { return nil }
-        return config.sites.first { $0.key == entry.siteKey }
+        guard let config = ConfigLibrary.load(id: lineID),
+              let site = config.sites.first(where: { $0.key == entry.siteKey })
+        else { return nil }
+        return (site, config.parses ?? [])
     }
 
     private func message(_ text: String) -> some View {

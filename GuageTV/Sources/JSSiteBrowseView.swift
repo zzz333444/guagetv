@@ -8,6 +8,7 @@ import SwiftUI
 /// from a screenshot.
 struct JSSiteBrowseView: View {
     let site: TVBoxConfig.Site
+    var parses: [TVBoxConfig.Parse] = []
 
     @State private var classes: [(String, String)] = []
     @State private var items: [VodItem] = []
@@ -73,7 +74,7 @@ struct JSSiteBrowseView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(items) { item in
                     NavigationLink {
-                        JSDetailLoaderView(site: site, item: item, ruleRef: ruleRef)
+                        JSDetailLoaderView(site: site, item: item, ruleRef: ruleRef, parses: parses)
                     } label: {
                         PosterCell(item: item)
                     }
@@ -186,6 +187,7 @@ struct JSDetailLoaderView: View {
     let site: TVBoxConfig.Site
     let item: VodItem
     let ruleRef: String
+    var parses: [TVBoxConfig.Parse] = []
     @State private var detail: VodDetail?
     @State private var errorText: String?
 
@@ -227,9 +229,9 @@ struct JSDetailLoaderView: View {
         }
     }
 
-    /// play(flag, id) → playable URL for parse=0 results. drpy may
-    /// return url as a single string or an array of candidates.
-    /// parse=1 needs the config's parse interfaces — a later stage.
+    /// play(flag, id) → playable URL. drpy may return url as a
+    /// single string or an array of candidates; parse=1 hands the
+    /// page URL to the line's parse interfaces.
     private func resolve(flag: String, episodeID: String) async -> (url: String, header: [String: String])? {
         guard let result = try? await JSBridge.shared.play(flag: flag, id: episodeID)
         else { return nil }
@@ -242,11 +244,15 @@ struct JSDetailLoaderView: View {
         } else {
             url = ""
         }
-        guard parse == 0, !url.isEmpty else { return nil }
+        guard !url.isEmpty else { return nil }
         var header = site.header ?? [:]
         if let extra = result["header"] as? [String: Any] {
             for (key, value) in extra { header[key] = String(describing: value) }
         }
-        return (url, header)
+        if parse == 0 { return (url, header) }
+        guard let resolved = await ParseResolver.resolve(flag: flag, url: url, parses: parses)
+        else { return nil }
+        for (key, value) in resolved.header { header[key] = value }
+        return (resolved.url, header)
     }
 }

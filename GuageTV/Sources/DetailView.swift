@@ -14,6 +14,10 @@ struct DetailView: View {
     /// Set by the loaders so playback lands in the history list with
     /// enough context to resume straight from there.
     var historySeed: HistorySeed?
+    /// The active (or home) line's parse interfaces: CMS episodes
+    /// whose URL is a page rather than a stream are resolved through
+    /// them on tap.
+    var parses: [TVBoxConfig.Parse] = []
     @State private var lineIndex = 0
     @State private var playSelection: PlaySelection?
     @State private var resolving = false
@@ -144,6 +148,29 @@ struct DetailView: View {
 
     private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
         guard let playerResolver else {
+            let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
+            // CMS episode that is a web page, not a stream: run it
+            // through the line's parse interfaces first.
+            if !parses.isEmpty, !ParseResolver.isMediaURL(ep.url) {
+                guard !resolving else { return }
+                resolving = true
+                Task {
+                    let parsed = await ParseResolver.resolve(flag: flag, url: ep.url, parses: parses)
+                    resolving = false
+                    let finalURL = parsed?.url ?? ep.url
+                    var finalHeader = header
+                    if let parsed { for (k, v) in parsed.header { finalHeader[k] = v } }
+                    let resume = recordHistory(episode: ep, episodeURL: finalURL, flag: flag, playHeader: finalHeader)
+                    playSelection = PlaySelection(
+                        episodes: episodes.map {
+                            PlayerView.EpisodeRef(name: $0.name, url: $0.id == ep.id ? finalURL : $0.url)
+                        },
+                        index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0,
+                        playHeader: parsed != nil ? finalHeader : nil,
+                        historyID: historyEntryID(), resumeAt: resume)
+                }
+                return
+            }
             let resume = recordHistory(episode: ep, episodeURL: ep.url, flag: "", playHeader: header)
             playSelection = PlaySelection(
                 episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },

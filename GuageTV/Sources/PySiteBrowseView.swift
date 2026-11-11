@@ -9,6 +9,7 @@ import SwiftUI
 /// broken spider can be diagnosed from a screenshot.
 struct PySiteBrowseView: View {
     let site: TVBoxConfig.Site
+    var parses: [TVBoxConfig.Parse] = []
 
     @State private var classes: [(String, String)] = []
     @State private var items: [VodItem] = []
@@ -73,7 +74,7 @@ struct PySiteBrowseView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(items) { item in
                     NavigationLink {
-                        PyDetailLoaderView(site: site, item: item)
+                        PyDetailLoaderView(site: site, item: item, parses: parses)
                     } label: {
                         PosterCell(item: item)
                     }
@@ -154,6 +155,13 @@ struct PySiteBrowseView: View {
     /// resolve against the config's own URL) and cache the file in
     /// Application Support/spiders for the interpreter to load.
     private func downloadSpider() async throws -> String {
+        try await Self.downloadSpider(for: site)
+    }
+
+    /// Download (or locate, for imported files) a site's .py and
+    /// return its local path. Shared with search and standalone
+    /// detail loads, which run outside this browse view.
+    static func downloadSpider(for site: TVBoxConfig.Site) async throws -> String {
         // Locally imported .py files already live in the spiders dir.
         if site.api.hasPrefix("local-spider://") {
             let name = String(site.api.dropFirst("local-spider://".count))
@@ -223,6 +231,7 @@ struct PySiteBrowseView: View {
 struct PyDetailLoaderView: View {
     let site: TVBoxConfig.Site
     let item: VodItem
+    var parses: [TVBoxConfig.Parse] = []
     @State private var detail: VodDetail?
     @State private var errorText: String?
 
@@ -251,6 +260,11 @@ struct PyDetailLoaderView: View {
         .preferredColorScheme(.dark)
         .task {
             do {
+                // The bridge holds ONE spider at a time; make sure it
+                // is this site's before asking for detail (search and
+                // history open this loader without browsing first).
+                let path = try await PySiteBrowseView.downloadSpider(for: site)
+                _ = try await SpiderBridge.shared.loadSpider(path: path, extend: site.extJSONString)
                 let result = try await SpiderBridge.shared.detailContent(ids: [item.id])
                 guard let first = (result["list"] as? [[String: Any]])?.first else {
                     errorText = "详情为空"
@@ -263,19 +277,23 @@ struct PyDetailLoaderView: View {
         }
     }
 
-    /// playerContent(flag, id) → playable URL for parse=0 results.
-    /// parse=1 needs the config's parse interfaces — a later stage;
-    /// returning nil makes DetailView say so instead of failing mute.
+    /// playerContent(flag, id) → playable URL. parse=0 answers go
+    /// straight to the player; parse=1 hands the page URL to the
+    /// line's parse interfaces.
     private func resolve(flag: String, episodeID: String) async -> (url: String, header: [String: String])? {
         guard let result = try? await SpiderBridge.shared.playerContent(flag: flag, id: episodeID)
         else { return nil }
         let parse = PySiteBrowseView.intValue(result["parse"]) ?? 0
         let url = result["url"] as? String ?? ""
-        guard parse == 0, !url.isEmpty else { return nil }
+        guard !url.isEmpty else { return nil }
         var header = site.header ?? [:]
         if let extra = result["header"] as? [String: Any] {
             for (key, value) in extra { header[key] = String(describing: value) }
         }
-        return (url, header)
+        if parse == 0 { return (url, header) }
+        guard let resolved = await ParseResolver.resolve(flag: flag, url: url, parses: parses)
+        else { return nil }
+        for (key, value) in resolved.header { header[key] = value }
+        return (resolved.url, header)
     }
 }

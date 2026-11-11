@@ -237,7 +237,7 @@ struct DiscoverView: View {
                     ForEach(items) { item in
                         if let site = activeSite {
                             NavigationLink {
-                                DetailLoaderView(site: site, item: item, lineID: feedLineID)
+                                DetailLoaderView(site: site, item: item, lineID: feedLineID, parses: (feedConfig ?? config)?.parses ?? [])
                             } label: {
                                 posterCard(item)
                             }
@@ -295,7 +295,7 @@ struct DiscoverView: View {
                       spacing: 12) {
                 ForEach(config?.sites ?? []) { site in
                     NavigationLink {
-                        SiteBrowseView(site: site)
+                        SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
                     } label: {
                         GlassCard(padding: 14) {
                             HStack {

@@ -39,7 +39,7 @@ struct LibraryView: View {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(sites) { site in
                             NavigationLink {
-                                SiteBrowseView(site: site)
+                                SiteBrowseView(site: site, parses: config?.parses ?? [])
                             } label: {
                                 sourceCard(site)
                             }

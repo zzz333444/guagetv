@@ -47,6 +47,7 @@ struct DetailLoaderView: View {
     /// The line this site belongs to (defaults to the active line);
     /// the Discover home-line passes its own line here.
     var lineID: String? = nil
+    var parses: [TVBoxConfig.Parse] = []
     @State private var detail: VodDetail?
     @State private var failed = false
 
@@ -54,6 +55,7 @@ struct DetailLoaderView: View {
         Group {
             if let detail {
                 DetailView(detail: detail, header: site.header ?? [:],
+                           parses: parses,
                            historySeed: HistorySeed(
                                lineID: lineID ?? ConfigLibrary.activeID() ?? "",
                                siteKey: site.key, siteName: site.name, vodId: item.id))
@@ -83,6 +85,7 @@ struct DetailLoaderView: View {
 /// py/JS sites show a holding page until their runtime wires in.
 struct SiteBrowseView: View {
     let site: TVBoxConfig.Site
+    var parses: [TVBoxConfig.Parse] = []
 
     @State private var classes: [(String, String)] = []
     @State private var items: [VodItem] = []
@@ -100,8 +103,8 @@ struct SiteBrowseView: View {
     var body: some View {
         Group {
             if isCMS { cmsBody }
-            else if site.kind == .spiderPY { PySiteBrowseView(site: site) }
-            else if site.kind == .spiderJS || site.kind == .drpyJS { JSSiteBrowseView(site: site) }
+            else if site.kind == .spiderPY { PySiteBrowseView(site: site, parses: parses) }
+            else if site.kind == .spiderJS || site.kind == .drpyJS { JSSiteBrowseView(site: site, parses: parses) }
             else { pendingBody }
         }
         .navigationTitle(site.name)
@@ -164,7 +167,7 @@ struct SiteBrowseView: View {
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(items) { item in
                         NavigationLink {
-                            DetailLoaderView(site: site, item: item)
+                            DetailLoaderView(site: site, item: item, parses: parses)
                         } label: {
                             PosterCell(item: item)
                         }
