@@ -19,6 +19,15 @@ targets:
     dependencies:
       - package: FFmpegKit
         product: libmpv
+      # BeeWare python-apple-support, fetched by CI into the project
+      # root (gitignored). The stdlib half of the install happens in
+      # the post-build script below.
+      - framework: Python.xcframework
+        embed: true
+    postBuildScripts:
+      - name: Install Python stdlib
+        script: bash "$PROJECT_DIR/scripts/install_python_nosign.sh"
+        basedOnDependencyAnalysis: false
     sources:
       - GuageTV/Sources
       - GuageTV/Assets.xcassets
@@ -28,8 +37,8 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "1.01"
-        CFBundleVersion: "101"
+        CFBundleShortVersionString: "1.02"
+        CFBundleVersion: "102"
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         UILaunchScreen: {}
         # TVBox configs, CMS APIs and media streams are very often plain
