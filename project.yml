@@ -19,10 +19,6 @@ targets:
         product: KSPlayerUI
       - package: KSPlayer
         product: MPVPlayer
-targets:
-  GuageTV:
-    type: application
-    platform: iOS
     sources:
       - GuageTV/Sources
       - path: GuageTV/Python
