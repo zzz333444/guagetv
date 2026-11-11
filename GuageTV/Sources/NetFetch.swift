@@ -19,9 +19,17 @@ enum NetFetch {
     static let userAgent =
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
-    static func request(for url: URL, extraHeader: [String: String] = [:]) -> URLRequest {
+    /// The identity Android TVBox apps present (OkHttp). Many config
+    /// servers sniff for exactly this: an okhttp UA receives the JSON
+    /// config at the domain root, while any browser UA receives a pretty
+    /// HTML portal page instead (verified live against a UA-sniffing
+    /// config host, 2026-11-11: okhttp → 36 KB application/json,
+    /// browser → 105 KB text/html).
+    static let okhttpUA = "okhttp/4.9.3"
+
+    static func request(for url: URL, ua: String = okhttpUA, extraHeader: [String: String] = [:]) -> URLRequest {
         var req = URLRequest(url: url, timeoutInterval: 20)
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue(ua, forHTTPHeaderField: "User-Agent")
         req.setValue("text/html,application/json,application/xml,*/*;q=0.8", forHTTPHeaderField: "Accept")
         req.setValue("zh-CN,zh;q=0.9,en;q=0.6", forHTTPHeaderField: "Accept-Language")
         for (k, v) in extraHeader { req.setValue(v, forHTTPHeaderField: k) }
@@ -30,7 +38,7 @@ enum NetFetch {
 
     // MARK: Tier 1 — URLSession, retries + scheme fallback
 
-    static func data(from url: URL, extraHeader: [String: String] = [:]) async throws -> Data {
+    static func data(from url: URL, ua: String = okhttpUA, extraHeader: [String: String] = [:]) async throws -> Data {
         var attempts: [URL] = [url]
         if let swapped = schemeSwapped(url) { attempts.append(swapped) }
         attempts.append(url)
@@ -38,7 +46,7 @@ enum NetFetch {
         for (i, candidate) in attempts.enumerated() {
             if i > 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
             do {
-                let (data, response) = try await URLSession.shared.data(for: request(for: candidate, extraHeader: extraHeader))
+                let (data, response) = try await URLSession.shared.data(for: request(for: candidate, ua: ua, extraHeader: extraHeader))
                 if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
                     throw URLError(.badServerResponse)
                 }
@@ -54,7 +62,9 @@ enum NetFetch {
 
     static func dataForConfig(from url: URL) async throws -> Data {
         if let data = try? await data(from: url), !data.isEmpty { return data }
+        if let data = try? await data(from: url, ua: userAgent), !data.isEmpty { return data }
         if let data = try? await dataBlockingSchemeUpgrade(from: url), !data.isEmpty { return data }
+        if let data = try? await dataBlockingSchemeUpgrade(from: url, ua: userAgent), !data.isEmpty { return data }
         if let data = try? await WebFetcher.fetch(url: url), !data.isEmpty { return data }
         if let swapped = schemeSwapped(url),
            let data = try? await WebFetcher.fetch(url: swapped), !data.isEmpty { return data }
@@ -63,11 +73,11 @@ enum NetFetch {
 
     // MARK: Tier 2 — redirects allowed, http→https upgrades refused
 
-    private static func dataBlockingSchemeUpgrade(from url: URL) async throws -> Data {
+    private static func dataBlockingSchemeUpgrade(from url: URL, ua: String = okhttpUA) async throws -> Data {
         let delegate = NoUpgradeRedirectDelegate()
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
-        let (data, response) = try await session.data(for: request(for: url))
+        let (data, response) = try await session.data(for: request(for: url, ua: ua))
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             throw URLError(.badServerResponse)
         }
@@ -115,6 +125,7 @@ private final class WebFetcher: NSObject, WKNavigationDelegate {
         try await withCheckedThrowingContinuation { cont in
             self.continuation = cont
             let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            wv.customUserAgent = NetFetch.okhttpUA
             wv.navigationDelegate = self
             wv.alpha = 0.01
             self.webView = wv
