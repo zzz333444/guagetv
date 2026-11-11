@@ -4,21 +4,21 @@ options:
   deploymentTarget:
     iOS: "16.0"
 packages:
-  # KSPlayer: dual-engine player (AVPlayer + mpv/FFmpeg via its MPVPlayer
-  # module — libass ASS subtitles, dav1d AV1, MKV/FLV demuxing). GPL-3.0;
-  # this project is personal-use and its source stays public in this repo.
-  KSPlayer:
-    url: https://github.com/kingslay/KSPlayer.git
-    branch: main
+  # FFmpegKit (kingslay fork): its libmpv product ships a real iOS-device
+  # slice (checked: ios-arm64 present) — FFmpeg demux/decode + libass +
+  # dav1d + libdovi, the stack Rex uses. KSPlayer was tried first, but its
+  # free/GPL xcframework has NO ios-arm64 device slice (simulator/mac/tvOS
+  # only) and cannot link into a device build.
+  FFmpegKit:
+    url: https://github.com/kingslay/FFmpegKit.git
+    from: 9.0.2
 targets:
   GuageTV:
     type: application
     platform: iOS
     dependencies:
-      - package: KSPlayer
-        product: KSPlayerUI
-      - package: KSPlayer
-        product: MPVPlayer
+      - package: FFmpegKit
+        product: libmpv
     sources:
       - GuageTV/Sources
       - path: GuageTV/Python
