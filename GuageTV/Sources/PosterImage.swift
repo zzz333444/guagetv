@@ -19,6 +19,8 @@ struct PosterImage: View {
                 Rectangle().fill(Color.white.opacity(0.08))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .task(id: urlString) {
             image = await PosterCache.shared.load(urlString)
         }

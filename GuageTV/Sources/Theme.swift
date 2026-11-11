@@ -50,7 +50,11 @@ struct GlassCard<Content: View>: View {
 extension View {
     /// Poster image with Rex's rounded corners; 2:3 by default.
     func posterFrame(ratio: CGFloat = 2.0 / 3.0) -> some View {
-        self.aspectRatio(ratio, contentMode: .fill)
+        // .fit, never .fill: .fill sizes the cell to COVER its parent,
+        // which let poster images balloon past their grid column and
+        // overlap neighbours whenever a row mixed image aspect ratios.
+        self.aspectRatio(ratio, contentMode: .fit)
+            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

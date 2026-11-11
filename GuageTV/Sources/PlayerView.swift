@@ -40,6 +40,7 @@ struct PlayerView: View {
     @State private var dragLevel: Double = 0
     @State private var scrubTarget: Double = 0
     @State private var hudVisible = false
+    @State private var showRemaining = false
     @State private var hudGeneration = 0
 
     private enum DragMode { case scrub, brightness, volume }
@@ -319,11 +320,14 @@ struct PlayerView: View {
                         .frame(width: 42, height: 42)
                         .background(.ultraThinMaterial, in: Circle())
                 }
-                Text("\(timeLabel(currentTime)) / \(timeLabel(duration))")
+                Text(showRemaining
+                     ? "\(timeLabel(currentTime)) / -\(timeLabel(max(duration - currentTime, 0)))"
+                     : "\(timeLabel(currentTime)) / \(timeLabel(duration))")
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
+                    .onTapGesture { showRemaining.toggle(); pokeChrome() }
                 Spacer()
                 HStack(spacing: 2) {
                     if episodes.count > 1 {
