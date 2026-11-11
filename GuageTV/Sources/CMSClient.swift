@@ -106,7 +106,7 @@ final class CMSClient {
             name: first["vod_name"] as? String ?? "",
             pic: first["vod_pic"] as? String ?? "",
             remarks: first["vod_remarks"] as? String ?? "",
-            content: (first["vod_content"] as? String ?? "")
+            content: (first["vod_content"] as? String ?? "").htmlCleaned
                 .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression),
             actor: first["vod_actor"] as? String ?? "",
             director: first["vod_director"] as? String ?? "",
@@ -161,5 +161,22 @@ final class CMSClient {
             }
         }
         return ["list": items, "class": classes]
+    }
+}
+
+private extension String {
+    /// CMS synopses arrive with HTML markup and entities (&nbsp;, <br>…).
+    var htmlCleaned: String {
+        var t = self
+        t = t.replacingOccurrences(of: "(?i)<br\\s*/?>", with: "\n", options: .regularExpression)
+        t = t.replacingOccurrences(of: "(?i)</p\\s*>", with: "\n", options: .regularExpression)
+        t = t.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        for (entity, replacement) in [
+            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"),
+        ] {
+            t = t.replacingOccurrences(of: entity, with: replacement)
+        }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

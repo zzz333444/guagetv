@@ -58,6 +58,23 @@ enum NetFetch {
         throw lastError
     }
 
+    /// Single-attempt image fetch (poster grids load dozens of these;
+    /// the full retry chain would multiply failures). Many image CDNs
+    /// require a Referer — the image's own origin is the usual key.
+    static func imageData(from url: URL) async throws -> Data {
+        var req = URLRequest(url: url, timeoutInterval: 12)
+        req.setValue(okhttpUA, forHTTPHeaderField: "User-Agent")
+        req.setValue("image/avif,image/webp,image/png,image/jpeg,*/*", forHTTPHeaderField: "Accept")
+        if let scheme = url.scheme, let host = url.host {
+            req.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
+        }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+
     // MARK: Full tier chain for config import
 
     static func dataForConfig(from url: URL) async throws -> Data {

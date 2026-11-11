@@ -32,8 +32,11 @@ final class PosterCache {
     func load(_ urlString: String) async -> UIImage? {
         let key = urlString as NSString
         if let hit = cache.object(forKey: key) { return hit }
-        guard let url = URL(string: urlString),
-              let data = try? await NetFetch.data(from: url),
+        var text = urlString.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("//") { text = "https:" + text }
+        else if !text.contains("://") { text = "https://" + text }
+        guard let url = URL(string: text),
+              let data = try? await NetFetch.imageData(from: url),
               let img = UIImage(data: data) else { return nil }
         cache.setObject(img, forKey: key)
         return img

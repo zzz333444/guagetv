@@ -23,6 +23,12 @@ final class MPVController: ObservableObject {
         setProperty("speed", String(value))
     }
 
+    /// Current frame as an image (for the screenshot button), rendered
+    /// through the same software path as the display.
+    func snapshot() -> CGImage? {
+        renderFrame(maxSize: CGSize(width: 1280, height: 720), scale: 1)
+    }
+
     private var handle: OpaquePointer?
     private var renderContext: OpaquePointer?
     private var buffer: UnsafeMutableRawPointer?
