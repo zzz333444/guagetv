@@ -19,11 +19,6 @@ targets:
     dependencies:
       - package: FFmpegKit
         product: libmpv
-      # BeeWare python-apple-support, fetched by CI into the project
-      # root (gitignored). The stdlib half of the install happens in
-      # the post-build script below.
-      - framework: Python.xcframework
-        embed: true
     postBuildScripts:
       - name: Install Python stdlib
         script: bash "$PROJECT_DIR/scripts/install_python_nosign.sh"
@@ -48,6 +43,12 @@ targets:
           NSAllowsArbitraryLoads: true
     settings:
       TARGETED_DEVICE_FAMILY: "1,2"
+      # Python (BeeWare python-apple-support, fetched by CI to the
+      # project root): linked by flag, embedded by the post-build
+      # script. XcodeGen's framework-dependency route did not resolve
+      # the module in CI (run #29), so this stays fully manual.
+      FRAMEWORK_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Python.xcframework/ios-arm64"
+      OTHER_LDFLAGS: "$(inherited) -framework Python"
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     # Stage 1: add Python.xcframework (python-apple-support) as an embedded
     # framework here, plus the libpython / ssl / crypto dylibs it ships.
