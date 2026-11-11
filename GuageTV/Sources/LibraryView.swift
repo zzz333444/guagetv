@@ -4,8 +4,10 @@ import SwiftUI
 /// content counts, freshness + status dot. Backed by the imported config's
 /// sites; counts/freshness fill in once a source has been synced.
 struct LibraryView: View {
-    var config: TVBoxConfig?
+    @Binding var config: TVBoxConfig?
     var onImportTap: () -> Void = {}
+    @State private var entries: [ConfigLibrary.Entry] = []
+    @State private var activeID: String?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -21,6 +23,15 @@ struct LibraryView: View {
                         .padding(.horizontal, 16).padding(.vertical, 7)
                         .background(Theme.glass, in: Capsule())
                         .foregroundStyle(.white)
+                }
+
+                if !entries.isEmpty {
+                    Text("我的线路").font(.headline).foregroundStyle(Theme.textDim)
+                    VStack(spacing: 10) {
+                        ForEach(entries) { entry in
+                            lineRow(entry)
+                        }
+                    }
                 }
 
                 if let sites = config?.sites, !sites.isEmpty {
@@ -77,6 +88,52 @@ struct LibraryView: View {
         }
         .background(AmbientBackground(imageURL: nil))
         .preferredColorScheme(.dark)
+        .onAppear { refreshLibrary() }
+        }
+    }
+
+    private func refreshLibrary() {
+        entries = ConfigLibrary.entries()
+        activeID = ConfigLibrary.activeID()
+    }
+
+    /// One saved config = one group of its own. Tapping a line makes
+    /// it the active config everywhere (发现/搜索 follow); its sites
+    /// are stored separately and load instantly, no re-download.
+    private func lineRow(_ entry: ConfigLibrary.Entry) -> some View {
+        let isActive = entry.id == activeID
+        return GlassCard(padding: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.subheadline).foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.name).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white).lineLimit(1)
+                    Text("\(entry.siteCount) 个站点 · \(URL(string: entry.sourceURL)?.host ?? "")")
+                        .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                }
+                Spacer()
+                if isActive {
+                    Text("使用中")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Theme.ok.opacity(0.15), in: Capsule())
+                } else {
+                    Text("点按启用")
+                        .font(.caption).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
+        .onTapGesture {
+            guard !isActive else { return }
+            config = ConfigLibrary.activate(id: entry.id)
+            refreshLibrary()
         }
     }
 

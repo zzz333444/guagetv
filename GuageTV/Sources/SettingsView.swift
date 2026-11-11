@@ -7,9 +7,10 @@ struct SettingsView: View {
     @Binding var config: TVBoxConfig?
     @State private var configURL = ""
     @State private var status = "还没有导入配置"
+    @State private var entries: [ConfigLibrary.Entry] = []
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.02 · Python"
+    static let buildLabel = "v1.03 · 多线路"
 
     var body: some View {
         NavigationStack {
@@ -20,6 +21,7 @@ struct SettingsView: View {
                         if configURL.isEmpty, let saved = ConfigStore.savedSourceURL() {
                             configURL = saved
                         }
+                        entries = ConfigLibrary.entries()
                     }
 
                     HStack(spacing: 12) {
@@ -53,6 +55,44 @@ struct SettingsView: View {
                             if let config {
                                 Text("已加载 \(config.sites.count) 个站点 · \(config.lives?.count ?? 0) 个直播源")
                                     .font(.footnote).foregroundStyle(Theme.textDim)
+                            }
+                        }
+                    }
+
+                    if !entries.isEmpty {
+                        group(title: "配置库") {
+                            ForEach(entries) { entry in
+                                HStack(spacing: 10) {
+                                    Image(systemName: "antenna.radiowaves.left.and.right")
+                                        .foregroundStyle(Theme.textDim).frame(width: 22)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.name).foregroundStyle(.white).lineLimit(1)
+                                        Text("\(entry.siteCount) 个站点")
+                                            .font(.caption).foregroundStyle(Theme.textDim)
+                                    }
+                                    Spacer()
+                                    if entry.id == ConfigLibrary.activeID() {
+                                        Text("使用中")
+                                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+                                    } else {
+                                        Button("启用") {
+                                            config = ConfigLibrary.activate(id: entry.id)
+                                            entries = ConfigLibrary.entries()
+                                            status = "已切换到 \(entry.name)"
+                                        }
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .background(Theme.glass, in: Capsule())
+                                        .foregroundStyle(.white)
+                                    }
+                                    Button(role: .destructive) {
+                                        config = ConfigLibrary.remove(id: entry.id)
+                                        entries = ConfigLibrary.entries()
+                                        status = "已删除 \(entry.name)"
+                                    } label: {
+                                        Image(systemName: "trash").foregroundStyle(.red.opacity(0.85))
+                                    }
+                                }
                             }
                         }
                     }
@@ -122,14 +162,17 @@ struct SettingsView: View {
         }
         do {
             if MaoYuanAdapter.looksLikeMaoYuan(data) {
-                config = try MaoYuanAdapter.convert(from: data)
-                ConfigStore.save(data: data, sourceURL: text)
-                status = "已加载（猫源配置已自动转换）"
+                let parsed = try MaoYuanAdapter.convert(from: data)
+                config = parsed
+                let entry = ConfigLibrary.add(data: data, sourceURL: text, siteCount: parsed.sites.count)
+                status = "猫源已转换并加入配置库：\(entry.name)"
             } else {
-                config = try ConfigLoader.load(from: data)
-                ConfigStore.save(data: data, sourceURL: text)
-                status = "已加载 TVBox 配置"
+                let parsed = try ConfigLoader.load(from: data)
+                config = parsed
+                let entry = ConfigLibrary.add(data: data, sourceURL: text, siteCount: parsed.sites.count)
+                status = "已加入配置库并启用：\(entry.name)"
             }
+            entries = ConfigLibrary.entries()
         } catch {
             let head = String(decoding: data.prefix(60), as: UTF8.self)
                 .replacingOccurrences(of: "\n", with: " ")

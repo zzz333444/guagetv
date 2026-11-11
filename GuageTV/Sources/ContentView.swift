@@ -11,7 +11,7 @@ struct ContentView: View {
     init() {
         // Restore the persisted config (v7): imported lines survive the
         // app being swiped away.
-        _config = State(initialValue: ConfigStore.loadConfig())
+        _config = State(initialValue: ConfigLibrary.loadActive())
     }
 
     var body: some View {
@@ -20,7 +20,7 @@ struct ContentView: View {
                 switch tab {
                 case 0: DiscoverView(config: config)
                 case 1: ProfileView()
-                case 2: LibraryView(config: config) { tab = 3 }
+                case 2: LibraryView(config: $config) { tab = 3 }
                 default: SettingsView(config: $config)
                 }
             }

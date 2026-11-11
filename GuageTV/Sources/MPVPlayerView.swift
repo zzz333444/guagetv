@@ -17,6 +17,9 @@ final class MPVController: ObservableObject {
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var speed: Double = 1.0
+    @Published var isBuffering = false
+    /// Demuxer cache download rate, bytes/sec (mpv's cache-speed).
+    @Published var netSpeedBytes: Double = 0
 
     func setSpeed(_ value: Double) {
         speed = value
@@ -179,7 +182,17 @@ final class MPVController: ObservableObject {
     private func poll() {
         duration = stringProperty("duration").flatMap(Double.init) ?? 0
         currentTime = stringProperty("time-pos").flatMap(Double.init) ?? 0
-        isPlaying = stringProperty("pause") == "no" && stringProperty("eof-reached") != "yes"
+        let userPaused = stringProperty("pause") == "yes"
+        let eof = stringProperty("eof-reached") == "yes"
+        isPlaying = !userPaused && !eof
+        // Buffering = waiting on the network, not waiting on the user:
+        // paused-for-cache / seeking / core idle all count, a deliberate
+        // pause and end-of-file never show the spinner.
+        isBuffering = !userPaused && !eof
+            && (stringProperty("paused-for-cache") == "yes"
+                || stringProperty("seeking") == "yes"
+                || stringProperty("core-idle") == "yes")
+        netSpeedBytes = stringProperty("cache-speed").flatMap(Double.init) ?? 0
     }
 }
 

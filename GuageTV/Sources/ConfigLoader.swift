@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// TVBox interface config — full field coverage for the mainstream format.
@@ -254,10 +255,148 @@ enum ConfigStore {
     }
 
     static func loadConfig() -> TVBoxConfig? {
-        guard let file = fileURL, let data = try? Data(contentsOf: file) else { return nil }
+        ConfigLibrary.loadActive()
+    }
+}
+
+// MARK: - Multi-config library
+
+/// Every imported TVBox/猫源 config is kept as its own line （线路）:
+/// raw bytes per config under Application Support/configs/, an index
+/// in UserDefaults, one active line at a time. Discover/Search/Library
+/// all read the active line; switching lines is instant (no download).
+enum ConfigLibrary {
+    struct Entry: Codable, Identifiable {
+        var id: String          // sha256 of the source URL
+        var name: String
+        var sourceURL: String
+        var siteCount: Int
+        var addedAt: TimeInterval
+    }
+
+    private static let indexKey = "configLibraryIndex.v1"
+    private static let activeKey = "activeConfigID.v1"
+    private static let legacyURLKey = "configSourceURL"
+
+    private static var dir: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("configs")
+    }
+
+    private static func file(for id: String) -> URL? {
+        dir?.appendingPathComponent(id + ".json")
+    }
+
+    static func entries() -> [Entry] {
+        guard let data = UserDefaults.standard.data(forKey: indexKey),
+              let list = try? JSONDecoder().decode([Entry].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    private static func saveEntries(_ list: [Entry]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: indexKey)
+        }
+    }
+
+    static func activeID() -> String? {
+        UserDefaults.standard.string(forKey: activeKey)
+    }
+
+    static func displayName(for sourceURL: String) -> String {
+        if let url = URL(string: sourceURL) {
+            let last = url.lastPathComponent
+            if !last.isEmpty, last != "/" { return last }
+            if let host = url.host, !host.isEmpty { return host }
+        }
+        return "配置"
+    }
+
+    /// Add (or refresh, when the URL repeats) a config; it becomes
+    /// the active line.
+    @discardableResult
+    static func add(data: Data, sourceURL: String, siteCount: Int) -> Entry {
+        let id = SHA256.hash(data: Data(sourceURL.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let entry = Entry(id: id, name: displayName(for: sourceURL),
+                          sourceURL: sourceURL, siteCount: siteCount,
+                          addedAt: Date().timeIntervalSince1970)
+        if let dir {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        if let file = file(for: id) {
+            try? data.write(to: file, options: .atomic)
+        }
+        var list = entries()
+        if let i = list.firstIndex(where: { $0.id == id }) {
+            list[i] = entry
+        } else {
+            list.append(entry)
+        }
+        saveEntries(list)
+        setActive(id: id)
+        return entry
+    }
+
+    static func setActive(id: String) {
+        UserDefaults.standard.set(id, forKey: activeKey)
+        if let entry = entries().first(where: { $0.id == id }) {
+            // PySiteBrowseView resolves relative spider paths against
+            // this key; it must always name the ACTIVE line's source.
+            UserDefaults.standard.set(entry.sourceURL, forKey: legacyURLKey)
+        }
+    }
+
+    static func activate(id: String) -> TVBoxConfig? {
+        setActive(id: id)
+        return loadEntry(id: id)
+    }
+
+    /// Remove a line; returns the config that should be on screen now
+    /// (the new active line, or nil when the library is empty).
+    static func remove(id: String) -> TVBoxConfig? {
+        if let file = file(for: id) { try? FileManager.default.removeItem(at: file) }
+        let list = entries().filter { $0.id != id }
+        saveEntries(list)
+        if activeID() == id {
+            UserDefaults.standard.removeObject(forKey: activeKey)
+            if let first = list.first { return activate(id: first.id) }
+            UserDefaults.standard.removeObject(forKey: legacyURLKey)
+            return nil
+        }
+        return loadActive()
+    }
+
+    static func loadActive() -> TVBoxConfig? {
+        migrateLegacyIfNeeded()
+        if let id = activeID(), let cfg = loadEntry(id: id) { return cfg }
+        if let first = entries().first { return activate(id: first.id) }
+        return nil
+    }
+
+    private static func loadEntry(id: String) -> TVBoxConfig? {
+        guard let file = file(for: id), let data = try? Data(contentsOf: file) else { return nil }
         if MaoYuanAdapter.looksLikeMaoYuan(data) {
             return try? MaoYuanAdapter.convert(from: data)
         }
         return try? ConfigLoader.load(from: data)
+    }
+
+    /// v7's single active-config.json becomes the library's first line,
+    /// so an upgrade never loses the config the user already imported.
+    private static func migrateLegacyIfNeeded() {
+        guard entries().isEmpty else { return }
+        let legacy = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("active-config.json")
+        guard let legacy, let data = try? Data(contentsOf: legacy) else { return }
+        let parsed: TVBoxConfig?
+        if MaoYuanAdapter.looksLikeMaoYuan(data) {
+            parsed = try? MaoYuanAdapter.convert(from: data)
+        } else {
+            parsed = try? ConfigLoader.load(from: data)
+        }
+        let url = UserDefaults.standard.string(forKey: legacyURLKey) ?? "本地导入"
+        add(data: data, sourceURL: url, siteCount: parsed?.sites.count ?? 0)
     }
 }

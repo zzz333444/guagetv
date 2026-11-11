@@ -79,6 +79,8 @@ struct PlayerView: View {
     }
 
     private var isPlaying: Bool { isMPV ? mpv.isPlaying : native.isPlaying }
+    private var isBuffering: Bool { isMPV ? mpv.isBuffering : native.isBuffering }
+    private var netSpeedBytes: Double { isMPV ? mpv.netSpeedBytes : native.netSpeedBytes }
     private var currentTime: Double { isMPV ? mpv.currentTime : native.currentTime }
     private var duration: Double { isMPV ? mpv.duration : native.duration }
     private var seekStep: Double { Double(UserDefaults.standard.object(forKey: "seekStep") as? Int ?? 15) }
@@ -95,6 +97,22 @@ struct PlayerView: View {
                     .opacity(0.02)
                     .allowsHitTesting(false)
                 if hudVisible { hud }
+                if isBuffering {
+                    VStack(spacing: 10) {
+                        ProgressView().tint(.white).scaleEffect(1.5)
+                        Text("加载中").font(.caption).foregroundStyle(.white.opacity(0.85))
+                    }
+                    .padding(.horizontal, 22).padding(.vertical, 18)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+                }
+                if !showChrome {
+                    VStack {
+                        HStack { speedPill; Spacer() }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                }
                 if showChrome {
                     chrome(isLandscape: geo.size.width > geo.size.height)
                 }
@@ -279,6 +297,7 @@ struct PlayerView: View {
                 }
             }
             .background(.ultraThinMaterial, in: Capsule())
+            speedPill
             Spacer()
             HStack(spacing: 2) {
                 Button { saveSnapshot() } label: {
@@ -366,6 +385,26 @@ struct PlayerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
+    }
+
+    /// Network rate readout — top-left, next to the close controls
+    /// while the chrome is up, standalone in the corner when it hides.
+    private var speedPill: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 10, weight: .bold))
+            Text(Self.formatSpeed(netSpeedBytes))
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 11).padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    static func formatSpeed(_ bytesPerSec: Double) -> String {
+        let kb = bytesPerSec / 1024
+        if kb < 1024 { return "\(Int(kb.rounded())) KB/s" }
+        return String(format: "%.1f MB/s", kb / 1024)
     }
 
     private var episodeSheet: some View {
@@ -473,8 +512,13 @@ final class NativeController: ObservableObject {
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var rate: Float = 1.0
+    @Published var isBuffering = false
+    /// Download rate from the item's access log, bytes/sec.
+    @Published var netSpeedBytes: Double = 0
     private var timeObserver: Any?
     private var loadedURL: URL?
+    private var lastBytes: Int64 = 0
+    private var lastBytesAt: Date?
 
     func load(url: URL, header: [String: String]) {
         if loadedURL == url, player.currentItem != nil {
@@ -497,9 +541,31 @@ final class NativeController: ObservableObject {
                     self.duration = d
                 }
                 self.isPlaying = self.player.timeControlStatus == .playing
+                self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.sampleSpeed()
             }
         }
         player.play()
+    }
+
+    /// Download rate from cumulative access-log bytes, sampled on a
+    /// ~1 s cadence and lightly smoothed so the readout doesn't jitter.
+    private func sampleSpeed() {
+        guard let events = player.currentItem?.accessLog()?.events, !events.isEmpty else { return }
+        let total = events.reduce(Int64(0)) { $0 + max($1.numberOfBytesTransferred, 0) }
+        let now = Date()
+        if let lastAt = lastBytesAt {
+            let dt = now.timeIntervalSince(lastAt)
+            if dt >= 1.0 {
+                let rate = Double(max(total - lastBytes, 0)) / dt
+                netSpeedBytes = netSpeedBytes == 0 ? rate : netSpeedBytes * 0.5 + rate * 0.5
+                lastBytes = total
+                lastBytesAt = now
+            }
+        } else {
+            lastBytes = total
+            lastBytesAt = now
+        }
     }
 
     func pause() { player.pause() }
