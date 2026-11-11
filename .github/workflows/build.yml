@@ -11,6 +11,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Python.xcframework
+        uses: actions/cache@v4
+        with:
+          path: Python.xcframework
+          key: pysupport-3.13-b18
+
+      - name: Fetch Python.xcframework (python-apple-support 3.13-b18)
+        run: |
+          if [ ! -d Python.xcframework ]; then
+            curl -sSL -o /tmp/py.tar.gz https://github.com/beeware/python-apple-support/releases/download/3.13-b18/Python-3.13-iOS-support.b18.tar.gz
+            echo "d06acf2a9c7964a8689566353a0e707402eff822037de5e29ba0e16040f7047d  /tmp/py.tar.gz" | shasum -a 256 -c -
+            tar xzf /tmp/py.tar.gz Python.xcframework
+          fi
+          ls Python.xcframework
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
