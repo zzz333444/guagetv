@@ -666,6 +666,22 @@ final class NativeController: NSObject, ObservableObject {
     @Published var specText: String = ""
     @Published var isPiPActive = false
     private var pipController: AVPictureInPictureController?
+
+    /// Wire PiP to the rendering layer. Called again with a fresh
+    /// layer when the episode (and thus the view) changes.
+    func setupPiP(layer: AVPlayerLayer) {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        if pipController?.playerLayer === layer { return }
+        let controller = AVPictureInPictureController(playerLayer: layer)
+        controller.delegate = self
+        pipController = controller
+    }
+
+    func togglePiP() {
+        guard let pip = pipController else { return }
+        if pip.isPictureInPictureActive { pip.stopPictureInPicture() }
+        else { pip.startPictureInPicture() }
+    }
     private var timeObserver: Any?
     private var loadedURL: URL?
     private var lastBytes: Int64 = 0
