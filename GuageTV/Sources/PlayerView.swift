@@ -1,32 +1,29 @@
 import AVFoundation
 import AVKit
 import SwiftUI
-#if canImport(KSPlayerUI)
-import KSPlayer
-import KSPlayerUI
-import MPVPlayer
-#endif
 
-/// Playback page — dual engine, mirroring how Rex is built:
-///  - Engine 1: AVPlayer (native, hardware decode, best battery/HLS)
-///  - Engine 2: mpv via KSPlayer's MPVPlayer module (FFmpeg + libass +
-///    dav1d: MKV/FLV/ASS subtitles/AV1 and everything AVPlayer rejects)
-/// KSPlayer's layer tries the first engine and falls back to the second
-/// automatically; the user can also force an engine from DetailView later.
-/// Spider-supplied headers are forwarded to whichever engine plays.
+/// Playback page — dual engine:
+///  - AVPlayer (native): HLS/MP4/MOV — hardware decode, best battery.
+///  - mpv (FFmpegKit's libmpv): everything else — MKV/FLV/AVI/TS/WebM,
+///    ASS subtitles, AV1 — the formats AVPlayer refuses.
+/// Engine is picked by file extension; spider headers go to both.
 struct PlayerView: View {
     let urlString: String
     var header: [String: String] = [:]
     var title: String = ""
 
+    private static let mpvExtensions: Set<String> = [
+        "mkv", "flv", "avi", "wmv", "rmvb", "ts", "mpg", "mpeg",
+        "m2ts", "webm", "3gp", "asf", "vob", "f4v",
+    ]
+
     var body: some View {
         if let url = URL(string: urlString) {
-            #if canImport(KSPlayerUI)
-            KSPlayerContainer(url: url, header: header, title: title)
-                .ignoresSafeArea()
-            #else
-            NativePlayerView(url: url, header: header)
-            #endif
+            if Self.mpvExtensions.contains(url.pathExtension.lowercased()) {
+                MPVPlayerView(url: url, header: header)
+            } else {
+                NativePlayerView(url: url, header: header)
+            }
         } else {
             ZStack {
                 Theme.bg.ignoresSafeArea()
@@ -36,8 +33,7 @@ struct PlayerView: View {
     }
 }
 
-/// AVPlayer fallback (also the sole engine if the KSPlayer package is
-/// ever removed).
+/// AVPlayer engine page.
 struct NativePlayerView: View {
     let url: URL
     var header: [String: String] = [:]
@@ -57,26 +53,3 @@ struct NativePlayerView: View {
         return AVPlayer(playerItem: AVPlayerItem(asset: asset))
     }
 }
-
-#if canImport(KSPlayerUI)
-/// UIKit bridge for KSPlayer's IOSVideoPlayerView.
-struct KSPlayerContainer: UIViewRepresentable {
-    let url: URL
-    var header: [String: String] = [:]
-    var title: String = ""
-
-    func makeUIView(context: Context) -> IOSVideoPlayerView {
-        // mpv (FFmpeg) as the fallback engine behind AVPlayer.
-        KSOptions.secondPlayerType = KSMPVPlayer.self
-        let view = IOSVideoPlayerView()
-        let options = KSOptions()
-        if !header.isEmpty { options.appendHeader(header) }
-        let definition = KSPlayerResourceDefinition(url: url, definition: "默认", options: options)
-        let resource = KSPlayerResource(name: title, definitions: [definition])
-        view.set(resource: resource)
-        return view
-    }
-
-    func updateUIView(_ uiView: IOSVideoPlayerView, context: Context) {}
-}
-#endif
