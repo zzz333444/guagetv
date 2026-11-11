@@ -28,6 +28,7 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
+        NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         UILaunchScreen: {}
         # TVBox configs, CMS APIs and media streams are very often plain
         # HTTP; without this, App Transport Security blocks every load
