@@ -7,8 +7,14 @@ import SwiftUI
 struct DetailView: View {
     let detail: VodDetail
     var header: [String: String] = [:]
+    /// When set (py spiders), episode taps resolve through this first:
+    /// episode urls are opaque ids until playerContent answers. A nil
+    /// result means the episode needs a parse interface (later stage).
+    var playerResolver: ((String, String) async -> (url: String, header: [String: String])?)?
     @State private var lineIndex = 0
     @State private var playSelection: PlaySelection?
+    @State private var resolving = false
+    @State private var playNote: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -32,7 +38,27 @@ struct DetailView: View {
         .preferredColorScheme(.dark)
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
-                       header: header, title: detail.name)
+                       header: sel.playHeader ?? header, title: detail.name)
+        }
+        .overlay {
+            if resolving {
+                ProgressView().tint(.white)
+                    .padding(16)
+                    .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+            } else if let playNote {
+                Text(playNote)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.black.opacity(0.7), in: Capsule())
+                    .padding(.bottom, 30)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .task(id: playNote) {
+            guard playNote != nil else { return }
+            try? await Task.sleep(nanoseconds: 2_600_000_000)
+            playNote = nil
         }
     }
 
@@ -101,11 +127,7 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
-                        .onTapGesture {
-                            playSelection = PlaySelection(
-                                episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },
-                                index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0)
-                        }
+                        .onTapGesture { tapEpisode(ep, in: episodes) }
                 }
             }
             .padding(.horizontal, 18)
@@ -117,8 +139,33 @@ struct DetailView: View {
     }
 }
 
+    private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
+        guard let playerResolver else {
+            playSelection = PlaySelection(
+                episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },
+                index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0)
+            return
+        }
+        guard !resolving else { return }
+        resolving = true
+        let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
+        Task {
+            let resolved = await playerResolver(flag, ep.url)
+            resolving = false
+            if let resolved {
+                playSelection = PlaySelection(
+                    episodes: [PlayerView.EpisodeRef(name: ep.name, url: resolved.url)],
+                    index: 0, playHeader: resolved.header)
+            } else {
+                playNote = "这一集需要解析接口，下一阶段接入"
+            }
+        }
+    }
+}
+
 private struct PlaySelection: Identifiable {
     let episodes: [PlayerView.EpisodeRef]
     let index: Int
+    var playHeader: [String: String]?
     var id: String { episodes[index].url + "#\(index)" }
 }

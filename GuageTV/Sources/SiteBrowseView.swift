@@ -93,7 +93,9 @@ struct SiteBrowseView: View {
 
     var body: some View {
         Group {
-            if isCMS { cmsBody } else { pendingBody }
+            if isCMS { cmsBody }
+            else if site.kind == .spiderPY { PySiteBrowseView(site: site) }
+            else { pendingBody }
         }
         .navigationTitle(site.name)
         .navigationBarTitleDisplayMode(.inline)
