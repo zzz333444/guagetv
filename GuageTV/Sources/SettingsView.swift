@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// 设置 (Settings) — Rex-style grouped glass cards. The four quick tiles
@@ -12,13 +13,13 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.07 · 解析与搜索"
+    static let buildLabel = "v1.08 · 搜索与外观"
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("设置").font(.largeTitle.bold()).foregroundStyle(.white)
+                    Text("设置").font(.largeTitle.bold()).foregroundStyle(Theme.text)
                     .onAppear {
                         if configURL.isEmpty, let saved = ConfigStore.savedSourceURL() {
                             configURL = saved
@@ -58,7 +59,7 @@ struct SettingsView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .padding(.horizontal, 18).padding(.vertical, 8)
                                     .background(Theme.glass, in: Capsule())
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Theme.text)
                             }
                             Text(status).font(.footnote).foregroundStyle(Theme.textDim)
                             if let config {
@@ -75,7 +76,7 @@ struct SettingsView: View {
                                     Image(systemName: "antenna.radiowaves.left.and.right")
                                         .foregroundStyle(Theme.textDim).frame(width: 22)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(entry.name).foregroundStyle(.white).lineLimit(1)
+                                        Text(entry.name).foregroundStyle(Theme.text).lineLimit(1)
                                         Text("\(entry.siteCount) 个站点")
                                             .font(.caption).foregroundStyle(Theme.textDim)
                                     }
@@ -92,7 +93,7 @@ struct SettingsView: View {
                                         .font(.caption.weight(.semibold))
                                         .padding(.horizontal, 12).padding(.vertical, 6)
                                         .background(Theme.glass, in: Capsule())
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(Theme.text)
                                     }
                                     Button(role: .destructive) {
                                         config = ConfigLibrary.remove(id: entry.id)
@@ -107,7 +108,10 @@ struct SettingsView: View {
                     }
 
                     group(title: "使用偏好") {
-                        row(icon: "paintbrush", title: "外观与交互", value: "")
+                        NavigationLink { AppearanceSettingsView() } label: {
+                            row(icon: "paintbrush", title: "外观与交互", value: "")
+                        }
+                        .buttonStyle(.plain)
                         row(icon: "square.grid.2x2", title: "模块", value: "")
                     }
 
@@ -123,11 +127,11 @@ struct SettingsView: View {
                 .padding(.bottom, 110)
             }
             .background(AmbientBackground(imageURL: nil))
-            .preferredColorScheme(.dark)
-            .fileImporter(isPresented: $showFileImporter,
-                          allowedContentTypes: [.item],
-                          allowsMultipleSelection: false) { result in
-                Task { await importFiles(result) }
+            .sheet(isPresented: $showFileImporter) {
+                DocumentPicker(
+                    onPick: { url in Task { await importPickedFile(url) } },
+                    onCancel: { status = "已取消文件导入" })
+                    .ignoresSafeArea()
             }
         }
     }
@@ -135,8 +139,8 @@ struct SettingsView: View {
     private func quickTile(icon: String, title: String) -> some View {
         GlassCard(padding: 12) {
             VStack(spacing: 8) {
-                Image(systemName: icon).font(.title3).foregroundStyle(.white)
-                Text(title).font(.footnote).foregroundStyle(.white.opacity(0.85))
+                Image(systemName: icon).font(.title3).foregroundStyle(Theme.text)
+                Text(title).font(.footnote).foregroundStyle(Theme.text.opacity(0.85))
             }
             .frame(maxWidth: .infinity)
         }
@@ -152,7 +156,7 @@ struct SettingsView: View {
     private func row(icon: String, title: String, value: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon).foregroundStyle(Theme.textDim).frame(width: 22)
-            Text(title).foregroundStyle(.white)
+            Text(title).foregroundStyle(Theme.text)
             Spacer()
             if !value.isEmpty { Text(value).foregroundStyle(Theme.textDim) }
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textDim)
@@ -217,20 +221,14 @@ struct SettingsView: View {
         }
     }
 
-    private func importFiles(_ result: Result<[URL], Error>) async {
-        guard case .success(let urls) = result, let fileURL = urls.first else {
-            if case .failure(let error) = result {
-                status = "导入失败：\(error.localizedDescription)"
-            }
-            return
-        }
+    /// The UIKit picker hands over an asCopy copy in our own tmp
+    /// directory, so reading needs no security-scope dance; every
+    /// outcome lands in the status line (nothing fails silently).
+    private func importPickedFile(_ fileURL: URL) async {
         let ext = fileURL.pathExtension.lowercased()
         do {
-            guard fileURL.startAccessingSecurityScopedResource() else {
-                status = "导入失败：无权读取该文件"
-                return
-            }
-            defer { fileURL.stopAccessingSecurityScopedResource() }
+            let scoped = fileURL.startAccessingSecurityScopedResource()
+            defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: fileURL)
             switch ext {
             case "py", "js":
@@ -285,6 +283,64 @@ struct SettingsView: View {
     }
 }
 
+/// UIKit document picker (asCopy). SwiftUI's .fileImporter left
+/// files un-tappable for this app's side-loaded installs, so file
+/// picking goes through UIDocumentPickerViewController directly:
+/// any file type is selectable, the copy lands in our sandbox, and
+/// cancel is reported like any other outcome.
+struct DocumentPicker: UIViewControllerRepresentable {
+    var onPick: (URL) -> Void
+    var onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let parent: DocumentPicker
+        init(_ parent: DocumentPicker) { self.parent = parent }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first { parent.onPick(url) }
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            parent.onCancel()
+        }
+    }
+}
+
+/// 外观与交互 — theme mode first (the app's surfaces are adaptive;
+/// the player itself always stays dark).
+struct AppearanceSettingsView: View {
+    @AppStorage("themeMode.v1") private var themeMode = "dark"
+
+    var body: some View {
+        SettingsPage(title: "外观与交互") {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("外观模式").font(.headline).foregroundStyle(Theme.text)
+                    Picker("外观", selection: $themeMode) {
+                        Text("跟随系统").tag("system")
+                        Text("浅色").tag("light")
+                        Text("深色").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                    Text("播放器始终用深色，不受这里影响。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+}
+
 /// 关于呱壳 — version and both runtime statuses live here (moved out
 /// of the settings list at the user's request).
 struct AboutView: View {
@@ -311,7 +367,7 @@ struct AboutView: View {
 
     private func aboutRow(_ title: String, _ value: String) -> some View {
         HStack(spacing: 10) {
-            Text(title).foregroundStyle(.white)
+            Text(title).foregroundStyle(Theme.text)
             Spacer()
             Text(value).foregroundStyle(Theme.textDim)
                 .multilineTextAlignment(.trailing)
@@ -333,7 +389,6 @@ private struct SettingsPage<Content: View>: View {
                 .padding(.bottom, 40)
         }
         .background(AmbientBackground(imageURL: nil))
-        .preferredColorScheme(.dark)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -347,7 +402,7 @@ struct PlaySettingsView: View {
         SettingsPage(title: "播放") {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("默认播放引擎").font(.headline).foregroundStyle(.white)
+                    Text("默认播放引擎").font(.headline).foregroundStyle(Theme.text)
                     Picker("引擎", selection: $engine) {
                         Text("自动").tag("auto")
                         Text("原生").tag("native")
@@ -370,7 +425,7 @@ struct AVSettingsView: View {
         SettingsPage(title: "音画") {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("画面填充（mpv 引擎）").font(.headline).foregroundStyle(.white)
+                    Text("画面填充（mpv 引擎）").font(.headline).foregroundStyle(Theme.text)
                     Picker("填充", selection: $gravity) {
                         Text("适应（留黑边）").tag("aspect")
                         Text("填充（裁剪）").tag("fill")
@@ -392,7 +447,7 @@ struct ControlSettingsView: View {
         SettingsPage(title: "操控") {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("双击快进/快退（mpv 引擎）").font(.headline).foregroundStyle(.white)
+                    Text("双击快进/快退（mpv 引擎）").font(.headline).foregroundStyle(Theme.text)
                     Picker("步长", selection: $step) {
                         Text("10 秒").tag(10.0)
                         Text("15 秒").tag(15.0)
@@ -415,14 +470,14 @@ struct SubtitleSettingsView: View {
         SettingsPage(title: "字幕") {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("字幕大小（mpv 引擎）").font(.headline).foregroundStyle(.white)
+                    Text("字幕大小（mpv 引擎）").font(.headline).foregroundStyle(Theme.text)
                     Slider(value: $scale, in: 0.5...2.0, step: 0.1)
-                        .tint(.white)
+                        .tint(Theme.text)
                     HStack {
                         Text("小").font(.caption).foregroundStyle(Theme.textDim)
                         Spacer()
                         Text(String(format: "%.0f%%", scale * 100))
-                            .font(.subheadline.weight(.medium)).foregroundStyle(.white)
+                            .font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
                         Spacer()
                         Text("大").font(.caption).foregroundStyle(Theme.textDim)
                     }

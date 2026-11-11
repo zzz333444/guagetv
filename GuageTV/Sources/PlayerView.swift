@@ -110,8 +110,8 @@ struct PlayerView: View {
                 if hudVisible { hud }
                 if isBuffering {
                     VStack(spacing: 10) {
-                        ProgressView().tint(.white).scaleEffect(1.5)
-                        Text("加载中").font(.caption).foregroundStyle(.white.opacity(0.85))
+                        ProgressView().tint(Theme.text).scaleEffect(1.5)
+                        Text("加载中").font(.caption).foregroundStyle(Theme.text.opacity(0.85))
                     }
                     .padding(.horizontal, 22).padding(.vertical, 18)
                     .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
@@ -130,7 +130,7 @@ struct PlayerView: View {
                 if let toast {
                     Text(toast)
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .padding(.horizontal, 16).padding(.vertical, 9)
                         .background(.black.opacity(0.7), in: Capsule())
                         .transition(.opacity)
@@ -260,7 +260,7 @@ struct PlayerView: View {
                 let delta = Int(scrubTarget - dragStartTime)
                 Text(delta >= 0 ? "+\(delta) 秒" : "\(delta) 秒")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Theme.text.opacity(0.75))
             case .brightness:
                 hudBar(icon: "sun.max.fill", level: dragLevel)
             case .volume:
@@ -269,7 +269,7 @@ struct PlayerView: View {
                 EmptyView()
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Theme.text)
         .padding(.horizontal, 20).padding(.vertical, 14)
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
     }
@@ -302,7 +302,7 @@ struct PlayerView: View {
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.body.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .frame(width: 40, height: 40)
                     .background(.ultraThinMaterial, in: Circle())
             }
@@ -314,7 +314,7 @@ struct PlayerView: View {
                 }
                 Button { rotationLocked.toggle(); pokeChrome() } label: {
                     Image(systemName: rotationLocked ? "lock.fill" : "lock.open.fill")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .frame(width: 40, height: 40)
                 }
             }
@@ -324,7 +324,7 @@ struct PlayerView: View {
             HStack(spacing: 2) {
                 Button { saveSnapshot() } label: {
                     Image(systemName: "camera")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .frame(width: 40, height: 40)
                 }
                 if !isMPV {
@@ -343,10 +343,10 @@ struct PlayerView: View {
             if !title.isEmpty || !current.name.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     if !title.isEmpty {
-                        Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
                     }
                     if !current.name.isEmpty {
-                        Text(current.name).font(.system(size: 13)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                        Text(current.name).font(.system(size: 13)).foregroundStyle(Theme.text.opacity(0.8)).lineLimit(1)
                     }
                 }
             }
@@ -360,7 +360,7 @@ struct PlayerView: View {
                 Button { togglePlay(); pokeChrome() } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.body.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .frame(width: 42, height: 42)
                         .background(.ultraThinMaterial, in: Circle())
                 }
@@ -368,7 +368,7 @@ struct PlayerView: View {
                      ? "\(timeLabel(currentTime)) / -\(timeLabel(max(duration - currentTime, 0)))"
                      : "\(timeLabel(currentTime)) / \(timeLabel(duration))")
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
@@ -377,7 +377,7 @@ struct PlayerView: View {
                     if episodes.count > 1 {
                         Button { showEpisodes = true } label: {
                             Image(systemName: "list.bullet")
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Theme.text)
                                 .frame(width: 40, height: 40)
                         }
                     }
@@ -401,7 +401,7 @@ struct PlayerView: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Theme.text)
                             .frame(width: 40, height: 40)
                     }
                 }
@@ -421,7 +421,7 @@ struct PlayerView: View {
             Text(Self.formatSpeed(netSpeedBytes))
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Theme.text)
         .padding(.horizontal, 11).padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
     }
@@ -442,7 +442,7 @@ struct PlayerView: View {
                     } label: {
                         HStack {
                             Text(episodes[i].name.isEmpty ? "第\(i + 1)集" : episodes[i].name)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Theme.text)
                             Spacer()
                             if i == index { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
                         }
@@ -791,7 +791,7 @@ private struct SeekBar: View {
             }
             Text(timeText(fraction * duration))
                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.text)
         }
         .padding(6)
         .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))

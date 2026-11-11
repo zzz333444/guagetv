@@ -18,20 +18,19 @@ struct ProfileView: View {
             .padding(.bottom, 110)
         }
         .background(AmbientBackground(imageURL: nil))
-        .preferredColorScheme(.dark)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             ZStack {
                 Circle().fill(Theme.accent.opacity(0.35)).frame(width: 34, height: 34)
-                Image(systemName: "person.fill").foregroundStyle(.white)
+                Image(systemName: "person.fill").foregroundStyle(Theme.text)
             }
-            Text("默认环境").font(.headline).foregroundStyle(.white)
+            Text("默认环境").font(.headline).foregroundStyle(Theme.text)
             Image(systemName: "chevron.up.chevron.down")
                 .font(.caption).foregroundStyle(Theme.textDim)
             Spacer()
-            Text("编辑").font(.subheadline.weight(.medium)).foregroundStyle(.white)
+            Text("编辑").font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
                 .padding(.horizontal, 16).padding(.vertical, 7)
                 .background(Theme.glass, in: Capsule())
         }
@@ -67,7 +66,7 @@ struct ProfileView: View {
                         .font(.subheadline).foregroundStyle(Theme.textDim)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("0.0").font(.system(size: 34, weight: .bold)).foregroundStyle(.white)
+                    Text("0.0").font(.system(size: 34, weight: .bold)).foregroundStyle(Theme.text)
                     Text("小时").foregroundStyle(Theme.textDim)
                 }
                 HStack(spacing: 16) {
@@ -107,7 +106,7 @@ struct ProfileView: View {
     private func counterCard(title: String, value: String) -> some View {
         GlassCard(padding: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(value).font(.title2.bold()).foregroundStyle(.white)
+                Text(value).font(.title2.bold()).foregroundStyle(Theme.text)
                 Text(title).font(.footnote).foregroundStyle(Theme.textDim)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -25,12 +25,12 @@ struct PosterCell: View {
                         .font(.caption2.weight(.medium))
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(.black.opacity(0.6), in: Capsule())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .padding(6)
                 }
             }
             Text(item.name)
-                .font(.footnote).foregroundStyle(.white.opacity(0.92))
+                .font(.footnote).foregroundStyle(Theme.text.opacity(0.92))
                 .lineLimit(1)
             if !item.year.isEmpty {
                 Text(item.year).font(.caption).foregroundStyle(Theme.textDim)
@@ -66,12 +66,11 @@ struct DetailLoaderView: View {
                 }
                 .foregroundStyle(Theme.textDim)
             } else {
-                ProgressView().tint(.white)
+                ProgressView().tint(Theme.text)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
-        .preferredColorScheme(.dark)
         .task {
             guard site.kind == .cmsJSON || site.kind == .cmsXML else { failed = true; return }
             detail = try? await CMSClient(site: site).detail(id: item.id)
@@ -110,7 +109,6 @@ struct SiteBrowseView: View {
         .navigationTitle(site.name)
         .navigationBarTitleDisplayMode(.inline)
         .background(AmbientBackground(imageURL: items.first?.pic))
-        .preferredColorScheme(.dark)
         .task { if isCMS { await loadHome() } }
     }
 
@@ -149,7 +147,7 @@ struct SiteBrowseView: View {
     private var content: some View {
         if loading {
             Spacer()
-            ProgressView().tint(.white)
+            ProgressView().tint(Theme.text)
             Spacer()
         } else if let errorText {
             Spacer()
@@ -181,14 +179,14 @@ struct SiteBrowseView: View {
                         Task { await loadMore() }
                     } label: {
                         if loadingMore {
-                            ProgressView().tint(.white)
+                            ProgressView().tint(Theme.text)
                         } else {
                             Text("加载更多").font(.subheadline.weight(.medium))
                         }
                     }
                     .padding(.horizontal, 20).padding(.vertical, 10)
                     .background(Theme.glass, in: Capsule())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .padding(.vertical, 18)
                 }
                 Color.clear.frame(height: 96)
@@ -203,7 +201,7 @@ struct SiteBrowseView: View {
             Spacer()
             Image(systemName: site.kind == .spiderJAR ? "nosign" : "hourglass")
                 .font(.largeTitle).foregroundStyle(Theme.textDim)
-            Text(site.name).font(.headline).foregroundStyle(.white)
+            Text(site.name).font(.headline).foregroundStyle(Theme.text)
             Text(pendingText)
                 .font(.subheadline).foregroundStyle(Theme.textDim)
                 .multilineTextAlignment(.center)

@@ -16,13 +16,13 @@ struct LibraryView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("资源库").font(.largeTitle.bold()).foregroundStyle(.white)
+                    Text("资源库").font(.largeTitle.bold()).foregroundStyle(Theme.text)
                     Spacer()
                     Button("编辑") { }
                         .font(.subheadline.weight(.medium))
                         .padding(.horizontal, 16).padding(.vertical, 7)
                         .background(Theme.glass, in: Capsule())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                 }
 
                 if !entries.isEmpty {
@@ -51,7 +51,7 @@ struct LibraryView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "tray.and.arrow.down")
                                 .font(.title2).foregroundStyle(Theme.textDim)
-                            Text("还没有资源").foregroundStyle(.white)
+                            Text("还没有资源").foregroundStyle(Theme.text)
                             Text("导入一个 TVBox 配置或猫源，站点会出现在这里")
                                 .font(.footnote).foregroundStyle(Theme.textDim)
                                 .multilineTextAlignment(.center)
@@ -73,7 +73,7 @@ struct LibraryView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Image(systemName: "tv").foregroundStyle(Theme.accent)
                                     Text(live.name).font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.white).lineLimit(1)
+                                        .foregroundStyle(Theme.text).lineLimit(1)
                                     Text("直播线路").font(.caption).foregroundStyle(Theme.textDim)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,7 +87,6 @@ struct LibraryView: View {
             .padding(.bottom, 110)
         }
         .background(AmbientBackground(imageURL: nil))
-        .preferredColorScheme(.dark)
         .onAppear { refreshLibrary() }
         }
     }
@@ -107,11 +106,11 @@ struct LibraryView: View {
                 ZStack {
                     Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
                     Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.subheadline).foregroundStyle(.white)
+                        .font(.subheadline).foregroundStyle(Theme.text)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.name).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white).lineLimit(1)
+                        .foregroundStyle(Theme.text).lineLimit(1)
                     Text("\(entry.siteCount) 个站点 · \(URL(string: entry.sourceURL)?.host ?? "")")
                         .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 }
@@ -144,7 +143,7 @@ struct LibraryView: View {
                     ZStack {
                         Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
                         Text(String(site.name.prefix(1)))
-                            .font(.headline).foregroundStyle(.white)
+                            .font(.headline).foregroundStyle(Theme.text)
                     }
                     Spacer()
                     Circle().fill(site.kind == .spiderJAR ? Color.orange : Theme.ok)
@@ -152,7 +151,7 @@ struct LibraryView: View {
                 }
                 Text(site.name)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white).lineLimit(1)
+                    .foregroundStyle(Theme.text).lineLimit(1)
                 Text(routeText(site))
                     .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 Text(kindText(site.kind))

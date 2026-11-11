@@ -31,9 +31,9 @@ struct DetailView: View {
                 episodeGrid
                 if !detail.content.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("简介").font(.headline).foregroundStyle(.white)
+                        Text("简介").font(.headline).foregroundStyle(Theme.text)
                         Text(detail.content)
-                            .font(.subheadline).foregroundStyle(.white.opacity(0.75))
+                            .font(.subheadline).foregroundStyle(Theme.text.opacity(0.75))
                             .lineSpacing(4)
                     }
                     .padding(.horizontal, 18)
@@ -42,7 +42,6 @@ struct DetailView: View {
             .padding(.bottom, 40)
         }
         .background(AmbientBackground(imageURL: detail.pic))
-        .preferredColorScheme(.dark)
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
                        header: sel.playHeader ?? header, title: detail.name,
@@ -50,13 +49,13 @@ struct DetailView: View {
         }
         .overlay {
             if resolving {
-                ProgressView().tint(.white)
+                ProgressView().tint(Theme.text)
                     .padding(16)
                     .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
             } else if let playNote {
                 Text(playNote)
                     .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .background(.black.opacity(0.7), in: Capsule())
                     .padding(.bottom, 30)
@@ -78,7 +77,7 @@ struct DetailView: View {
                     .posterFrame()
             }
             VStack(alignment: .leading, spacing: 7) {
-                Text(detail.name).font(.title3.bold()).foregroundStyle(.white)
+                Text(detail.name).font(.title3.bold()).foregroundStyle(Theme.text)
                 if !detail.remarks.isEmpty {
                     Text(detail.remarks).font(.subheadline).foregroundStyle(Theme.accent)
                 }
@@ -99,7 +98,7 @@ struct DetailView: View {
             if !value.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
                     Text(label).foregroundStyle(Theme.textDim)
-                    Text(value).foregroundStyle(.white.opacity(0.88)).lineLimit(2)
+                    Text(value).foregroundStyle(Theme.text.opacity(0.88)).lineLimit(2)
                 }
                 .font(.footnote)
             }
@@ -125,13 +124,13 @@ struct DetailView: View {
     private var episodeGrid: some View {
         let episodes = detail.playGroups.indices.contains(lineIndex) ? detail.playGroups[lineIndex] : []
         return VStack(alignment: .leading, spacing: 12) {
-            Text("选集").font(.headline).foregroundStyle(.white).padding(.horizontal, 18)
+            Text("选集").font(.headline).foregroundStyle(Theme.text).padding(.horizontal, 18)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
                       spacing: 10) {
                 ForEach(episodes) { ep in
                     Text(ep.name)
                         .font(.subheadline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))

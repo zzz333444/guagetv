@@ -7,6 +7,16 @@ struct ContentView: View {
     @State private var config: TVBoxConfig?
     @State private var tab = 0
     @State private var showSearch = false
+    /// 外观与交互 choice: "system" follows the phone, else forced.
+    @AppStorage("themeMode.v1") private var themeMode = "dark"
+
+    private var colorScheme: ColorScheme? {
+        switch themeMode {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
 
     init() {
         // Restore the persisted config (v7): imported lines survive the
@@ -30,7 +40,7 @@ struct ContentView: View {
                 .padding(.horizontal, 18)
                 .padding(.bottom, 10)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(colorScheme)
         .sheet(isPresented: $showSearch) {
             SearchView(config: config)
         }
@@ -52,7 +62,7 @@ struct ContentView: View {
             Button { showSearch = true } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .frame(width: 52, height: 52)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().strokeBorder(Theme.glassStroke, lineWidth: 1))

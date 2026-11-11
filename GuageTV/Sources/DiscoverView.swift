@@ -45,7 +45,6 @@ struct DiscoverView: View {
                 .padding(.bottom, 110)   // clear the floating tab bar
             }
             .background(AmbientBackground(imageURL: displayHero.first?.pic))
-            .preferredColorScheme(.dark)
             .overlay(alignment: .bottomLeading) { editButton }
             .sheet(isPresented: $showLinePicker) { linePicker }
             .onAppear {
@@ -64,7 +63,7 @@ struct DiscoverView: View {
                 Image(systemName: "pencil").font(.footnote.weight(.semibold))
                 Text("编辑").font(.subheadline.weight(.semibold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.text)
             .padding(.horizontal, 16).padding(.vertical, 10)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
@@ -88,7 +87,7 @@ struct DiscoverView: View {
                     } label: {
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.name).foregroundStyle(.white)
+                                Text(entry.name).foregroundStyle(Theme.text)
                                 Text("\(entry.siteCount) 个站点")
                                     .font(.caption).foregroundStyle(Theme.textDim)
                             }
@@ -111,7 +110,6 @@ struct DiscoverView: View {
                     Button("完成") { showLinePicker = false }
                 }
             }
-            .preferredColorScheme(.dark)
         }
         .presentationDetents([.medium])
     }
@@ -190,22 +188,22 @@ struct DiscoverView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(item.name)
                     .font(.system(size: 30, weight: .heavy))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .lineLimit(2)
                 HStack(spacing: 8) {
                     if !item.remarks.isEmpty { Text(item.remarks) }
                     if !item.year.isEmpty { Text(item.year) }
                 }
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(Theme.text.opacity(0.8))
                 if !item.score.isEmpty {
                     HStack(spacing: 6) {
                         Image(systemName: "star.fill").foregroundStyle(.yellow)
                         Text(item.score).fontWeight(.semibold)
-                        Text("评分").foregroundStyle(.white.opacity(0.6))
+                        Text("评分").foregroundStyle(Theme.text.opacity(0.6))
                     }
                     .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                 }
             }
             .padding(.horizontal, 18)
@@ -224,7 +222,7 @@ struct DiscoverView: View {
     private func posterRow(title: String, items: [VodItem]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(title).font(.title3.bold()).foregroundStyle(.white)
+                Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.subheadline.weight(.semibold))
@@ -267,12 +265,12 @@ struct DiscoverView: View {
                         .font(.caption2.weight(.medium))
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(.black.opacity(0.6), in: Capsule())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.text)
                         .padding(6)
                 }
             }
             Text(item.name)
-                .font(.footnote).foregroundStyle(.white.opacity(0.92))
+                .font(.footnote).foregroundStyle(Theme.text.opacity(0.92))
                 .lineLimit(1).frame(width: 112, alignment: .leading)
             if !item.year.isEmpty {
                 Text(item.year).font(.caption).foregroundStyle(Theme.textDim)
@@ -282,14 +280,14 @@ struct DiscoverView: View {
 
     private var posterPlaceholder: some View {
         Rectangle().fill(Color.white.opacity(0.08))
-            .overlay(Image(systemName: "film").foregroundStyle(.white.opacity(0.3)))
+            .overlay(Image(systemName: "film").foregroundStyle(Theme.text.opacity(0.3)))
     }
 
     // MARK: Category browse
 
     private var categoryBrowse: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("分类浏览").font(.title3.bold()).foregroundStyle(.white)
+            Text("分类浏览").font(.title3.bold()).foregroundStyle(Theme.text)
                 .padding(.horizontal, 18)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
                       spacing: 12) {
@@ -303,7 +301,7 @@ struct DiscoverView: View {
                                     .foregroundStyle(Theme.accent)
                                 Text(site.name)
                                     .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Theme.text)
                                     .lineLimit(1)
                                 Spacer()
                             }

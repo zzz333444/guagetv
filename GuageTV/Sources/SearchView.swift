@@ -10,6 +10,8 @@ struct SearchView: View {
     @State private var results: [(site: TVBoxConfig.Site, items: [VodItem])] = []
     @State private var searching = false
     @State private var searched = false
+    @State private var progressText = ""
+    @State private var failureNote = ""
 
     private var cmsSites: [TVBoxConfig.Site] {
         (config?.sites ?? []).filter { $0.kind == .cmsJSON || $0.kind == .cmsXML }
@@ -30,12 +32,11 @@ struct SearchView: View {
                 content
             }
             .background(AmbientBackground(imageURL: nil))
-            .preferredColorScheme(.dark)
             .navigationTitle("搜索")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }.foregroundStyle(.white)
+                    Button("关闭") { dismiss() }.foregroundStyle(Theme.text)
                 }
             }
         }
@@ -46,7 +47,7 @@ struct SearchView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.textDim)
                 TextField("搜片名", text: $keyword)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.text)
                     .submitLabel(.search)
                     .onSubmit { Task { await run() } }
             }
@@ -68,10 +69,10 @@ struct SearchView: View {
             hint("先在设置里导入一个配置，搜索才能开工")
         } else if searching && results.isEmpty {
             Spacer()
-            ProgressView().tint(.white)
+            ProgressView().tint(Theme.text)
             Spacer()
         } else if searched && results.isEmpty {
-            hint("没有搜到结果")
+            hint(failureNote.isEmpty ? "没有搜到结果" : "没有搜到结果\n\(failureNote)")
         } else if !searched {
             hint("跨已导入的 CMS / py / JS 站点一起搜")
         } else {
@@ -80,7 +81,7 @@ struct SearchView: View {
                     ForEach(results, id: \.site.id) { group in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(group.site.name)
-                                .font(.headline).foregroundStyle(.white)
+                                .font(.headline).foregroundStyle(Theme.text)
                                 .padding(.horizontal, 18)
                             LazyVGrid(columns: columns, spacing: 14) {
                                 ForEach(group.items) { item in
@@ -101,8 +102,9 @@ struct SearchView: View {
             }
             if searching {
                 HStack(spacing: 8) {
-                    ProgressView().tint(.white)
-                    Text("还在搜其他站点…").font(.footnote).foregroundStyle(Theme.textDim)
+                    ProgressView().tint(Theme.text)
+                    Text(progressText.isEmpty ? "还在搜其他站点…" : progressText)
+                        .font(.footnote).foregroundStyle(Theme.textDim)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
@@ -134,32 +136,83 @@ struct SearchView: View {
         }
     }
 
+    /// Race work against a deadline: one dead or crawling site must
+    /// not stall the whole search (the old serial run could sit on a
+    /// single host for a minute and look exactly like "broken").
+    private func withTimeout<T>(_ seconds: Double,
+                                _ work: @escaping () async -> T?) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await work() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
         searching = true
         searched = false
         results = []
+        failureNote = ""
+        let total = cmsSites.count + pySites.count + jsSites.count
+        var done = 0
+        var responded = 0
         var out: [(site: TVBoxConfig.Site, items: [VodItem])] = []
-        for site in cmsSites {
-            if let items = try? await CMSClient(site: site).search(keyword: kw), !items.isEmpty {
-                out.append((site, items))
-                results = out
+
+        func tick() {
+            done += 1
+            progressText = "已搜 \(done)/\(total) 个站点 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
+        }
+
+        // CMS sites are independent HTTP calls: search them all at
+        // once instead of one by one.
+        let cms = cmsSites
+        await withTaskGroup(of: (TVBoxConfig.Site, [VodItem]?).self) { group in
+            for site in cms {
+                group.addTask {
+                    let items = await withTimeout(12) {
+                        try? await CMSClient(site: site).search(keyword: kw)
+                    }
+                    return (site, items)
+                }
+            }
+            for await (site, items) in group {
+                if let items {
+                    responded += 1
+                    if !items.isEmpty {
+                        out.append((site, items))
+                        results = out
+                    }
+                }
+                tick()
             }
         }
         // The py and JS bridges each hold ONE loaded site, so their
-        // searches run serially; results stream in per site.
+        // searches still run serially — but each has a deadline.
         for site in pySites {
-            if let items = await searchPy(site, keyword: kw), !items.isEmpty {
-                out.append((site, items))
-                results = out
+            let items = await withTimeout(15) { await searchPy(site, keyword: kw) } ?? nil
+            if let items {
+                responded += 1
+                if !items.isEmpty { out.append((site, items)); results = out }
             }
+            tick()
         }
         for site in jsSites {
-            if let items = await searchJS(site, keyword: kw), !items.isEmpty {
-                out.append((site, items))
-                results = out
+            let items = await withTimeout(15) { await searchJS(site, keyword: kw) } ?? nil
+            if let items {
+                responded += 1
+                if !items.isEmpty { out.append((site, items)); results = out }
             }
+            tick()
+        }
+        if out.isEmpty {
+            failureNote = "共搜了 \(total) 个站，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
         }
         searched = true
         searching = false

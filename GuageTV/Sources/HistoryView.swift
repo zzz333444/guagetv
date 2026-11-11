@@ -17,7 +17,7 @@ struct HistoryView: View {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.largeTitle).foregroundStyle(Theme.textDim)
                         Text("还没有浏览记录")
-                            .font(.headline).foregroundStyle(.white)
+                            .font(.headline).foregroundStyle(Theme.text)
                         Text("看过的剧会出现在这里，下次点开直接续播")
                             .font(.subheadline).foregroundStyle(Theme.textDim)
                     }
@@ -40,7 +40,6 @@ struct HistoryView: View {
                 }
             }
             .background(AmbientBackground(imageURL: history.entries.first?.pic))
-            .preferredColorScheme(.dark)
             .navigationTitle("浏览记录")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -71,7 +70,7 @@ struct HistoryView: View {
                 .posterFrame()
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.name).font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white).lineLimit(1)
+                    .foregroundStyle(Theme.text).lineLimit(1)
                 Text(subtitle(entry)).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 if entry.durationSeconds > 0 {
                     ProgressView(value: min(entry.positionSeconds / entry.durationSeconds, 1))
@@ -81,11 +80,11 @@ struct HistoryView: View {
             }
             Spacer()
             Image(systemName: "play.circle.fill")
-                .font(.title2).foregroundStyle(.white.opacity(0.9))
+                .font(.title2).foregroundStyle(Theme.text.opacity(0.9))
             NavigationLink {
                 HistoryDetailDestination(entry: entry)
             } label: {
-                Text("详情").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                Text("详情").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(Theme.glass, in: Capsule())
             }
@@ -145,7 +144,6 @@ private struct HistoryDetailDestination: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: entry.pic))
-        .preferredColorScheme(.dark)
     }
 
     private var resolved: (site: TVBoxConfig.Site, parses: [TVBoxConfig.Parse])? {

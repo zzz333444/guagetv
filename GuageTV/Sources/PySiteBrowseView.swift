@@ -34,7 +34,7 @@ struct PySiteBrowseView: View {
                         .padding(18)
                 }
             } else if loading {
-                ProgressView().tint(.white)
+                ProgressView().tint(Theme.text)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 0) {
@@ -90,7 +90,7 @@ struct PySiteBrowseView: View {
             .padding(.top, 6)
             .padding(.bottom, 110)
             if loadingMore {
-                ProgressView().tint(.white).padding(.bottom, 120)
+                ProgressView().tint(Theme.text).padding(.bottom, 120)
             }
         }
     }
@@ -252,12 +252,11 @@ struct PyDetailLoaderView: View {
                         .padding(18)
                 }
             } else {
-                ProgressView().tint(.white)
+                ProgressView().tint(Theme.text)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
-        .preferredColorScheme(.dark)
         .task {
             do {
                 // The bridge holds ONE spider at a time; make sure it

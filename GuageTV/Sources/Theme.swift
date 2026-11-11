@@ -1,13 +1,29 @@
 import SwiftUI
+import UIKit
 
 /// Rex-style visual system: ambient artwork glow behind everything, frosted
 /// glass cards, floating pill tab bar. All neutral surfaces derive from
 /// these helpers so every screen shares one look.
 enum Theme {
-    static let bg = Color(red: 0.05, green: 0.05, blue: 0.08)
-    static let glass = Color.white.opacity(0.08)
-    static let glassStroke = Color.white.opacity(0.10)
-    static let textDim = Color.white.opacity(0.55)
+    /// Adaptive surfaces: identical to the original palette in dark
+    /// mode (the app's native look), light counterparts in light mode.
+    /// The mode itself is chosen in 外观与交互 (system / light / dark)
+    /// and applied once at the app root.
+    private static func dyn(dark: UIColor, light: UIColor) -> Color {
+        Color(UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light })
+    }
+
+    static let bg = dyn(dark: UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1),
+                        light: UIColor(red: 0.96, green: 0.96, blue: 0.98, alpha: 1))
+    static let glass = dyn(dark: UIColor.white.withAlphaComponent(0.08),
+                           light: UIColor.black.withAlphaComponent(0.05))
+    static let glassStroke = dyn(dark: UIColor.white.withAlphaComponent(0.10),
+                                 light: UIColor.black.withAlphaComponent(0.08))
+    static let text = dyn(dark: .white, light: UIColor(red: 0.07, green: 0.07, blue: 0.10, alpha: 1))
+    static let textDim = dyn(dark: UIColor.white.withAlphaComponent(0.55),
+                             light: UIColor.black.withAlphaComponent(0.55))
+    static let scrim = dyn(dark: UIColor.black.withAlphaComponent(0.25),
+                           light: UIColor.white.withAlphaComponent(0.25))
     static let accent = Color(red: 0.55, green: 0.45, blue: 0.95)
     static let ok = Color(red: 0.35, green: 0.85, blue: 0.45)
 }
@@ -26,7 +42,7 @@ struct AmbientBackground: View {
                     .opacity(0.45)
                     .saturation(1.2)
             }
-            LinearGradient(colors: [Color.black.opacity(0.25), Theme.bg.opacity(0.88)],
+            LinearGradient(colors: [Theme.scrim, Theme.bg.opacity(0.88)],
                            startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
