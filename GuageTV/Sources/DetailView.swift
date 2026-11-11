@@ -137,7 +137,6 @@ struct DetailView: View {
             }
         }
     }
-}
 
     private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
         guard let playerResolver else {
