@@ -20,6 +20,8 @@ final class MPVController: ObservableObject {
     @Published var isBuffering = false
     /// Demuxer cache download rate, bytes/sec (mpv's cache-speed).
     @Published var netSpeedBytes: Double = 0
+    /// "1920×1080 · hevc" once mpv reports the video size.
+    @Published var specText: String = ""
 
     func setSpeed(_ value: Double) {
         speed = value
@@ -57,6 +59,7 @@ final class MPVController: ObservableObject {
         createRenderContext()
         let scale = UserDefaults.standard.object(forKey: "subtitleScale") as? Double ?? 1.0
         setProperty("sub-scale", String(scale))
+        specText = ""
         command(["loadfile", url.absoluteString])
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.poll()
@@ -193,6 +196,12 @@ final class MPVController: ObservableObject {
                 || stringProperty("seeking") == "yes"
                 || stringProperty("core-idle") == "yes")
         netSpeedBytes = stringProperty("cache-speed").flatMap(Double.init) ?? 0
+        if specText.isEmpty,
+           let w = stringProperty("width"), let h = stringProperty("height"),
+           w != "0", h != "0" {
+            let codec = stringProperty("video-codec") ?? ""
+            specText = codec.isEmpty ? "\(w)×\(h)" : "\(w)×\(h) · \(codec)"
+        }
     }
 }
 

@@ -138,8 +138,8 @@ struct SiteBrowseView: View {
         Text(title)
             .font(.subheadline.weight(selectedTid == tid ? .semibold : .regular))
             .padding(.horizontal, 14).padding(.vertical, 7)
-            .background(selectedTid == tid ? Color.white : Color.white.opacity(0.10), in: Capsule())
-            .foregroundStyle(selectedTid == tid ? .black : .white.opacity(0.85))
+            .background(selectedTid == tid ? Color.white : Theme.glass, in: Capsule())
+            .foregroundStyle(selectedTid == tid ? .black : Theme.text.opacity(0.85))
             .onTapGesture { Task { await selectClass(tid) } }
     }
 

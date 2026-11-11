@@ -92,6 +92,10 @@ struct PlayerView: View {
     private var isPlaying: Bool { isMPV ? mpv.isPlaying : native.isPlaying }
     private var isBuffering: Bool { isMPV ? mpv.isBuffering : native.isBuffering }
     private var netSpeedBytes: Double { isMPV ? mpv.netSpeedBytes : native.netSpeedBytes }
+    private var specText: String { isMPV ? mpv.specText : native.specText }
+    @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
+    @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
+    @State private var didSkipIntro = false
     private var currentTime: Double { isMPV ? mpv.currentTime : native.currentTime }
     private var duration: Double { isMPV ? mpv.duration : native.duration }
     private var seekStep: Double { Double(UserDefaults.standard.object(forKey: "seekStep") as? Int ?? 15) }
@@ -118,7 +122,7 @@ struct PlayerView: View {
                 }
                 if !showChrome {
                     VStack {
-                        HStack { speedPill; Spacer() }
+                        HStack(spacing: 8) { speedPill; specPill; Spacer() }
                         Spacer()
                     }
                     .padding(.horizontal, 14)
@@ -139,10 +143,17 @@ struct PlayerView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { scheduleChromeHide() }
-        .onChange(of: duration) { _ in applyResumeIfNeeded() }
+        .onChange(of: duration) { _ in
+            applyResumeIfNeeded()
+            applyIntroSkipIfNeeded()
+        }
+        .onChange(of: currentTime) { _ in checkOutroSkip() }
         .task { await saveProgressLoop() }
         .onDisappear { saveProgress(accumulate: false) }
-        .onChange(of: index) { _ in pokeChrome() }
+        .onChange(of: index) { _ in
+            didSkipIntro = false
+            pokeChrome()
+        }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
     }
 
@@ -414,6 +425,20 @@ struct PlayerView: View {
 
     /// Network rate readout — top-left, next to the close controls
     /// while the chrome is up, standalone in the corner when it hides.
+    @ViewBuilder
+    private var specPill: some View {
+        if !specText.isEmpty {
+            HStack(spacing: 5) {
+                Image(systemName: "rectangle.on.rectangle").font(.system(size: 10))
+                Text(specText).font(.caption2.weight(.medium)).monospacedDigit()
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+        }
+    }
+
     private var speedPill: some View {
         HStack(spacing: 5) {
             Image(systemName: "arrow.down")
@@ -424,6 +449,20 @@ struct PlayerView: View {
         .foregroundStyle(Theme.text)
         .padding(.horizontal, 11).padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    static func codecName(_ subType: FourCharCode) -> String {
+        let bytes: [UInt8] = [UInt8((subType >> 24) & 0xff), UInt8((subType >> 16) & 0xff),
+                              UInt8((subType >> 8) & 0xff), UInt8(subType & 0xff)]
+        let code = String(bytes: bytes, encoding: .ascii) ?? ""
+        switch code {
+        case "avc1": return "H.264"
+        case "hvc1", "hev1": return "H.265"
+        case "vp09": return "VP9"
+        case "av01": return "AV1"
+        case "mp4v": return "MPEG-4"
+        default: return code
+        }
     }
 
     static func formatSpeed(_ bytesPerSec: Double) -> String {
@@ -591,12 +630,16 @@ final class NativeController: ObservableObject {
     @Published var isBuffering = false
     /// Download rate from the item's access log, bytes/sec.
     @Published var netSpeedBytes: Double = 0
+    /// "1920×1080 · H.265" once the current item reports its video
+    /// size; empty until then (spec pill hides itself).
+    @Published var specText: String = ""
     private var timeObserver: Any?
     private var loadedURL: URL?
     private var lastBytes: Int64 = 0
     private var lastBytesAt: Date?
 
     func load(url: URL, header: [String: String]) {
+        specText = ""
         if loadedURL == url, player.currentItem != nil {
             player.play()
             return
@@ -615,6 +658,20 @@ final class NativeController: ObservableObject {
                 self.currentTime = time.seconds.isFinite ? time.seconds : 0
                 if let d = self.player.currentItem?.duration.seconds, d.isFinite {
                     self.duration = d
+                    if self.specText.isEmpty, let item = self.player.currentItem {
+                        let size = item.presentationSize
+                        if size.width > 0 {
+                            var text = "\(Int(size.width))×\(Int(size.height))"
+                            Task { @MainActor in
+                                if let track = try? await item.asset.loadTracks(withMediaType: .video).first,
+                                   let desc = track.formatDescriptions.first {
+                                    let codec = PlayerView.codecName(CMFormatDescriptionGetMediaSubType(desc))
+                                    if !codec.isEmpty { self.specText = text + " · " + codec }
+                                }
+                            }
+                            self.specText = text
+                        }
+                    }
                 }
                 self.isPlaying = self.player.timeControlStatus == .playing
                 self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate

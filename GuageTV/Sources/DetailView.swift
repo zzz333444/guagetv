@@ -112,8 +112,8 @@ struct DetailView: View {
                     Text(detail.playFrom[i])
                         .font(.subheadline.weight(lineIndex == i ? .semibold : .regular))
                         .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(lineIndex == i ? Color.white : Color.white.opacity(0.10), in: Capsule())
-                        .foregroundStyle(lineIndex == i ? .black : .white.opacity(0.85))
+                        .background(lineIndex == i ? Color.white : Theme.glass, in: Capsule())
+                        .foregroundStyle(lineIndex == i ? .black : Theme.text.opacity(0.85))
                         .onTapGesture { lineIndex = i }
                 }
             }

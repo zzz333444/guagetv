@@ -77,9 +77,9 @@ struct ContentView: View {
                 Image(systemName: icon).font(.system(size: 19))
                 Text(label).font(.system(size: 10))
             }
-            .foregroundStyle(tab == index ? .white : .white.opacity(0.55))
+            .foregroundStyle(tab == index ? Theme.text : Theme.text.opacity(0.55))
             .frame(width: 62, height: 46)
-            .background(tab == index ? Color.white.opacity(0.14) : Color.clear, in: Capsule())
+            .background(tab == index ? Theme.text.opacity(0.14) : Color.clear, in: Capsule())
         }
     }
 }

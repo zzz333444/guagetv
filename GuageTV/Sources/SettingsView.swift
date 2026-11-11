@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.09 · 直播与节目单"
+    static let buildLabel = "v1.10 · 播放体验"
 
     var body: some View {
         NavigationStack {
@@ -397,6 +397,9 @@ private struct SettingsPage<Content: View>: View {
 /// 播放： default player engine — "auto" picks by file extension.
 struct PlaySettingsView: View {
     @AppStorage("enginePreference") private var engine = "auto"
+    @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
+    @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
+    private let skipOptions = [0, 30, 60, 90, 120, 180]
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -413,6 +416,30 @@ struct PlaySettingsView: View {
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("跳过片头片尾").font(.headline).foregroundStyle(Theme.text)
+                    skipPicker(title: "片头跳过", selection: $skipIntroSeconds)
+                    skipPicker(title: "片尾跳过", selection: $skipOutroSeconds)
+                    Text("每集开始自动快进片头设定的秒数；片尾剩余不足设定秒数时自动切下一集。0 = 关闭。续播时以续播位置为准，不再叠加跳片头。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+
+    private func skipPicker(title: String, selection: Binding<Int>) -> some View {
+        HStack {
+            Text(title).font(.subheadline).foregroundStyle(Theme.text)
+            Spacer()
+            Picker(title, selection: selection) {
+                ForEach(skipOptions, id: \.self) { seconds in
+                    Text(seconds == 0 ? "关" : "\(seconds) 秒").tag(seconds)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .tint(Theme.accent)
         }
     }
 }
