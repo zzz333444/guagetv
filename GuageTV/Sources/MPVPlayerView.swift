@@ -114,7 +114,7 @@ final class MPVController: ObservableObject {
             width: Int(w), height: Int(hgt),
             bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: Int(w) * 4,
             space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapByteOrderInfo.order32Little.rawValue),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGImageByteOrderInfo.order32Little.rawValue),
             provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
         )
     }
