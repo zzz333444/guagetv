@@ -46,4 +46,9 @@ find "$DLDIR" -name '*.so' | while read -r FULL_EXT; do
     echo "${RELATIVE_EXT%.so}.fwork" > "$APP_DIR/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME.origin"
 done
 
+# Embed the Python framework binary itself (the manual counterpart of
+# Xcode's Embed Frameworks phase, so the whole install is one script).
+rm -rf "$APP_DIR/Frameworks/Python.framework"
+cp -R "$XCF/ios-arm64/Python.framework" "$APP_DIR/Frameworks/Python.framework"
+
 echo "Python install complete: $(ls "$APP_DIR/Frameworks" | wc -l) frameworks in bundle"
