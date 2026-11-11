@@ -49,6 +49,8 @@ targets:
       # the module in CI (run #29), so this stays fully manual.
       FRAMEWORK_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Python.xcframework/ios-arm64"
       OTHER_LDFLAGS: "$(inherited) -framework Python"
+      SWIFT_OBJC_BRIDGING_HEADER: GuageTV/Sources/GuageTV-Bridging-Header.h
+      HEADER_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Python.xcframework/ios-arm64/Python.framework/Headers"
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     # Stage 1: add Python.xcframework (python-apple-support) as an embedded
     # framework here, plus the libpython / ssl / crypto dylibs it ships.
