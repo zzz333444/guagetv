@@ -94,7 +94,7 @@ struct SettingsView: View {
         }
         status = "加载中…"
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let data = try await NetFetch.data(from: url)
             if MaoYuanAdapter.looksLikeMaoYuan(data) {
                 config = try MaoYuanAdapter.convert(from: data)
                 status = "已加载（猫源配置已自动转换）"

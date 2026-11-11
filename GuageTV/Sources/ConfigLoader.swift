@@ -131,7 +131,7 @@ enum ConfigLoader {
     }
 
     static func load(url: URL) async throws -> TVBoxConfig {
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let data = try await NetFetch.data(from: url)
         return try load(from: data)
     }
 }
