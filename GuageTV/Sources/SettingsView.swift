@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.10 · 播放体验"
+    static let buildLabel = "v1.11 · 画中画与刷新"
 
     var body: some View {
         NavigationStack {
@@ -94,6 +94,11 @@ struct SettingsView: View {
                                         .padding(.horizontal, 12).padding(.vertical, 6)
                                         .background(Theme.glass, in: Capsule())
                                         .foregroundStyle(Theme.text)
+                                    }
+                                    Button {
+                                        refreshEntry(entry)
+                                    } label: {
+                                        Image(systemName: "arrow.clockwise").foregroundStyle(Theme.textDim)
                                     }
                                     Button(role: .destructive) {
                                         config = ConfigLibrary.remove(id: entry.id)
@@ -209,6 +214,29 @@ struct SettingsView: View {
 
     /// A .py / .js URL becomes a single-site line: the file is stored
     /// locally and a synthetic one-site config joins the library.
+    /// 刷新一条线路：按原地址重新拉取、校验、覆盖本地副本；
+    /// 正在用的线路刷新后立即换上新内容。
+    private func refreshEntry(_ entry: ConfigLibrary.Entry) {
+        guard let source = ConfigLibrary.sourceURL(id: entry.id),
+              let url = URL(string: source) else {
+            status = "这条线路没有来源地址，刷新不了"
+            return
+        }
+        status = "正在刷新 \(entry.name)…"
+        Task {
+            do {
+                let data = try await NetFetch.dataForConfig(from: url)
+                let parsed = try TVBoxConfig.load(from: data)
+                let updated = ConfigLibrary.add(data: data, sourceURL: source, siteCount: parsed.sites.count)
+                entries = ConfigLibrary.entries()
+                if updated.id == ConfigLibrary.activeID() { config = parsed }
+                status = "已刷新 \(entry.name)：\(parsed.sites.count) 个站点"
+            } catch {
+                status = "刷新失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
     private func importSingleFile(url: URL, kind: String) async {
         status = "下载中…"
         do {

@@ -142,7 +142,11 @@ struct PlayerView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { scheduleChromeHide() }
+        .onAppear {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            scheduleChromeHide()
+        }
         .onChange(of: duration) { _ in
             applyResumeIfNeeded()
             applyIntroSkipIfNeeded()
@@ -165,7 +169,8 @@ struct PlayerView: View {
             if isMPV {
                 MPVPlayerView(url: url, header: header, controller: mpv)
             } else {
-                AVPlayerLayerView(player: native.player)
+                AVPlayerLayerView(player: native.player,
+                                  onLayer: { native.setupPiP(layer: $0) })
                     .ignoresSafeArea()
                     .onAppear { native.load(url: url, header: header) }
                     .onDisappear { native.pause() }
@@ -339,6 +344,14 @@ struct PlayerView: View {
                         .frame(width: 40, height: 40)
                 }
                 if !isMPV {
+                    if !isMPV, AVPictureInPictureController.isPictureInPictureSupported() {
+                        Button { native.togglePiP() } label: {
+                            Image(systemName: native.isPiPActive ? "pip.exit" : "pip.enter")
+                                .font(.body.weight(.semibold)).foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                    }
                     RoutePickerView()
                         .frame(width: 40, height: 40)
                 }
@@ -573,6 +586,24 @@ struct PlayerView: View {
         showToast("已续播至 " + timeLabel(resumeAt))
     }
 
+    /// 跳片头：每集一次，时长已知后执行；有续播位置时以续播为准。
+    private func applyIntroSkipIfNeeded() {
+        let intro = Double(skipIntroSeconds)
+        guard intro > 0, !didSkipIntro, duration > intro + 30 else { return }
+        didSkipIntro = true
+        if resumeAt > 5 { return }
+        seek(to: intro)
+        showToast("已跳过片头 " + timeLabel(intro))
+    }
+
+    /// 跳片尾：剩余时长进入片尾窗口且有下一集时自动切集。
+    private func checkOutroSkip() {
+        let outro = Double(skipOutroSeconds)
+        guard outro > 0, duration > 0, index < episodes.count - 1 else { return }
+        let remaining = duration - currentTime
+        if remaining > 0, remaining <= outro { index += 1 }
+    }
+
     private func saveProgress(accumulate: Bool = true) {
         guard let historyID else { return }
         HistoryStore.shared.updatePosition(
@@ -621,7 +652,7 @@ struct PlayerView: View {
 
 // MARK: - Native engine controller
 
-final class NativeController: ObservableObject {
+final class NativeController: NSObject, ObservableObject {
     let player = AVPlayer()
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
@@ -633,6 +664,8 @@ final class NativeController: ObservableObject {
     /// "1920×1080 · H.265" once the current item reports its video
     /// size; empty until then (spec pill hides itself).
     @Published var specText: String = ""
+    @Published var isPiPActive = false
+    private var pipController: AVPictureInPictureController?
     private var timeObserver: Any?
     private var loadedURL: URL?
     private var lastBytes: Int64 = 0
@@ -664,7 +697,7 @@ final class NativeController: ObservableObject {
                             var text = "\(Int(size.width))×\(Int(size.height))"
                             Task { @MainActor in
                                 if let track = try? await item.asset.loadTracks(withMediaType: .video).first,
-                                   let desc = track.formatDescriptions.first {
+                                   let desc = track.formatDescriptions.first as? CMFormatDescription {
                                     let codec = PlayerView.codecName(CMFormatDescriptionGetMediaSubType(desc))
                                     if !codec.isEmpty { self.specText = text + " · " + codec }
                                 }
@@ -760,12 +793,14 @@ private final class PlayerLayerUIView: UIView {
 
 private struct AVPlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
+    var onLayer: ((AVPlayerLayer) -> Void)?
 
     func makeUIView(context: Context) -> PlayerLayerUIView {
         let view = PlayerLayerUIView()
         view.backgroundColor = .black
         view.playerLayer.player = player
         view.playerLayer.videoGravity = .resizeAspect
+        onLayer?(view.playerLayer)
         return view
     }
 
@@ -892,4 +927,15 @@ private struct VolumeHost: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+}
+
+extension NativeController: AVPictureInPictureControllerDelegate {
+    func pictureInPictureControllerDidStartPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController) {
+        isPiPActive = true
+    }
+    func pictureInPictureControllerDidStopPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController) {
+        isPiPActive = false
+    }
 }
