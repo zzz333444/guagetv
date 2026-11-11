@@ -127,7 +127,69 @@ enum ConfigLoader {
     }
 
     static func load(from data: Data) throws -> TVBoxConfig {
-        try JSONDecoder().decode(TVBoxConfig.self, from: cleaned(data))
+        if let cfg = try? JSONDecoder().decode(TVBoxConfig.self, from: cleaned(data)) {
+            return cfg
+        }
+        return try lenientLoad(from: data)
+    }
+
+    /// Tolerant second pass for real-world configs: strict Codable fails
+    /// the WHOLE file when a single site uses a string where an Int is
+    /// declared, a non-string header value, etc. Here each site/section is
+    /// coerced or dropped individually so one rotten entry can't kill the
+    /// other 150.
+    private static func lenientLoad(from data: Data) throws -> TVBoxConfig {
+        let cleanedData = cleaned(data)
+        guard let obj = try JSONSerialization.jsonObject(with: cleanedData) as? [String: Any] else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "top level is not a JSON object"))
+        }
+        var out = obj
+
+        if let rawSites = obj["sites"] as? [[String: Any]] {
+            out["sites"] = rawSites.compactMap { raw -> [String: Any]? in
+                guard let key = raw["key"] as? String,
+                      let name = raw["name"] as? String else { return nil }
+                var s = raw
+                if let t = s["type"] as? String { s["type"] = Int(t) ?? 3 }
+                if s["type"] == nil { s["type"] = 3 }
+                if s["api"] == nil { s["api"] = "" }
+                for f in ["searchable", "quickSearch", "filterable", "changeable", "playerType", "timeout"] {
+                    if let v = s[f] as? String {
+                        if let n = Int(v) { s[f] = n } else { s[f] = nil }
+                    }
+                }
+                if let h = s["header"] as? [String: Any],
+                   h.values.contains(where: { !($0 is String) }) {
+                    s["header"] = h.compactMapValues { $0 as? String }
+                }
+                if var style = s["style"] as? [String: Any],
+                   let r = style["ratio"] as? String {
+                    if let d = Double(r) { style["ratio"] = d } else { style["ratio"] = nil }
+                    s["style"] = style
+                }
+                return s
+            }
+        }
+        for section in ["flags", "ads"] {
+            if let arr = obj[section] as? [Any] {
+                out[section] = arr.compactMap { $0 as? String }
+            }
+        }
+        for section in ["lives", "parses", "doh"] {
+            if let arr = obj[section] as? [Any] {
+                out[section] = arr.filter { element in
+                    guard let d = try? JSONSerialization.data(withJSONObject: element) else { return false }
+                    switch section {
+                    case "lives": return (try? JSONDecoder().decode(TVBoxConfig.Live.self, from: d)) != nil
+                    case "parses": return (try? JSONDecoder().decode(TVBoxConfig.Parse.self, from: d)) != nil
+                    default: return (try? JSONDecoder().decode(TVBoxConfig.Doh.self, from: d)) != nil
+                    }
+                }
+            }
+        }
+        let rebuilt = try JSONSerialization.data(withJSONObject: out)
+        return try JSONDecoder().decode(TVBoxConfig.self, from: rebuilt)
     }
 
     static func load(url: URL) async throws -> TVBoxConfig {

@@ -9,7 +9,7 @@ struct SettingsView: View {
     @State private var status = "还没有导入配置"
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v5 · UA通道+图标"
+    static let buildLabel = "v6 · 宽容解析"
 
     var body: some View {
         NavigationStack {
@@ -123,7 +123,9 @@ struct SettingsView: View {
                 status = "已加载 TVBox 配置"
             }
         } catch {
-            status = "加载失败：取到了内容，但不是能识别的配置格式（多半是网页或加密配置）"
+            let head = String(decoding: data.prefix(60), as: UTF8.self)
+                .replacingOccurrences(of: "\n", with: " ")
+            status = "加载失败：内容无法识别（\(data.count) 字节，开头：\(head)）"
         }
     }
 }
