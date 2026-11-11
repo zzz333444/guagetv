@@ -13,7 +13,9 @@ set -e
 
 XCF="$PROJECT_DIR/Python.xcframework"
 APP_DIR="$CODESIGNING_FOLDER_PATH"
-DEST="$APP_DIR/python/lib"
+# Capital P on purpose: the stdlib installs INTO the bundled
+# GuageTV/Python folder resource (deterministic on any filesystem).
+DEST="$APP_DIR/Python/lib"
 
 mkdir -p "$DEST"
 if [ -d "$XCF/lib" ]; then
@@ -31,7 +33,7 @@ find "$DLDIR" -name '*.so' | while read -r FULL_EXT; do
     EXT=$(basename "$FULL_EXT")
     MODULE_NAME=$(echo "$EXT" | cut -d. -f1)
     RELATIVE_EXT=${FULL_EXT#$APP_DIR/}
-    PYTHON_EXT=${RELATIVE_EXT#python/lib/$PYVER/lib-dynload/}
+    PYTHON_EXT=${RELATIVE_EXT#Python/lib/$PYVER/lib-dynload/}
     FULL_MODULE_NAME=$(echo "${PYTHON_EXT%.so}" | tr '/' '.')
     FRAMEWORK_FOLDER="Frameworks/$FULL_MODULE_NAME.framework"
     BUNDLE_ID=$(echo "$PRODUCT_BUNDLE_IDENTIFIER.$FULL_MODULE_NAME" | tr '_' '-')
