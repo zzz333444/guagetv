@@ -3,6 +3,22 @@ options:
   bundleIdPrefix: com.guage
   deploymentTarget:
     iOS: "16.0"
+packages:
+  # KSPlayer: dual-engine player (AVPlayer + mpv/FFmpeg via its MPVPlayer
+  # module — libass ASS subtitles, dav1d AV1, MKV/FLV demuxing). GPL-3.0;
+  # this project is personal-use and its source stays public in this repo.
+  KSPlayer:
+    url: https://github.com/kingslay/KSPlayer.git
+    branch: main
+targets:
+  GuageTV:
+    type: application
+    platform: iOS
+    dependencies:
+      - package: KSPlayer
+        product: KSPlayerUI
+      - package: KSPlayer
+        product: MPVPlayer
 targets:
   GuageTV:
     type: application
