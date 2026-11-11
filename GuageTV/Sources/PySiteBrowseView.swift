@@ -154,6 +154,14 @@ struct PySiteBrowseView: View {
     /// resolve against the config's own URL) and cache the file in
     /// Application Support/spiders for the interpreter to load.
     private func downloadSpider() async throws -> String {
+        // Locally imported .py files already live in the spiders dir.
+        if site.api.hasPrefix("local-spider://") {
+            let name = String(site.api.dropFirst("local-spider://".count))
+            let dir = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("spiders")
+            return dir.appendingPathComponent(name).path
+        }
         let url: URL?
         if let direct = URL(string: site.api), direct.scheme?.hasPrefix("http") == true {
             url = direct

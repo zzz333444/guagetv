@@ -95,6 +95,7 @@ struct SiteBrowseView: View {
         Group {
             if isCMS { cmsBody }
             else if site.kind == .spiderPY { PySiteBrowseView(site: site) }
+            else if site.kind == .spiderJS || site.kind == .drpyJS { JSSiteBrowseView(site: site) }
             else { pendingBody }
         }
         .navigationTitle(site.name)

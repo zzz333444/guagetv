@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 设置 (Settings) — Rex-style grouped glass cards. The four quick tiles
 /// open real setting pages （播放引擎 / 画面填充 / 操控步长 / 字幕大小）,
@@ -8,9 +9,10 @@ struct SettingsView: View {
     @State private var configURL = ""
     @State private var status = "还没有导入配置"
     @State private var entries: [ConfigLibrary.Entry] = []
+    @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.04 · 快进预览"
+    static let buildLabel = "v1.05 · JS 引擎"
 
     var body: some View {
         NavigationStack {
@@ -40,17 +42,24 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    group(title: "数据与资源") {
+                    group(title: "万能导入") {
                         VStack(alignment: .leading, spacing: 10) {
-                            TextField("TVBox 配置地址 https://…", text: $configURL)
+                            TextField("地址：配置 / .py / .js 规则 / 猫源 https://…", text: $configURL)
                                 .textFieldStyle(.roundedBorder)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
-                            Button("导入配置") { Task { await load() } }
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 18).padding(.vertical, 8)
-                                .background(.white, in: Capsule())
-                                .foregroundStyle(.black)
+                            HStack(spacing: 10) {
+                                Button("导入地址") { Task { await load() } }
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 18).padding(.vertical, 8)
+                                    .background(.white, in: Capsule())
+                                    .foregroundStyle(.black)
+                                Button("从文件导入") { showFileImporter = true }
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 18).padding(.vertical, 8)
+                                    .background(Theme.glass, in: Capsule())
+                                    .foregroundStyle(.white)
+                            }
                             Text(status).font(.footnote).foregroundStyle(Theme.textDim)
                             if let config {
                                 Text("已加载 \(config.sites.count) 个站点 · \(config.lives?.count ?? 0) 个直播源")
@@ -105,6 +114,7 @@ struct SettingsView: View {
                     group(title: "应用") {
                         row(icon: "info.circle", title: "关于呱壳", value: Self.buildLabel)
                         row(icon: "chevron.left.forwardslash.chevron.right", title: "Python 运行时", value: PythonRuntime.shared.statusText)
+                        row(icon: "curlybraces", title: "JS 运行时", value: "drpy2 · JavaScriptCore")
                     }
                 }
                 .padding(.horizontal, 18)
@@ -113,6 +123,11 @@ struct SettingsView: View {
             }
             .background(AmbientBackground(imageURL: nil))
             .preferredColorScheme(.dark)
+            .fileImporter(isPresented: $showFileImporter,
+                          allowedContentTypes: [.json, .plainText, .text],
+                          allowsMultipleSelection: false) { result in
+                Task { await importFiles(result) }
+            }
         }
     }
 
@@ -152,6 +167,11 @@ struct SettingsView: View {
             status = "地址格式不对"
             return
         }
+        let pathExt = url.pathExtension.lowercased()
+        if pathExt == "py" || pathExt == "js" {
+            await importSingleFile(url: url, kind: pathExt)
+            return
+        }
         status = "加载中…（多通道轮试中，稍等）"
         let data: Data
         do {
@@ -178,6 +198,89 @@ struct SettingsView: View {
                 .replacingOccurrences(of: "\n", with: " ")
             status = "加载失败：内容无法识别（\(data.count) 字节，开头：\(head)）"
         }
+    }
+
+    // MARK: - 万能导入 helpers
+
+    /// A .py / .js URL becomes a single-site line: the file is stored
+    /// locally and a synthetic one-site config joins the library.
+    private func importSingleFile(url: URL, kind: String) async {
+        status = "下载中…"
+        do {
+            let data = try await NetFetch.data(from: url)
+            let fileName = url.lastPathComponent.isEmpty
+                ? (kind == "py" ? "spider.py" : "rule.js") : url.lastPathComponent
+            try await registerSingleFile(data: data, fileName: fileName, kind: kind)
+        } catch {
+            status = "导入失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func importFiles(_ result: Result<[URL], Error>) async {
+        guard case .success(let urls) = result, let fileURL = urls.first else {
+            if case .failure(let error) = result {
+                status = "导入失败：\(error.localizedDescription)"
+            }
+            return
+        }
+        let ext = fileURL.pathExtension.lowercased()
+        do {
+            guard fileURL.startAccessingSecurityScopedResource() else {
+                status = "导入失败：无权读取该文件"
+                return
+            }
+            defer { fileURL.stopAccessingSecurityScopedResource() }
+            let data = try Data(contentsOf: fileURL)
+            switch ext {
+            case "py", "js":
+                try await registerSingleFile(data: data, fileName: fileURL.lastPathComponent, kind: ext)
+            case "json":
+                if MaoYuanAdapter.looksLikeMaoYuan(data) {
+                    let parsed = try MaoYuanAdapter.convert(from: data)
+                    config = parsed
+                    let entry = ConfigLibrary.add(data: data, sourceURL: "file-import://" + fileURL.lastPathComponent, siteCount: parsed.sites.count)
+                    status = "猫源文件已转换并加入配置库：\(entry.name)"
+                } else {
+                    let parsed = try ConfigLoader.load(from: data)
+                    config = parsed
+                    let entry = ConfigLibrary.add(data: data, sourceURL: "file-import://" + fileURL.lastPathComponent, siteCount: parsed.sites.count)
+                    status = "配置文件已加入配置库：\(entry.name)"
+                }
+                entries = ConfigLibrary.entries()
+            default:
+                status = "不支持的文件类型：.\(ext)（可导入 .json / .py / .js）"
+            }
+        } catch {
+            status = "导入失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Store the file and add its synthetic one-site config line.
+    private func registerSingleFile(data: Data, fileName: String, kind: String) async throws {
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dirName = kind == "py" ? "spiders" : "jsrules"
+        let dir = support.appendingPathComponent(dirName)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+        let base = (fileName as NSString).deletingPathExtension
+        let site: [String: Any]
+        if kind == "py" {
+            site = ["key": "pyfile_" + base, "name": base, "type": 3,
+                    "api": "local-spider://" + fileName, "searchable": 1, "quickSearch": 1]
+        } else {
+            site = ["key": "jsfile_" + base, "name": base, "type": 3,
+                    "api": "bundled-engine.js", "ext": "local-rule://" + fileName,
+                    "searchable": 1, "quickSearch": 1]
+        }
+        let configData = try JSONSerialization.data(withJSONObject: ["sites": [site]])
+        let parsed = try ConfigLoader.load(from: configData)
+        config = parsed
+        let entry = ConfigLibrary.add(data: configData,
+                                      sourceURL: (kind == "py" ? "py-import://" : "js-import://") + fileName,
+                                      siteCount: 1)
+        entries = ConfigLibrary.entries()
+        status = (kind == "py" ? "py 文件已导入为单站线路：" : "JS 规则已导入为单站线路：") + entry.name
     }
 }
 
