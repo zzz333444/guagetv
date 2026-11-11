@@ -9,7 +9,7 @@ struct SettingsView: View {
     @State private var status = "还没有导入配置"
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v4 · 双引擎"
+    static let buildLabel = "v5 · UA通道+图标"
 
     var body: some View {
         NavigationStack {
@@ -106,9 +106,15 @@ struct SettingsView: View {
             status = "地址格式不对"
             return
         }
-        status = "加载中…（直连不通会自动换通道重试）"
+        status = "加载中…（多通道轮试中，稍等）"
+        let data: Data
         do {
-            let data = try await NetFetch.dataForConfig(from: url)
+            data = try await NetFetch.dataForConfig(from: url)
+        } catch {
+            status = "加载失败：网络取不到内容（已试 okhttp、浏览器、禁跳转、WebKit 四种通道）"
+            return
+        }
+        do {
             if MaoYuanAdapter.looksLikeMaoYuan(data) {
                 config = try MaoYuanAdapter.convert(from: data)
                 status = "已加载（猫源配置已自动转换）"
@@ -117,7 +123,7 @@ struct SettingsView: View {
                 status = "已加载 TVBox 配置"
             }
         } catch {
-            status = "加载失败：\(error.localizedDescription)（已试直连、禁跳转、浏览器通道三种方式）"
+            status = "加载失败：取到了内容，但不是能识别的配置格式（多半是网页或加密配置）"
         }
     }
 }
