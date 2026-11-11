@@ -7,7 +7,7 @@ import Foundation
 ///
 /// Layout contract (produced by scripts/install_python_nosign.sh at
 /// build time, mirroring BeeWare's own install step):
-///   <bundle>/python/lib/python3.13/…   stdlib (PYTHONHOME=<bundle>/python)
+///   <bundle>/Python/lib/python3.13/…   stdlib (PYTHONHOME=<bundle>/Python)
 ///   <bundle>/Python/pybundle.zip       spider_runner + base.spider +
 ///                                      vendored requests stack + pure
 ///                                      Python Crypto shim (PYTHONPATH)
@@ -77,7 +77,7 @@ final class PythonRuntime {
         try? FileManager.default.createDirectory(
             atPath: spidersDir, withIntermediateDirectories: true)
 
-        setenv("PYTHONHOME", bundlePath + "/python", 1)
+        setenv("PYTHONHOME", bundlePath + "/Python", 1)
         setenv("PYTHONPATH", zipPath + ":" + spidersDir, 1)
         setenv("PYTHONDONTWRITEBYTECODE", "1", 1)
 
