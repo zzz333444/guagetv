@@ -1,5 +1,6 @@
 import Foundation
-import Python
+// No `import Python`: the CPython C API is exposed target-wide through
+// GuageTV-Bridging-Header.h (see that file for why).
 
 /// Embedded CPython runtime (stage 1) — BeeWare python-apple-support
 /// 3.13, loaded once and kept for the app's lifetime.
