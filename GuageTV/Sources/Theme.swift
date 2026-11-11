@@ -22,6 +22,11 @@ enum Theme {
     static let text = dyn(dark: .white, light: UIColor(red: 0.07, green: 0.07, blue: 0.10, alpha: 1))
     static let textDim = dyn(dark: UIColor.white.withAlphaComponent(0.55),
                              light: UIColor.black.withAlphaComponent(0.55))
+    /// Section / category titles sit directly on the ambient
+    /// background, not on a card — in light mode the 55% dim grey
+    /// washed out there, so titles get a stronger tone.
+    static let section = dyn(dark: UIColor.white.withAlphaComponent(0.55),
+                             light: UIColor.black.withAlphaComponent(0.85))
     static let scrim = dyn(dark: UIColor.black.withAlphaComponent(0.25),
                            light: UIColor.white.withAlphaComponent(0.25))
     static let accent = Color(red: 0.55, green: 0.45, blue: 0.95)

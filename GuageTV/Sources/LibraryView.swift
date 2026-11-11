@@ -26,7 +26,7 @@ struct LibraryView: View {
                 }
 
                 if !entries.isEmpty {
-                    Text("我的线路").font(.headline).foregroundStyle(Theme.textDim)
+                    Text("我的线路").font(.headline).foregroundStyle(Theme.section)
                     VStack(spacing: 10) {
                         ForEach(entries) { entry in
                             lineRow(entry)
@@ -35,7 +35,7 @@ struct LibraryView: View {
                 }
 
                 if let sites = config?.sites, !sites.isEmpty {
-                    Text("点播源").font(.headline).foregroundStyle(Theme.textDim)
+                    Text("点播源").font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(sites) { site in
                             NavigationLink {
@@ -66,18 +66,23 @@ struct LibraryView: View {
                 }
 
                 if let lives = config?.lives, !lives.isEmpty {
-                    Text("直播源").font(.headline).foregroundStyle(Theme.textDim)
+                    Text("直播源").font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(lives, id: \.name) { live in
-                            GlassCard(padding: 14) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Image(systemName: "tv").foregroundStyle(Theme.accent)
-                                    Text(live.name).font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(Theme.text).lineLimit(1)
-                                    Text("直播线路").font(.caption).foregroundStyle(Theme.textDim)
+                            NavigationLink {
+                                LiveView(live: live)
+                            } label: {
+                                GlassCard(padding: 14) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Image(systemName: "tv").foregroundStyle(Theme.accent)
+                                        Text(live.name).font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(Theme.text).lineLimit(1)
+                                        Text("直播线路").font(.caption).foregroundStyle(Theme.textDim)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }

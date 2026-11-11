@@ -12,16 +12,25 @@ enum LiveListParser {
         var url: String
         var group: String
         var logo: String = ""
+        var tvgId: String = ""
         var id: String { name + "|" + url }
     }
 
-    static func parse(_ text: String) -> [String: [Channel]] {
+    /// Groups in first-seen order (a dictionary would scramble the
+    /// list's own grouping, which reads as channel categories).
+    static func parse(_ text: String) -> [(name: String, channels: [Channel])] {
         text.contains("#EXTINF") ? parseM3U(text) : parseTXT(text)
     }
 
-    private static func parseM3U(_ text: String) -> [String: [Channel]] {
+    private static func ordered(_ groups: [String: [Channel]],
+                                _ order: [String]) -> [(name: String, channels: [Channel])] {
+        order.compactMap { name in groups[name].map { (name: name, channels: $0) } }
+    }
+
+    private static func parseM3U(_ text: String) -> [(name: String, channels: [Channel])] {
         var groups: [String: [Channel]] = [:]
-        var pending: (name: String, group: String, logo: String)?
+        var order: [String] = []
+        var pending: (name: String, group: String, logo: String, tvgId: String)?
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#EXTINF") {
@@ -29,18 +38,21 @@ enum LiveListParser {
                     .trimmingCharacters(in: .whitespaces) ?? ""
                 let group = capture("group-title=\"([^\"]+)\"", in: line) ?? "未分组"
                 let logo = capture("tvg-logo=\"([^\"]+)\"", in: line) ?? ""
-                pending = (name, group, logo)
+                let tvgId = capture("tvg-id=\"([^\"]+)\"", in: line) ?? ""
+                pending = (name, group, logo, tvgId)
             } else if line.hasPrefix("http"), let p = pending {
+                if groups[p.group] == nil { order.append(p.group) }
                 groups[p.group, default: []].append(
-                    Channel(name: p.name, url: line, group: p.group, logo: p.logo))
+                    Channel(name: p.name, url: line, group: p.group, logo: p.logo, tvgId: p.tvgId))
                 pending = nil
             }
         }
-        return groups
+        return ordered(groups, order)
     }
 
-    private static func parseTXT(_ text: String) -> [String: [Channel]] {
+    private static func parseTXT(_ text: String) -> [(name: String, channels: [Channel])] {
         var groups: [String: [Channel]] = [:]
+        var order: [String] = []
         var currentGroup = "未分组"
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -53,10 +65,11 @@ enum LiveListParser {
             guard parts.count >= 2 else { continue }
             let url = parts[1...].joined(separator: ",")
             guard url.hasPrefix("http") else { continue }
+            if groups[currentGroup] == nil { order.append(currentGroup) }
             groups[currentGroup, default: []].append(
                 Channel(name: parts[0], url: url, group: currentGroup))
         }
-        return groups
+        return ordered(groups, order)
     }
 
     private static func capture(_ pattern: String, in s: String) -> String? {

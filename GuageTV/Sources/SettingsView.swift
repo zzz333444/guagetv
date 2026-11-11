@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.08 · 搜索与外观"
+    static let buildLabel = "v1.09 · 直播与节目单"
 
     var body: some View {
         NavigationStack {
@@ -148,7 +148,7 @@ struct SettingsView: View {
 
     private func group<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline).foregroundStyle(Theme.textDim)
+            Text(title).font(.headline).foregroundStyle(Theme.section)
             GlassCard { VStack(alignment: .leading, spacing: 12) { content() } }
         }
     }
