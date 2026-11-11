@@ -182,7 +182,8 @@ final class HistoryStore: ObservableObject {
                   let site = config.sites.first(where: { $0.key == entry.siteKey }),
                   site.kind == .cmsJSON || site.kind == .cmsXML,
                   let detail = try? await CMSClient(site: site).detail(id: entry.vodId),
-                  let remarks = detail?.remarks, !remarks.isEmpty else { continue }
+                  !detail.remarks.isEmpty else { continue }
+            let remarks = detail.remarks
             if remarks != entry.lastRemarks, !entry.lastRemarks.isEmpty || entry.hasUpdate == false {
                 if remarks != entry.lastRemarks,
                    let i = entries.firstIndex(where: { $0.id == entry.id }) {

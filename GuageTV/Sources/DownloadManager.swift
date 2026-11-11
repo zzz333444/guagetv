@@ -112,10 +112,10 @@ final class DownloadManager: NSObject, ObservableObject {
     private func startHLS(_ item: Item) {
         guard let url = URL(string: item.remoteURL) else { markFailed(item.id); return }
         var options: [String: Any] = [:]
-        if !item.header.isEmpty { options[AVURLAssetHTTPHeaderFieldsKey] = item.header }
+        if !item.header.isEmpty { options["AVURLAssetHTTPHeaderFieldsKey"] = item.header }
         let asset = AVURLAsset(url: url, options: options)
-        guard let task = hlsSession.makeAssetDownloadTask(asset: asset, title: item.episodeName,
-                                                          artworkData: nil, options: nil)
+        guard let task = hlsSession.makeAssetDownloadTask(asset: asset, assetTitle: item.episodeName,
+                                                          assetArtworkData: nil, options: nil)
         else { markFailed(item.id); return }
         hlsTasks[item.id] = task
         task.resume()
