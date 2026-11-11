@@ -6,8 +6,11 @@ import SwiftUI
 /// re-opens the show's page on its original line.
 struct HistoryView: View {
     @StateObject private var history = HistoryStore.shared
+    @StateObject private var downloads = DownloadManager.shared
     @State private var playEntry: HistoryStore.Entry?
+    @State private var dlPlayItem: DownloadManager.Item?
     @State private var confirmClear = false
+    @State private var checkingUpdates = false
 
     @State private var segment = 0
 
@@ -26,11 +29,14 @@ struct HistoryView: View {
                 Picker("分段", selection: $segment) {
                     Text("历史").tag(0)
                     Text("收藏").tag(1)
+                    Text("下载").tag(2)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
-                if shownEntries.isEmpty {
+                if segment == 2 {
+                    downloadsView
+                } else if shownEntries.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: segment == 0 ? "clock.arrow.circlepath" : "heart")
                             .font(.largeTitle).foregroundStyle(Theme.textDim)
@@ -71,6 +77,19 @@ struct HistoryView: View {
             .navigationTitle("记录")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                if segment == 1 && !history.favourites.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(checkingUpdates ? "检测中…" : "检测更新") {
+                            checkingUpdates = true
+                            Task {
+                                await HistoryStore.shared.checkFavouritesForUpdates()
+                                checkingUpdates = false
+                            }
+                        }
+                        .disabled(checkingUpdates)
+                        .foregroundStyle(Theme.text)
+                    }
+                }
                 if segment == 0 && !history.entries.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("清空") { confirmClear = true }
@@ -81,6 +100,21 @@ struct HistoryView: View {
             .confirmationDialog("清空全部浏览记录？", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("清空", role: .destructive) { history.clearAll() }
                 Button("取消", role: .cancel) {}
+            }
+            .onChange(of: segment) { newValue in
+                if newValue == 1 && !history.favourites.isEmpty && !checkingUpdates {
+                    checkingUpdates = true
+                    Task {
+                        await HistoryStore.shared.checkFavouritesForUpdates()
+                        checkingUpdates = false
+                    }
+                }
+            }
+            .fullScreenCover(item: $dlPlayItem) { item in
+                if let local = DownloadManager.shared.localURLString(item) {
+                    PlayerView(episodes: [PlayerView.EpisodeRef(name: item.episodeName, url: local)],
+                               startIndex: 0, header: [:], title: item.vodName, pic: item.pic)
+                }
             }
             .fullScreenCover(item: $playEntry) { entry in
                 PlayerView(
@@ -97,8 +131,15 @@ struct HistoryView: View {
                 .frame(width: 46, height: 69)
                 .posterFrame()
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.name).font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.text).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(entry.name).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text).lineLimit(1)
+                    if entry.hasUpdate {
+                        Text("有更新").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Theme.accent, in: Capsule())
+                    }
+                }
                 Text(subtitle(entry)).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 if entry.durationSeconds > 0 {
                     ProgressView(value: min(entry.positionSeconds / entry.durationSeconds, 1))
@@ -124,6 +165,77 @@ struct HistoryView: View {
         .onTapGesture {
             if !entry.episodeURL.isEmpty { playEntry = entry }
         }
+    }
+
+    // MARK: downloads segment
+
+    @ViewBuilder
+    private var downloadsView: some View {
+        if downloads.items.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "arrow.down.circle")
+                    .font(.largeTitle).foregroundStyle(Theme.textDim)
+                Text("还没有下载")
+                    .font(.headline).foregroundStyle(Theme.text)
+                Text("在详情页长按集数、或播放器里点下载钮，剧会存到这里离线看")
+                    .font(.subheadline).foregroundStyle(Theme.textDim)
+                    .multilineTextAlignment(.center).padding(.horizontal, 32)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                ForEach(downloads.items) { item in
+                    downloadRow(item)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+                }
+                .onDelete { offsets in
+                    offsets.map { downloads.items[$0] }.forEach { DownloadManager.shared.remove($0) }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func downloadRow(_ item: DownloadManager.Item) -> some View {
+        HStack(spacing: 12) {
+            PosterImage(urlString: item.pic)
+                .frame(width: 46, height: 69)
+                .posterFrame()
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.vodName).font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text).lineLimit(1)
+                Text(item.episodeName).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                switch item.state {
+                case "downloading":
+                    ProgressView(value: item.progress).tint(Theme.accent)
+                    Text("下载中 \(Int(item.progress * 100))%").font(.caption2).foregroundStyle(Theme.textDim)
+                case "done":
+                    Text("已下载 · \(sizeText(item.totalBytes))").font(.caption2).foregroundStyle(Theme.ok)
+                default:
+                    Text("下载失败，左滑删除后重试").font(.caption2).foregroundStyle(.red.opacity(0.85))
+                }
+            }
+            Spacer()
+            if item.state == "done" {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2).foregroundStyle(Theme.text.opacity(0.9))
+            }
+        }
+        .padding(10)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if item.state == "done" { dlPlayItem = item }
+        }
+    }
+
+    private func sizeText(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "大小未知" }
+        let mb = Double(bytes) / 1_048_576
+        return mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : String(format: "%.0f MB", mb)
     }
 
     private func subtitle(_ entry: HistoryStore.Entry) -> String {

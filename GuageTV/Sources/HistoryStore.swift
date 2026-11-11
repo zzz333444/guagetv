@@ -27,13 +27,18 @@ final class HistoryStore: ObservableObject {
         var episodeID: String = ""
         var playFlag: String = ""
         var playHeader: [String: String] = [:]
+        /// 追剧更新： lastRemarks snapshots the site's "更新至第X集"
+        /// text at favourite/last-detail time; hasUpdate flips when a
+        /// later check sees different remarks.
+        var lastRemarks: String = ""
+        var hasUpdate: Bool = false
         var id: String { siteKey + "|" + vodId }
 
         enum CodingKeys: String, CodingKey {
             case vodId, siteKey, name, pic, episodeName, episodeURL
             case positionSeconds, durationSeconds, watchedSeconds, updatedAt
             case isFavourite, isWatchlist, lineID, siteName, episodeID
-            case playFlag, playHeader
+            case playFlag, playHeader, lastRemarks, hasUpdate
         }
 
         init(vodId: String, siteKey: String, name: String, pic: String,
@@ -41,7 +46,8 @@ final class HistoryStore: ObservableObject {
              durationSeconds: Double, watchedSeconds: Double, updatedAt: Date,
              isFavourite: Bool = false, isWatchlist: Bool = false,
              lineID: String = "", siteName: String = "", episodeID: String = "",
-             playFlag: String = "", playHeader: [String: String] = [:]) {
+             playFlag: String = "", playHeader: [String: String] = [:],
+             lastRemarks: String = "", hasUpdate: Bool = false) {
             self.vodId = vodId; self.siteKey = siteKey; self.name = name
             self.pic = pic; self.episodeName = episodeName
             self.episodeURL = episodeURL; self.positionSeconds = positionSeconds
@@ -51,6 +57,8 @@ final class HistoryStore: ObservableObject {
             self.lineID = lineID; self.siteName = siteName
             self.episodeID = episodeID; self.playFlag = playFlag
             self.playHeader = playHeader
+            self.lastRemarks = lastRemarks
+            self.hasUpdate = hasUpdate
         }
 
         /// Tolerant decoding: entries written before v1.06 lack the
@@ -74,6 +82,8 @@ final class HistoryStore: ObservableObject {
             episodeID = try c.decodeIfPresent(String.self, forKey: .episodeID) ?? ""
             playFlag = try c.decodeIfPresent(String.self, forKey: .playFlag) ?? ""
             playHeader = try c.decodeIfPresent([String: String].self, forKey: .playHeader) ?? [:]
+            lastRemarks = try c.decodeIfPresent(String.self, forKey: .lastRemarks) ?? ""
+            hasUpdate = try c.decodeIfPresent(Bool.self, forKey: .hasUpdate) ?? false
         }
     }
 
@@ -93,6 +103,8 @@ final class HistoryStore: ObservableObject {
             merged.watchedSeconds += entries[i].watchedSeconds
             merged.isFavourite = entries[i].isFavourite
             merged.isWatchlist = entries[i].isWatchlist
+            if merged.lastRemarks.isEmpty { merged.lastRemarks = entries[i].lastRemarks }
+            merged.hasUpdate = entries[i].hasUpdate && merged.lastRemarks == entries[i].lastRemarks
             entries[i] = merged
         } else {
             entries.insert(entry, at: 0)
@@ -147,6 +159,38 @@ final class HistoryStore: ObservableObject {
             entries.insert(fresh, at: 0)
         }
         save()
+    }
+
+    /// Opening the detail page acknowledges a pending update: the
+    /// badge clears and the remarks snapshot moves to what the page
+    /// actually shows now.
+    func markUpdateSeen(siteKey: String, vodId: String, remarks: String) {
+        guard let i = entries.firstIndex(where: { $0.siteKey == siteKey && $0.vodId == vodId }) else { return }
+        entries[i].hasUpdate = false
+        if !remarks.isEmpty { entries[i].lastRemarks = remarks }
+        save()
+    }
+
+    /// 追剧更新检测： re-fetch the detail of every CMS favourite on
+    /// its own line and compare the "更新至…" remarks. py/JS
+    /// favourites are skipped (their bridges load one spider at a
+    /// time; a mass check would thrash them).
+    func checkFavouritesForUpdates() async {
+        for entry in favourites {
+            guard !entry.lineID.isEmpty,
+                  let config = ConfigLibrary.load(id: entry.lineID),
+                  let site = config.sites.first(where: { $0.key == entry.siteKey }),
+                  site.kind == .cmsJSON || site.kind == .cmsXML,
+                  let detail = try? await CMSClient(site: site).detail(id: entry.vodId),
+                  let remarks = detail?.remarks, !remarks.isEmpty else { continue }
+            if remarks != entry.lastRemarks, !entry.lastRemarks.isEmpty || entry.hasUpdate == false {
+                if remarks != entry.lastRemarks,
+                   let i = entries.firstIndex(where: { $0.id == entry.id }) {
+                    entries[i].hasUpdate = true
+                    save()
+                }
+            }
+        }
     }
 
     var favourites: [Entry] { entries.filter(\.isFavourite) }

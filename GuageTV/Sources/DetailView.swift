@@ -45,12 +45,14 @@ struct DetailView: View {
         .onAppear {
             if let seed = historySeed {
                 isFav = HistoryStore.shared.isFavourite(siteKey: seed.siteKey, vodId: seed.vodId)
+                HistoryStore.shared.markUpdateSeen(siteKey: seed.siteKey, vodId: seed.vodId,
+                                                   remarks: detail.remarks)
             }
         }
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
                        header: sel.playHeader ?? header, title: detail.name,
-                       historyID: sel.historyID, resumeAt: sel.resumeAt)
+                       historyID: sel.historyID, resumeAt: sel.resumeAt, pic: detail.pic)
         }
         .overlay {
             if resolving {
@@ -117,7 +119,7 @@ struct DetailView: View {
             vodId: seed.vodId, siteKey: seed.siteKey, name: detail.name, pic: detail.pic,
             episodeName: "", episodeURL: "", positionSeconds: 0, durationSeconds: 0,
             watchedSeconds: 0, updatedAt: Date(), isFavourite: target,
-            lineID: seed.lineID, siteName: seed.siteName)
+            lineID: seed.lineID, siteName: seed.siteName, lastRemarks: detail.remarks)
         HistoryStore.shared.setFavourite(stub: stub, on: target)
         isFav = target
     }
@@ -164,6 +166,14 @@ struct DetailView: View {
                         .padding(.vertical, 11)
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
                         .onTapGesture { tapEpisode(ep, in: episodes) }
+                        .contextMenu {
+                            Button { tapEpisode(ep, in: episodes) } label: {
+                                Label("播放", systemImage: "play.fill")
+                            }
+                            Button { downloadEpisode(ep) } label: {
+                                Label("下载此集", systemImage: "arrow.down.circle")
+                            }
+                        }
                 }
             }
             .padding(.horizontal, 18)
@@ -172,6 +182,52 @@ struct DetailView: View {
                     .padding(.horizontal, 18)
             }
         }
+    }
+
+    /// Long-press download: resolves the episode exactly like
+    /// playback does (parse interface / spider resolver), then hands
+    /// the final media URL to the DownloadManager.
+    private func downloadEpisode(_ ep: VodDetail.Episode) {
+        let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
+        if let playerResolver {
+            guard !resolving else { return }
+            resolving = true
+            Task {
+                let resolved = await playerResolver(flag, ep.url)
+                resolving = false
+                if let resolved {
+                    DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
+                                                   pic: detail.pic, url: resolved.url,
+                                                   header: resolved.header)
+                    playNote = "已加入下载：\(ep.name)"
+                } else {
+                    playNote = "这一集解析失败，下载不了"
+                }
+            }
+            return
+        }
+        if !parses.isEmpty, !ParseResolver.isMediaURL(ep.url) {
+            guard !resolving else { return }
+            resolving = true
+            Task {
+                let parsed = await ParseResolver.resolve(flag: flag, url: ep.url, parses: parses)
+                resolving = false
+                if let parsed {
+                    var finalHeader = header
+                    for (k, v) in parsed.header { finalHeader[k] = v }
+                    DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
+                                                   pic: detail.pic, url: parsed.url,
+                                                   header: finalHeader)
+                    playNote = "已加入下载：\(ep.name)"
+                } else {
+                    playNote = "这一集解析失败，下载不了"
+                }
+            }
+            return
+        }
+        DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
+                                       pic: detail.pic, url: ep.url, header: header)
+        playNote = "已加入下载：\(ep.name)"
     }
 
     private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
@@ -246,7 +302,7 @@ struct DetailView: View {
             durationSeconds: existing?.durationSeconds ?? 0,
             watchedSeconds: 0, updatedAt: Date(),
             lineID: seed.lineID, siteName: seed.siteName, episodeID: episode.url,
-            playFlag: flag, playHeader: playHeader))
+            playFlag: flag, playHeader: playHeader, lastRemarks: detail.remarks))
         return resume
     }
 }

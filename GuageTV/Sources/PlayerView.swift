@@ -22,6 +22,7 @@ struct PlayerView: View {
     }
 
     let episodes: [EpisodeRef]
+    var pic: String = ""
     var header: [String: String] = [:]
     var title: String = ""
     /// When set, playback reports its position to HistoryStore and
@@ -62,12 +63,13 @@ struct PlayerView: View {
     }
 
     init(episodes: [EpisodeRef], startIndex: Int, header: [String: String] = [:], title: String = "",
-         historyID: String? = nil, resumeAt: Double = 0) {
+         historyID: String? = nil, resumeAt: Double = 0, pic: String = "") {
         self.episodes = episodes
         self.header = header
         self.title = title
         self.historyID = historyID
         self.resumeAt = resumeAt
+        self.pic = pic
         _index = State(initialValue: min(max(startIndex, 0), max(episodes.count - 1, 0)))
     }
 
@@ -344,6 +346,14 @@ struct PlayerView: View {
                         .frame(width: 40, height: 40)
                 }
                 if !isMPV {
+                    if current.url.hasPrefix("http") {
+                        Button { downloadCurrent() } label: {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.body.weight(.semibold)).foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                    }
                     if !isMPV, AVPictureInPictureController.isPictureInPictureSupported() {
                         Button { native.togglePiP() } label: {
                             Image(systemName: native.isPiPActive ? "pip.exit" : "pip.enter")
@@ -584,6 +594,14 @@ struct PlayerView: View {
         didResume = true
         seek(to: resumeAt)
         showToast("已续播至 " + timeLabel(resumeAt))
+    }
+
+    /// 播放器内的下载钮：把当前集的最终播放地址交给下载器
+    /// （HLS 走 AVAssetDownloadTask、直链文件走普通下载）。
+    private func downloadCurrent() {
+        DownloadManager.shared.enqueue(vodName: title, episodeName: current.name,
+                                       pic: pic, url: current.url, header: header)
+        showToast("已加入下载")
     }
 
     /// 跳片头：每集一次，时长已知后执行；有续播位置时以续播为准。
