@@ -47,7 +47,6 @@ struct VodDetail: Identifiable {
 /// the Python/JS engines land.
 final class CMSClient {
     let site: TVBoxConfig.Site
-    private let session = URLSession.shared
 
     init(site: TVBoxConfig.Site) { self.site = site }
 
@@ -62,13 +61,7 @@ final class CMSClient {
 
     private func fetch(params: [String: String]) async throws -> [String: Any] {
         guard let url = buildURL(params: params) else { return [:] }
-        var req = URLRequest(url: url)
-        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
-                     forHTTPHeaderField: "User-Agent")
-        if let header = site.header {
-            for (k, v) in header { req.setValue(v, forHTTPHeaderField: k) }
-        }
-        let (data, _) = try await session.data(for: req)
+        let data = try await NetFetch.data(from: url, extraHeader: site.header ?? [:])
         if site.type == 0 {
             return Self.parseXMLResponse(data)
         }
@@ -87,7 +80,14 @@ final class CMSClient {
     }
 
     func category(tid: String, page: Int) async throws -> [VodItem] {
-        let r = try await fetch(params: ["ac": "list", "t": tid, "pg": String(page)])
+        try await list(tid: tid, page: page)
+    }
+
+    /// Raw list call; tid nil = the site's home feed (latest updates).
+    func list(tid: String?, page: Int) async throws -> [VodItem] {
+        var params = ["ac": "list", "pg": String(page)]
+        if let tid, !tid.isEmpty { params["t"] = tid }
+        let r = try await fetch(params: params)
         return Self.mapList(r)
     }
 

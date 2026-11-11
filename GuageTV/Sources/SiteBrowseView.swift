@@ -1,0 +1,256 @@
+import SwiftUI
+
+/// Grid poster cell shared by site browsing and search results.
+struct PosterCell: View {
+    let item: VodItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let url = URL(string: item.pic) {
+                        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: {
+                            Rectangle().fill(Color.white.opacity(0.08))
+                        }
+                    } else {
+                        Rectangle().fill(Color.white.opacity(0.08))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .posterFrame()
+                if !item.remarks.isEmpty {
+                    Text(item.remarks)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(.black.opacity(0.6), in: Capsule())
+                        .foregroundStyle(.white)
+                        .padding(6)
+                }
+            }
+            Text(item.name)
+                .font(.footnote).foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+            if !item.year.isEmpty {
+                Text(item.year).font(.caption).foregroundStyle(Theme.textDim)
+            }
+        }
+    }
+}
+
+/// Loads a CMS detail page, then hands off to DetailView. Non-CMS sites
+/// reach here only after their runtimes land; until then it fails soft.
+struct DetailLoaderView: View {
+    let site: TVBoxConfig.Site
+    let item: VodItem
+    @State private var detail: VodDetail?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let detail {
+                DetailView(detail: detail, header: site.header ?? [:])
+            } else if failed {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle").font(.title3)
+                    Text("详情加载失败，稍后重试").font(.subheadline)
+                }
+                .foregroundStyle(Theme.textDim)
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AmbientBackground(imageURL: item.pic))
+        .preferredColorScheme(.dark)
+        .task {
+            guard site.kind == .cmsJSON || site.kind == .cmsXML else { failed = true; return }
+            detail = try? await CMSClient(site: site).detail(id: item.id)
+            if detail == nil { failed = true }
+        }
+    }
+}
+
+/// Site browsing: tap a source card in 资源库 → class chips + poster grid
+/// → detail → player. CMS sites (the overwhelming majority) work natively;
+/// py/JS sites show a holding page until their runtime wires in.
+struct SiteBrowseView: View {
+    let site: TVBoxConfig.Site
+
+    @State private var classes: [(String, String)] = []
+    @State private var items: [VodItem] = []
+    @State private var selectedTid = ""
+    @State private var page = 1
+    @State private var loading = true
+    @State private var loadingMore = false
+    @State private var canLoadMore = false
+    @State private var errorText: String?
+
+    private var isCMS: Bool { site.kind == .cmsJSON || site.kind == .cmsXML }
+    private var client: CMSClient { CMSClient(site: site) }
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+
+    var body: some View {
+        Group {
+            if isCMS { cmsBody } else { pendingBody }
+        }
+        .navigationTitle(site.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .background(AmbientBackground(imageURL: items.first?.pic))
+        .preferredColorScheme(.dark)
+        .task { if isCMS { await loadHome() } }
+    }
+
+    // MARK: CMS browsing
+
+    private var cmsBody: some View {
+        VStack(spacing: 0) {
+            if !classes.isEmpty { classChips }
+            content
+        }
+    }
+
+    private var classChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip(title: "推荐", tid: "")
+                ForEach(classes, id: \.0) { cls in
+                    chip(title: cls.1, tid: cls.0)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func chip(title: String, tid: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(selectedTid == tid ? .semibold : .regular))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(selectedTid == tid ? Color.white : Color.white.opacity(0.10), in: Capsule())
+            .foregroundStyle(selectedTid == tid ? .black : .white.opacity(0.85))
+            .onTapGesture { Task { await selectClass(tid) } }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if loading {
+            Spacer()
+            ProgressView().tint(.white)
+            Spacer()
+        } else if let errorText {
+            Spacer()
+            VStack(spacing: 12) {
+                Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim)
+                    .multilineTextAlignment(.center).padding(.horizontal, 32)
+                Button("重试") { Task { await loadHome() } }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 18).padding(.vertical, 8)
+                    .background(.white, in: Capsule()).foregroundStyle(.black)
+            }
+            Spacer()
+        } else {
+            ScrollView(showsIndicators: false) {
+                LazyVGrid(columns: columns, spacing: 14) {
+                    ForEach(items) { item in
+                        NavigationLink {
+                            DetailLoaderView(site: site, item: item)
+                        } label: {
+                            PosterCell(item: item)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+                if canLoadMore {
+                    Button {
+                        Task { await loadMore() }
+                    } label: {
+                        if loadingMore {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text("加载更多").font(.subheadline.weight(.medium))
+                        }
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 10)
+                    .background(Theme.glass, in: Capsule())
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 18)
+                }
+                Color.clear.frame(height: 96)
+            }
+        }
+    }
+
+    // MARK: Non-CMS holding page
+
+    private var pendingBody: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Image(systemName: site.kind == .spiderJAR ? "nosign" : "hourglass")
+                .font(.largeTitle).foregroundStyle(Theme.textDim)
+            Text(site.name).font(.headline).foregroundStyle(.white)
+            Text(pendingText)
+                .font(.subheadline).foregroundStyle(Theme.textDim)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var pendingText: String {
+        switch site.kind {
+        case .spiderJAR: return "Jar 源依赖 JVM，iOS 平台无法运行，此源不可用。"
+        case .spiderPY: return "Python 源：内嵌 Python 运行时在阶段 1 接入中，接入后此站可直接浏览。"
+        case .spiderJS, .drpyJS: return "JS 源：JavaScriptCore 运行时在阶段 2 接入中，接入后此站可直接浏览。"
+        default: return "此站类型待识别。"
+        }
+    }
+
+    // MARK: Loading
+
+    private func loadHome() async {
+        loading = true
+        errorText = nil
+        do {
+            let home = try await client.home()
+            classes = home.classes
+            items = home.list
+            selectedTid = ""
+            page = 1
+            canLoadMore = home.list.count >= 10
+        } catch {
+            errorText = "加载失败：\(error.localizedDescription)"
+        }
+        loading = false
+    }
+
+    private func selectClass(_ tid: String) async {
+        selectedTid = tid
+        page = 1
+        loading = true
+        errorText = nil
+        do {
+            items = try await client.list(tid: tid.isEmpty ? nil : tid, page: 1)
+            canLoadMore = items.count >= 10
+        } catch {
+            errorText = "加载失败：\(error.localizedDescription)"
+        }
+        loading = false
+    }
+
+    private func loadMore() async {
+        guard canLoadMore, !loadingMore else { return }
+        loadingMore = true
+        do {
+            let next = try await client.list(tid: selectedTid.isEmpty ? nil : selectedTid, page: page + 1)
+            page += 1
+            items += next
+            canLoadMore = next.count >= 10
+        } catch {
+            canLoadMore = false
+        }
+        loadingMore = false
+    }
+}

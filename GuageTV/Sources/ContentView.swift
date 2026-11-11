@@ -6,6 +6,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var config: TVBoxConfig?
     @State private var tab = 0
+    @State private var showSearch = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -24,6 +25,9 @@ struct ContentView: View {
                 .padding(.bottom, 10)
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showSearch) {
+            SearchView(config: config)
+        }
     }
 
     private var floatingBar: some View {
@@ -39,7 +43,7 @@ struct ContentView: View {
             .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
 
-            Button { tab = 0 } label: {
+            Button { showSearch = true } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.white)

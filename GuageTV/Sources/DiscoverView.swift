@@ -17,20 +17,49 @@ struct DiscoverView: View {
     var heroItems: [VodItem] = []
     var sections: [DiscoverSection] = []
     @State private var heroIndex = 0
+    @State private var liveHero: [VodItem] = []
+    @State private var liveSections: [DiscoverSection] = []
+
+    /// First CMS site feeds the Discover page natively (no runtime needed).
+    private var activeSite: TVBoxConfig.Site? {
+        config?.sites.first { $0.kind == .cmsJSON || $0.kind == .cmsXML }
+    }
+    private var displayHero: [VodItem] { liveHero.isEmpty ? heroItems : liveHero }
+    private var displaySections: [DiscoverSection] { liveSections.isEmpty ? sections : liveSections }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 26) {
-                hero
-                ForEach(sections) { section in
-                    posterRow(title: section.title, items: section.items)
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 26) {
+                    hero
+                    ForEach(displaySections) { section in
+                        posterRow(title: section.title, items: section.items)
+                    }
+                    categoryBrowse
                 }
-                categoryBrowse
+                .padding(.bottom, 110)   // clear the floating tab bar
             }
-            .padding(.bottom, 110)   // clear the floating tab bar
+            .background(AmbientBackground(imageURL: displayHero.first?.pic))
+            .preferredColorScheme(.dark)
         }
-        .background(AmbientBackground(imageURL: heroItems.first?.pic))
-        .preferredColorScheme(.dark)
+        .task(id: activeSite?.id ?? "") { await loadFeed() }
+    }
+
+    private func loadFeed() async {
+        guard let site = activeSite else { return }
+        let client = CMSClient(site: site)
+        guard let home = try? await client.home() else { return }
+        liveHero = Array(home.list.prefix(5))
+        var secs: [DiscoverSection] = []
+        if !home.list.isEmpty {
+            secs.append(DiscoverSection(title: "最新更新 · \(site.name)", items: home.list))
+        }
+        for cls in home.classes.prefix(3) {
+            if let items = try? await client.category(tid: cls.0, page: 1), !items.isEmpty {
+                secs.append(DiscoverSection(title: cls.1, items: items))
+            }
+        }
+        liveSections = secs
     }
 
     // MARK: Hero carousel
@@ -38,16 +67,16 @@ struct DiscoverView: View {
     private var hero: some View {
         VStack(spacing: 10) {
             TabView(selection: $heroIndex) {
-                ForEach(heroItems.indices, id: \.self) { idx in
-                    heroPage(heroItems[idx]).tag(idx)
+                ForEach(displayHero.indices, id: \.self) { idx in
+                    heroPage(displayHero[idx]).tag(idx)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 430)
 
-            if heroItems.count > 1 {
+            if displayHero.count > 1 {
                 HStack(spacing: 6) {
-                    ForEach(heroItems.indices, id: \.self) { i in
+                    ForEach(displayHero.indices, id: \.self) { i in
                         Circle()
                             .fill(i == heroIndex ? Color.white : Color.white.opacity(0.35))
                             .frame(width: 6, height: 6)
@@ -114,7 +143,18 @@ struct DiscoverView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
-                    ForEach(items) { item in posterCard(item) }
+                    ForEach(items) { item in
+                        if let site = activeSite {
+                            NavigationLink {
+                                DetailLoaderView(site: site, item: item)
+                            } label: {
+                                posterCard(item)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            posterCard(item)
+                        }
+                    }
                 }
                 .padding(.horizontal, 18)
             }
@@ -163,17 +203,22 @@ struct DiscoverView: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
                       spacing: 12) {
                 ForEach(config?.sites ?? []) { site in
-                    GlassCard(padding: 14) {
-                        HStack {
-                            Image(systemName: "rectangle.stack")
-                                .foregroundStyle(Theme.accent)
-                            Text(site.name)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            Spacer()
+                    NavigationLink {
+                        SiteBrowseView(site: site)
+                    } label: {
+                        GlassCard(padding: 14) {
+                            HStack {
+                                Image(systemName: "rectangle.stack")
+                                    .foregroundStyle(Theme.accent)
+                                Text(site.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 18)

@@ -10,6 +10,7 @@ struct LibraryView: View {
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
+        NavigationStack {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
@@ -25,7 +26,14 @@ struct LibraryView: View {
                 if let sites = config?.sites, !sites.isEmpty {
                     Text("点播源").font(.headline).foregroundStyle(Theme.textDim)
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(sites) { site in sourceCard(site) }
+                        ForEach(sites) { site in
+                            NavigationLink {
+                                SiteBrowseView(site: site)
+                            } label: {
+                                sourceCard(site)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 } else {
                     GlassCard {
@@ -69,6 +77,7 @@ struct LibraryView: View {
         }
         .background(AmbientBackground(imageURL: nil))
         .preferredColorScheme(.dark)
+        }
     }
 
     private func sourceCard(_ site: TVBoxConfig.Site) -> some View {
