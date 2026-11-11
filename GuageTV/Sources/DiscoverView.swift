@@ -88,8 +88,8 @@ struct DiscoverView: View {
 
     private func heroPage(_ item: VodItem) -> some View {
         ZStack(alignment: .bottomLeading) {
-            if let url = URL(string: item.pic) {
-                AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { heroPlaceholder }
+            if !item.pic.isEmpty {
+                PosterImage(urlString: item.pic)
                     .frame(height: 430).clipped()
             } else {
                 heroPlaceholder.frame(height: 430)
@@ -164,8 +164,8 @@ struct DiscoverView: View {
     private func posterCard(_ item: VodItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
-                if let url = URL(string: item.pic) {
-                    AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { posterPlaceholder }
+                if !item.pic.isEmpty {
+                    PosterImage(urlString: item.pic)
                         .frame(width: 112, height: 168)
                         .posterFrame()
                 } else {

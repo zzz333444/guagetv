@@ -8,7 +8,7 @@ struct DetailView: View {
     let detail: VodDetail
     var header: [String: String] = [:]
     @State private var lineIndex = 0
-    @State private var playingURL: String?
+    @State private var playSelection: PlaySelection?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -30,21 +30,18 @@ struct DetailView: View {
         }
         .background(AmbientBackground(imageURL: detail.pic))
         .preferredColorScheme(.dark)
-        .fullScreenCover(item: Binding(
-            get: { playingURL.map { PlayTarget(url: $0) } },
-            set: { playingURL = $0?.url })) { target in
-            PlayerView(urlString: target.url, header: header)
+        .fullScreenCover(item: $playSelection) { sel in
+            PlayerView(episodes: sel.episodes, startIndex: sel.index,
+                       header: header, title: detail.name)
         }
     }
 
     private var headerBlock: some View {
         HStack(alignment: .top, spacing: 14) {
-            if let url = URL(string: detail.pic) {
-                AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: {
-                    Rectangle().fill(Color.white.opacity(0.08))
-                }
-                .frame(width: 110, height: 165)
-                .posterFrame()
+            if !detail.pic.isEmpty {
+                PosterImage(urlString: detail.pic)
+                    .frame(width: 110, height: 165)
+                    .posterFrame()
             }
             VStack(alignment: .leading, spacing: 7) {
                 Text(detail.name).font(.title3.bold()).foregroundStyle(.white)
@@ -104,7 +101,11 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
-                        .onTapGesture { playingURL = ep.url }
+                        .onTapGesture {
+                            playSelection = PlaySelection(
+                                episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },
+                                index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0)
+                        }
                 }
             }
             .padding(.horizontal, 18)
@@ -116,7 +117,8 @@ struct DetailView: View {
     }
 }
 
-private struct PlayTarget: Identifiable {
-    let url: String
-    var id: String { url }
+private struct PlaySelection: Identifiable {
+    let episodes: [PlayerView.EpisodeRef]
+    let index: Int
+    var id: String { episodes[index].url + "#\(index)" }
 }

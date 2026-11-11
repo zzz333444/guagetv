@@ -8,10 +8,8 @@ struct PosterCell: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 Group {
-                    if let url = URL(string: item.pic) {
-                        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: {
-                            Rectangle().fill(Color.white.opacity(0.08))
-                        }
+                    if !item.pic.isEmpty {
+                        PosterImage(urlString: item.pic)
                     } else {
                         Rectangle().fill(Color.white.opacity(0.08))
                     }

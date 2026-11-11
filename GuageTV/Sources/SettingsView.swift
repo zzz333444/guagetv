@@ -9,13 +9,18 @@ struct SettingsView: View {
     @State private var status = "还没有导入配置"
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v6 · 宽容解析"
+    static let buildLabel = "v7 · 播放器补全"
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("设置").font(.largeTitle.bold()).foregroundStyle(.white)
+                    .onAppear {
+                        if configURL.isEmpty, let saved = ConfigStore.savedSourceURL() {
+                            configURL = saved
+                        }
+                    }
 
                     HStack(spacing: 12) {
                         NavigationLink { PlaySettingsView() } label: {
@@ -117,9 +122,11 @@ struct SettingsView: View {
         do {
             if MaoYuanAdapter.looksLikeMaoYuan(data) {
                 config = try MaoYuanAdapter.convert(from: data)
+                ConfigStore.save(data: data, sourceURL: text)
                 status = "已加载（猫源配置已自动转换）"
             } else {
                 config = try ConfigLoader.load(from: data)
+                ConfigStore.save(data: data, sourceURL: text)
                 status = "已加载 TVBox 配置"
             }
         } catch {

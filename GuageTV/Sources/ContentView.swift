@@ -8,6 +8,12 @@ struct ContentView: View {
     @State private var tab = 0
     @State private var showSearch = false
 
+    init() {
+        // Restore the persisted config (v7): imported lines survive the
+        // app being swiped away.
+        _config = State(initialValue: ConfigStore.loadConfig())
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             Group {

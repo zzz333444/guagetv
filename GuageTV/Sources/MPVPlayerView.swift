@@ -16,6 +16,12 @@ final class MPVController: ObservableObject {
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
+    @Published var speed: Double = 1.0
+
+    func setSpeed(_ value: Double) {
+        speed = value
+        setProperty("speed", String(value))
+    }
 
     private var handle: OpaquePointer?
     private var renderContext: OpaquePointer?
@@ -239,62 +245,20 @@ private struct MPVRenderRepresentable: UIViewRepresentable {
     }
 }
 
-/// Full player page on the mpv engine.
+/// Render surface for the mpv engine. All chrome (close bar, transport
+/// controls) lives in PlayerView, which owns the controller.
 struct MPVPlayerView: View {
     let url: URL
     var header: [String: String] = [:]
-
-    @StateObject private var controller = MPVController()
+    let controller: MPVController
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             MPVRenderRepresentable(controller: controller)
                 .ignoresSafeArea()
-            VStack {
-                Spacer()
-                controlBar
-            }
         }
         .onAppear { controller.start(url: url, header: header) }
         .onDisappear { controller.stop() }
-    }
-
-    private var controlBar: some View {
-        HStack(spacing: 14) {
-            Button {
-                controller.togglePlay()
-            } label: {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-            }
-            Text(timeLabel(controller.currentTime))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.85))
-            Slider(
-                value: Binding(
-                    get: { controller.currentTime },
-                    set: { controller.currentTime = $0 }
-                ),
-                in: 0...max(controller.duration, 1),
-                onEditingChanged: { editing in
-                    if !editing { controller.seek(to: controller.currentTime) }
-                }
-            )
-            .tint(.white)
-            Text(timeLabel(controller.duration))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(.black.opacity(0.45))
-    }
-
-    private func timeLabel(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "00:00" }
-        let s = Int(seconds)
-        return String(format: "%02d:%02d", s / 60, s % 60)
     }
 }

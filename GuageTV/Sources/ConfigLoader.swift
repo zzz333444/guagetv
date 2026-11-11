@@ -197,3 +197,35 @@ enum ConfigLoader {
         return try load(from: data)
     }
 }
+
+/// Persists the active config so it survives the app being swiped away
+/// (v7): the raw bytes live in Application Support, the source URL in
+/// UserDefaults; ContentView restores on launch.
+enum ConfigStore {
+    private static let urlKey = "configSourceURL"
+
+    private static var fileURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("active-config.json")
+    }
+
+    static func save(data: Data, sourceURL: String) {
+        guard let file = fileURL else { return }
+        try? FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
+        UserDefaults.standard.set(sourceURL, forKey: urlKey)
+    }
+
+    static func savedSourceURL() -> String? {
+        UserDefaults.standard.string(forKey: urlKey)
+    }
+
+    static func loadConfig() -> TVBoxConfig? {
+        guard let file = fileURL, let data = try? Data(contentsOf: file) else { return nil }
+        if MaoYuanAdapter.looksLikeMaoYuan(data) {
+            return try? MaoYuanAdapter.convert(from: data)
+        }
+        return try? ConfigLoader.load(from: data)
+    }
+}
