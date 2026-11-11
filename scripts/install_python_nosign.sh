@@ -19,10 +19,16 @@ DEST="$APP_DIR/Python/lib"
 
 mkdir -p "$DEST"
 if [ -d "$XCF/lib" ]; then
-    rsync -a --delete "$XCF/lib/" "$DEST/" --exclude 'libpython*.dylib'
-    rsync -a "$XCF/ios-arm64/lib-arm64/" "$DEST/" --exclude 'libpython*.dylib'
+    # Slimming: the stdlib's own test suites, the idle editor, the
+    # turtle demo and ensurepip's bundled wheels are dead weight in a
+    # spider runtime — no spider imports them, and they cost ~15 MB.
+    SLIM=(--exclude 'libpython*.dylib' --exclude '/python3.13/test'
+          --exclude '/python3.13/idlelib' --exclude '/python3.13/turtledemo'
+          --exclude '/python3.13/ensurepip')
+    rsync -a --delete "$XCF/lib/" "$DEST/" "${SLIM[@]}"
+    rsync -a "$XCF/ios-arm64/lib-arm64/" "$DEST/" "${SLIM[@]}"
 else
-    rsync -a --delete "$XCF/ios-arm64/lib/" "$DEST/" --exclude 'libpython*.dylib'
+    rsync -a --delete "$XCF/ios-arm64/lib/" "$DEST/" --exclude 'libpython*.dylib' --exclude '/python3.13/test' --exclude '/python3.13/idlelib' --exclude '/python3.13/turtledemo' --exclude '/python3.13/ensurepip'
 fi
 
 PYVER=$(ls "$DEST" | grep -E '^python3\.[0-9]+$' | head -1)
