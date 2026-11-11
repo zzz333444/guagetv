@@ -226,7 +226,7 @@ struct SettingsView: View {
         Task {
             do {
                 let data = try await NetFetch.dataForConfig(from: url)
-                let parsed = try TVBoxConfig.load(from: data)
+                let parsed = try ConfigLoader.load(from: data)
                 let updated = ConfigLibrary.add(data: data, sourceURL: source, siteCount: parsed.sites.count)
                 entries = ConfigLibrary.entries()
                 if updated.id == ConfigLibrary.activeID() { config = parsed }

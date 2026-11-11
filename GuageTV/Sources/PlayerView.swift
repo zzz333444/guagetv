@@ -672,7 +672,7 @@ final class NativeController: NSObject, ObservableObject {
     func setupPiP(layer: AVPlayerLayer) {
         guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
         if pipController?.playerLayer === layer { return }
-        let controller = AVPictureInPictureController(playerLayer: layer)
+        guard let controller = AVPictureInPictureController(playerLayer: layer) else { return }
         controller.delegate = self
         pipController = controller
     }
@@ -713,7 +713,7 @@ final class NativeController: NSObject, ObservableObject {
                             var text = "\(Int(size.width))×\(Int(size.height))"
                             Task { @MainActor in
                                 if let track = try? await item.asset.loadTracks(withMediaType: .video).first,
-                                   let desc = track.formatDescriptions.first as? CMFormatDescription {
+                                   let desc = track.formatDescriptions.first as! CMFormatDescription {
                                     let codec = PlayerView.codecName(CMFormatDescriptionGetMediaSubType(desc))
                                     if !codec.isEmpty { self.specText = text + " · " + codec }
                                 }
