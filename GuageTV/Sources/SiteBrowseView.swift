@@ -7,15 +7,19 @@ struct PosterCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
-                Group {
-                    if !item.pic.isEmpty {
-                        PosterImage(urlString: item.pic)
-                    } else {
-                        Rectangle().fill(Color.white.opacity(0.08))
+                // The bare Rectangle owns the cell's size (2:3 from the
+                // column width — fully deterministic); the poster rides
+                // in an overlay, so a loaded image's intrinsic size can
+                // never feed back into grid layout.
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .overlay {
+                        if !item.pic.isEmpty {
+                            PosterImage(urlString: item.pic)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .posterFrame()
+                    .posterFrame()
                 if !item.remarks.isEmpty {
                     Text(item.remarks)
                         .font(.caption2.weight(.medium))

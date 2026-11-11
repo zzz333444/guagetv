@@ -9,7 +9,7 @@ struct SettingsView: View {
     @State private var status = "还没有导入配置"
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v10 · 封面统一"
+    static let buildLabel = "v1.01 · 封面定版"
 
     var body: some View {
         NavigationStack {
