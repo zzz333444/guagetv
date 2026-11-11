@@ -20,7 +20,61 @@ final class HistoryStore: ObservableObject {
         var updatedAt: Date
         var isFavourite: Bool = false
         var isWatchlist: Bool = false
+        // v1.06: enough context to re-open the detail page or resume
+        // playback straight from the history list.
+        var lineID: String = ""
+        var siteName: String = ""
+        var episodeID: String = ""
+        var playFlag: String = ""
+        var playHeader: [String: String] = [:]
         var id: String { siteKey + "|" + vodId }
+
+        enum CodingKeys: String, CodingKey {
+            case vodId, siteKey, name, pic, episodeName, episodeURL
+            case positionSeconds, durationSeconds, watchedSeconds, updatedAt
+            case isFavourite, isWatchlist, lineID, siteName, episodeID
+            case playFlag, playHeader
+        }
+
+        init(vodId: String, siteKey: String, name: String, pic: String,
+             episodeName: String, episodeURL: String, positionSeconds: Double,
+             durationSeconds: Double, watchedSeconds: Double, updatedAt: Date,
+             isFavourite: Bool = false, isWatchlist: Bool = false,
+             lineID: String = "", siteName: String = "", episodeID: String = "",
+             playFlag: String = "", playHeader: [String: String] = [:]) {
+            self.vodId = vodId; self.siteKey = siteKey; self.name = name
+            self.pic = pic; self.episodeName = episodeName
+            self.episodeURL = episodeURL; self.positionSeconds = positionSeconds
+            self.durationSeconds = durationSeconds
+            self.watchedSeconds = watchedSeconds; self.updatedAt = updatedAt
+            self.isFavourite = isFavourite; self.isWatchlist = isWatchlist
+            self.lineID = lineID; self.siteName = siteName
+            self.episodeID = episodeID; self.playFlag = playFlag
+            self.playHeader = playHeader
+        }
+
+        /// Tolerant decoding: entries written before v1.06 lack the
+        /// context fields and must still load.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            vodId = try c.decode(String.self, forKey: .vodId)
+            siteKey = try c.decode(String.self, forKey: .siteKey)
+            name = try c.decode(String.self, forKey: .name)
+            pic = try c.decode(String.self, forKey: .pic)
+            episodeName = try c.decode(String.self, forKey: .episodeName)
+            episodeURL = try c.decode(String.self, forKey: .episodeURL)
+            positionSeconds = try c.decode(Double.self, forKey: .positionSeconds)
+            durationSeconds = try c.decode(Double.self, forKey: .durationSeconds)
+            watchedSeconds = try c.decode(Double.self, forKey: .watchedSeconds)
+            updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+            isFavourite = try c.decodeIfPresent(Bool.self, forKey: .isFavourite) ?? false
+            isWatchlist = try c.decodeIfPresent(Bool.self, forKey: .isWatchlist) ?? false
+            lineID = try c.decodeIfPresent(String.self, forKey: .lineID) ?? ""
+            siteName = try c.decodeIfPresent(String.self, forKey: .siteName) ?? ""
+            episodeID = try c.decodeIfPresent(String.self, forKey: .episodeID) ?? ""
+            playFlag = try c.decodeIfPresent(String.self, forKey: .playFlag) ?? ""
+            playHeader = try c.decodeIfPresent([String: String].self, forKey: .playHeader) ?? [:]
+        }
     }
 
     @Published private(set) var entries: [Entry] = []
@@ -43,6 +97,30 @@ final class HistoryStore: ObservableObject {
         } else {
             entries.insert(entry, at: 0)
         }
+        save()
+    }
+
+    /// Player heartbeat: keep the resume point (and rough watch time)
+    /// current, and float the entry to the top of the list.
+    func updatePosition(id: String, position: Double, duration: Double,
+                        playing: Bool, accumulate: Bool = true) {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[i].positionSeconds = position
+        if duration > 0 { entries[i].durationSeconds = duration }
+        if playing && accumulate { entries[i].watchedSeconds += 5 }
+        entries[i].updatedAt = Date()
+        let entry = entries.remove(at: i)
+        entries.insert(entry, at: 0)
+        save()
+    }
+
+    func remove(id: String) {
+        entries.removeAll { $0.id == id }
+        save()
+    }
+
+    func clearAll() {
+        entries.removeAll()
         save()
     }
 
@@ -75,4 +153,12 @@ final class HistoryStore: ObservableObject {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
+}
+
+/// What a detail page needs to file a history entry for its playback.
+struct HistorySeed {
+    let lineID: String
+    let siteKey: String
+    let siteName: String
+    let vodId: String
 }

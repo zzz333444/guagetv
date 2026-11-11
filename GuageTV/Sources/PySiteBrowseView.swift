@@ -230,7 +230,10 @@ struct PyDetailLoaderView: View {
         Group {
             if let detail {
                 DetailView(detail: detail, header: site.header ?? [:],
-                           playerResolver: resolve)
+                           playerResolver: resolve,
+                           historySeed: HistorySeed(
+                               lineID: ConfigLibrary.activeID() ?? "",
+                               siteKey: site.key, siteName: site.name, vodId: item.id))
             } else if let errorText {
                 ScrollView {
                     Text(errorText)

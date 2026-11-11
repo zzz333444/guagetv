@@ -24,6 +24,10 @@ struct PlayerView: View {
     let episodes: [EpisodeRef]
     var header: [String: String] = [:]
     var title: String = ""
+    /// When set, playback reports its position to HistoryStore and
+    /// resumes at resumeAt once the duration is known.
+    var historyID: String?
+    var resumeAt: Double = 0
 
     @State private var index: Int
     @StateObject private var mpv = MPVController()
@@ -44,6 +48,7 @@ struct PlayerView: View {
     @State private var previewTask: Task<Void, Never>?
     @State private var lastPreviewTarget: Double = -10
     @State private var showRemaining = false
+    @State private var didResume = false
     @State private var hudGeneration = 0
 
     private enum DragMode { case scrub, brightness, volume }
@@ -56,10 +61,13 @@ struct PlayerView: View {
         _index = State(initialValue: 0)
     }
 
-    init(episodes: [EpisodeRef], startIndex: Int, header: [String: String] = [:], title: String = "") {
+    init(episodes: [EpisodeRef], startIndex: Int, header: [String: String] = [:], title: String = "",
+         historyID: String? = nil, resumeAt: Double = 0) {
         self.episodes = episodes
         self.header = header
         self.title = title
+        self.historyID = historyID
+        self.resumeAt = resumeAt
         _index = State(initialValue: min(max(startIndex, 0), max(episodes.count - 1, 0)))
     }
 
@@ -131,6 +139,9 @@ struct PlayerView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { scheduleChromeHide() }
+        .onChange(of: duration) { _ in applyResumeIfNeeded() }
+        .task { await saveProgressLoop() }
+        .onDisappear { saveProgress(accumulate: false) }
         .onChange(of: index) { _ in pokeChrome() }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
     }
@@ -512,6 +523,30 @@ struct PlayerView: View {
         let target = min(max(currentTime + delta, 0),
                          duration > 0 ? duration : .greatestFiniteMagnitude)
         showToast((delta >= 0 ? "快进至 " : "快退至 ") + timeLabel(target))
+    }
+
+    // MARK: history / resume
+
+    private func applyResumeIfNeeded() {
+        guard !didResume, resumeAt > 5, duration > 0 else { return }
+        didResume = true
+        seek(to: resumeAt)
+        showToast("已续播至 " + timeLabel(resumeAt))
+    }
+
+    private func saveProgress(accumulate: Bool = true) {
+        guard let historyID else { return }
+        HistoryStore.shared.updatePosition(
+            id: historyID, position: currentTime, duration: duration,
+            playing: isPlaying, accumulate: accumulate)
+    }
+
+    private func saveProgressLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if Task.isCancelled { break }
+            saveProgress()
+        }
     }
 
     private func showToast(_ text: String) {

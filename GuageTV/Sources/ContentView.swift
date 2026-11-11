@@ -19,7 +19,7 @@ struct ContentView: View {
             Group {
                 switch tab {
                 case 0: DiscoverView(config: config)
-                case 1: ProfileView()
+                case 1: HistoryView()
                 case 2: LibraryView(config: $config) { tab = 3 }
                 default: SettingsView(config: $config)
                 }
@@ -40,7 +40,7 @@ struct ContentView: View {
         HStack(spacing: 10) {
             HStack(spacing: 2) {
                 tabButton(index: 0, icon: "house.fill", label: "发现")
-                tabButton(index: 1, icon: "person.fill", label: "我的")
+                tabButton(index: 1, icon: "clock.fill", label: "记录")
                 tabButton(index: 2, icon: "externaldrive.fill", label: "资源库")
                 tabButton(index: 3, icon: "gearshape.fill", label: "设置")
             }

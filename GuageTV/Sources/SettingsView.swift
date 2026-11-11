@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.05 · JS 引擎"
+    static let buildLabel = "v1.06 · 记录与首页"
 
     var body: some View {
         NavigationStack {
@@ -112,9 +112,10 @@ struct SettingsView: View {
                     }
 
                     group(title: "应用") {
-                        row(icon: "info.circle", title: "关于呱壳", value: Self.buildLabel)
-                        row(icon: "chevron.left.forwardslash.chevron.right", title: "Python 运行时", value: PythonRuntime.shared.statusText)
-                        row(icon: "curlybraces", title: "JS 运行时", value: "drpy2 · JavaScriptCore")
+                        NavigationLink { AboutView() } label: {
+                            row(icon: "info.circle", title: "关于呱壳", value: "")
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -124,7 +125,7 @@ struct SettingsView: View {
             .background(AmbientBackground(imageURL: nil))
             .preferredColorScheme(.dark)
             .fileImporter(isPresented: $showFileImporter,
-                          allowedContentTypes: [.json, .plainText, .text],
+                          allowedContentTypes: [.item],
                           allowsMultipleSelection: false) { result in
                 Task { await importFiles(result) }
             }
@@ -234,7 +235,7 @@ struct SettingsView: View {
             switch ext {
             case "py", "js":
                 try await registerSingleFile(data: data, fileName: fileURL.lastPathComponent, kind: ext)
-            case "json":
+            case "json", "txt", "":
                 if MaoYuanAdapter.looksLikeMaoYuan(data) {
                     let parsed = try MaoYuanAdapter.convert(from: data)
                     config = parsed
@@ -281,6 +282,40 @@ struct SettingsView: View {
                                       siteCount: 1)
         entries = ConfigLibrary.entries()
         status = (kind == "py" ? "py 文件已导入为单站线路：" : "JS 规则已导入为单站线路：") + entry.name
+    }
+}
+
+/// 关于呱壳 — version and both runtime statuses live here (moved out
+/// of the settings list at the user's request).
+struct AboutView: View {
+    var body: some View {
+        SettingsPage(title: "关于呱壳") {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    aboutRow("应用", "呱壳 GuageTV")
+                    Divider().background(Color.white.opacity(0.12))
+                    aboutRow("版本", SettingsView.buildLabel)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    aboutRow("Python 运行时", PythonRuntime.shared.statusText)
+                    Divider().background(Color.white.opacity(0.12))
+                    aboutRow("JS 运行时", "drpy2 3.9.52 · JavaScriptCore")
+                }
+            }
+            Text("个人自用壳：内容来自你自己导入的线路与文件，呱壳不提供任何影视内容。")
+                .font(.footnote).foregroundStyle(Theme.textDim)
+        }
+    }
+
+    private func aboutRow(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 10) {
+            Text(title).foregroundStyle(.white)
+            Spacer()
+            Text(value).foregroundStyle(Theme.textDim)
+                .multilineTextAlignment(.trailing)
+        }
     }
 }
 

@@ -19,10 +19,15 @@ struct DiscoverView: View {
     @State private var heroIndex = 0
     @State private var liveHero: [VodItem] = []
     @State private var liveSections: [DiscoverSection] = []
+    @State private var feedLineID = ""
+    @State private var feedConfig: TVBoxConfig?
+    @State private var showLinePicker = false
 
-    /// First CMS site feeds the Discover page natively (no runtime needed).
+    /// First CMS site of the HOME line feeds the Discover page (the
+    /// home line is chosen with the 编辑 button and may differ from
+    /// the active line).
     private var activeSite: TVBoxConfig.Site? {
-        config?.sites.first { $0.kind == .cmsJSON || $0.kind == .cmsXML }
+        (feedConfig ?? config)?.sites.first { $0.kind == .cmsJSON || $0.kind == .cmsXML }
     }
     private var displayHero: [VodItem] { liveHero.isEmpty ? heroItems : liveHero }
     private var displaySections: [DiscoverSection] { liveSections.isEmpty ? sections : liveSections }
@@ -41,8 +46,74 @@ struct DiscoverView: View {
             }
             .background(AmbientBackground(imageURL: displayHero.first?.pic))
             .preferredColorScheme(.dark)
+            .overlay(alignment: .bottomLeading) { editButton }
+            .sheet(isPresented: $showLinePicker) { linePicker }
+            .onAppear {
+                if feedLineID.isEmpty {
+                    feedLineID = ConfigLibrary.homeLineID()
+                    feedConfig = ConfigLibrary.load(id: feedLineID)
+                }
+            }
         }
         .task(id: activeSite?.id ?? "") { await loadFeed() }
+    }
+
+    private var editButton: some View {
+        Button { showLinePicker = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "pencil").font(.footnote.weight(.semibold))
+                Text("编辑").font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        }
+        .padding(.leading, 18)
+        .padding(.bottom, 108)
+    }
+
+    private var linePicker: some View {
+        NavigationStack {
+            List {
+                ForEach(ConfigLibrary.entries()) { entry in
+                    Button {
+                        ConfigLibrary.setHomeLineID(entry.id)
+                        feedLineID = entry.id
+                        feedConfig = ConfigLibrary.load(id: entry.id)
+                        liveHero = []
+                        liveSections = []
+                        showLinePicker = false
+                    } label: {
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.name).foregroundStyle(.white)
+                                Text("\(entry.siteCount) 个站点")
+                                    .font(.caption).foregroundStyle(Theme.textDim)
+                            }
+                            Spacer()
+                            if entry.id == feedLineID {
+                                Text("首页").font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+                                Image(systemName: "checkmark").foregroundStyle(Theme.ok)
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.white.opacity(0.06))
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg)
+            .navigationTitle("选择首页线路")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showLinePicker = false }
+                }
+            }
+            .preferredColorScheme(.dark)
+        }
+        .presentationDetents([.medium])
     }
 
     private func loadFeed() async {
@@ -166,7 +237,7 @@ struct DiscoverView: View {
                     ForEach(items) { item in
                         if let site = activeSite {
                             NavigationLink {
-                                DetailLoaderView(site: site, item: item)
+                                DetailLoaderView(site: site, item: item, lineID: feedLineID)
                             } label: {
                                 posterCard(item)
                             }

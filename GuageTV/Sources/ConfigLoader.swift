@@ -368,6 +368,28 @@ enum ConfigLibrary {
         return loadActive()
     }
 
+    /// Parse any line's stored config without activating it (the
+    /// Discover home-line and history may point at non-active lines).
+    static func load(id: String) -> TVBoxConfig? { loadEntry(id: id) }
+
+    static func sourceURL(id: String) -> String? {
+        entries().first { $0.id == id }?.sourceURL
+    }
+
+    // MARK: home line (which line feeds the Discover page)
+
+    private static let homeLineKey = "homeConfigID.v1"
+
+    static func homeLineID() -> String {
+        if let id = UserDefaults.standard.string(forKey: homeLineKey),
+           entries().contains(where: { $0.id == id }) { return id }
+        return activeID() ?? entries().first?.id ?? ""
+    }
+
+    static func setHomeLineID(_ id: String) {
+        UserDefaults.standard.set(id, forKey: homeLineKey)
+    }
+
     static func loadActive() -> TVBoxConfig? {
         migrateLegacyIfNeeded()
         if let id = activeID(), let cfg = loadEntry(id: id) { return cfg }

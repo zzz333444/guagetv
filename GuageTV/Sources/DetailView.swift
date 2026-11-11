@@ -11,6 +11,9 @@ struct DetailView: View {
     /// episode urls are opaque ids until playerContent answers. A nil
     /// result means the episode needs a parse interface (later stage).
     var playerResolver: ((String, String) async -> (url: String, header: [String: String])?)?
+    /// Set by the loaders so playback lands in the history list with
+    /// enough context to resume straight from there.
+    var historySeed: HistorySeed?
     @State private var lineIndex = 0
     @State private var playSelection: PlaySelection?
     @State private var resolving = false
@@ -38,7 +41,8 @@ struct DetailView: View {
         .preferredColorScheme(.dark)
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
-                       header: sel.playHeader ?? header, title: detail.name)
+                       header: sel.playHeader ?? header, title: detail.name,
+                       historyID: sel.historyID, resumeAt: sel.resumeAt)
         }
         .overlay {
             if resolving {
@@ -140,9 +144,11 @@ struct DetailView: View {
 
     private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
         guard let playerResolver else {
+            let resume = recordHistory(episode: ep, episodeURL: ep.url, flag: "", playHeader: header)
             playSelection = PlaySelection(
                 episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },
-                index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0)
+                index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0,
+                historyID: historyEntryID(), resumeAt: resume)
             return
         }
         guard !resolving else { return }
@@ -152,13 +158,41 @@ struct DetailView: View {
             let resolved = await playerResolver(flag, ep.url)
             resolving = false
             if let resolved {
+                let resume = recordHistory(episode: ep, episodeURL: resolved.url, flag: flag, playHeader: resolved.header)
                 playSelection = PlaySelection(
                     episodes: [PlayerView.EpisodeRef(name: ep.name, url: resolved.url)],
-                    index: 0, playHeader: resolved.header)
+                    index: 0, playHeader: resolved.header,
+                    historyID: historyEntryID(), resumeAt: resume)
             } else {
                 playNote = "这一集需要解析接口，下一阶段接入"
             }
         }
+    }
+
+    // MARK: history
+
+    private func historyEntryID() -> String? {
+        guard let seed = historySeed else { return nil }
+        return seed.siteKey + "|" + seed.vodId
+    }
+
+    /// File (or refresh) the history entry for this episode and return
+    /// the resume point when the SAME episode was watched before.
+    @discardableResult
+    private func recordHistory(episode: VodDetail.Episode, episodeURL: String,
+                               flag: String, playHeader: [String: String]) -> Double {
+        guard let seed = historySeed, let id = historyEntryID() else { return 0 }
+        let existing = HistoryStore.shared.entries.first { $0.id == id }
+        let resume = (existing?.episodeID == episode.url) ? (existing?.positionSeconds ?? 0) : 0
+        HistoryStore.shared.record(HistoryStore.Entry(
+            vodId: seed.vodId, siteKey: seed.siteKey, name: detail.name, pic: detail.pic,
+            episodeName: episode.name, episodeURL: episodeURL,
+            positionSeconds: resume,
+            durationSeconds: existing?.durationSeconds ?? 0,
+            watchedSeconds: 0, updatedAt: Date(),
+            lineID: seed.lineID, siteName: seed.siteName, episodeID: episode.url,
+            playFlag: flag, playHeader: playHeader))
+        return resume
     }
 }
 
@@ -166,5 +200,7 @@ private struct PlaySelection: Identifiable {
     let episodes: [PlayerView.EpisodeRef]
     let index: Int
     var playHeader: [String: String]?
+    var historyID: String?
+    var resumeAt: Double = 0
     var id: String { episodes[index].url + "#\(index)" }
 }

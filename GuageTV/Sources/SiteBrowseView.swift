@@ -44,13 +44,19 @@ struct PosterCell: View {
 struct DetailLoaderView: View {
     let site: TVBoxConfig.Site
     let item: VodItem
+    /// The line this site belongs to (defaults to the active line);
+    /// the Discover home-line passes its own line here.
+    var lineID: String? = nil
     @State private var detail: VodDetail?
     @State private var failed = false
 
     var body: some View {
         Group {
             if let detail {
-                DetailView(detail: detail, header: site.header ?? [:])
+                DetailView(detail: detail, header: site.header ?? [:],
+                           historySeed: HistorySeed(
+                               lineID: lineID ?? ConfigLibrary.activeID() ?? "",
+                               siteKey: site.key, siteName: site.name, vodId: item.id))
             } else if failed {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle").font(.title3)
