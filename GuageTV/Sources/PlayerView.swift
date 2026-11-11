@@ -40,6 +40,9 @@ struct PlayerView: View {
     @State private var dragLevel: Double = 0
     @State private var scrubTarget: Double = 0
     @State private var hudVisible = false
+    @State private var previewImage: UIImage?
+    @State private var previewTask: Task<Void, Never>?
+    @State private var lastPreviewTarget: Double = -10
     @State private var showRemaining = false
     @State private var hudGeneration = 0
 
@@ -156,10 +159,10 @@ struct PlayerView: View {
         HStack(spacing: 0) {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { seekBy(-seekStep) }
+                .onTapGesture(count: 2) { seekBy(-seekStep); showSeekToast(delta: -seekStep) }
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { seekBy(seekStep) }
+                .onTapGesture(count: 2) { seekBy(seekStep); showSeekToast(delta: seekStep) }
         }
         .onTapGesture {
             withAnimation { showChrome.toggle() }
@@ -202,6 +205,7 @@ struct PlayerView: View {
             guard duration > 0 else { return }
             let delta = Double(dx) / Double(size.width) * duration
             scrubTarget = min(max(dragStartTime + delta, 0), duration)
+            requestPreview(at: scrubTarget)
         case .brightness:
             let level = min(max(dragStartLevel - Double(dy) / 220, 0.05), 1)
             dragLevel = level
@@ -217,6 +221,7 @@ struct PlayerView: View {
 
     private func endDrag() {
         if dragMode == .scrub, duration > 0 { seek(to: scrubTarget) }
+        clearPreview()
         dragMode = nil
         hudGeneration += 1
         let gen = hudGeneration
@@ -231,6 +236,12 @@ struct PlayerView: View {
         VStack(spacing: 8) {
             switch dragMode {
             case .scrub:
+                if let previewImage {
+                    Image(uiImage: previewImage)
+                        .resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 148, height: 84)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
                 Image(systemName: scrubTarget >= dragStartTime ? "goforward" : "gobackward")
                     .font(.title3)
                 Text(timeLabel(scrubTarget))
@@ -328,8 +339,11 @@ struct PlayerView: View {
                     }
                 }
             }
-            SeekBar(value: currentTime, duration: duration) { seconds in
+            SeekBar(value: currentTime, duration: duration,
+                    preview: previewImage,
+                    onDrag: { requestPreview(at: $0) }) { seconds in
                 seek(to: seconds)
+                clearPreview()
             }
             HStack(spacing: 12) {
                 Button { togglePlay(); pokeChrome() } label: {
@@ -473,6 +487,33 @@ struct PlayerView: View {
         pokeChrome()
     }
 
+    /// Seek-preview frames come from the native engine's generator
+    /// (m3u8/mp4 — the bulk of playback). mpv would need a second
+    /// decoder instance to grab arbitrary frames, so its scrub HUD
+    /// stays time-only.
+    private func requestPreview(at seconds: Double) {
+        guard !isMPV else { return }
+        guard abs(seconds - lastPreviewTarget) > 0.8 else { return }
+        lastPreviewTarget = seconds
+        previewTask?.cancel()
+        previewTask = Task { @MainActor in
+            let image = await native.previewImage(at: seconds)
+            if !Task.isCancelled, let image { previewImage = image }
+        }
+    }
+
+    private func clearPreview() {
+        previewTask?.cancel()
+        previewImage = nil
+        lastPreviewTarget = -10
+    }
+
+    private func showSeekToast(delta: Double) {
+        let target = min(max(currentTime + delta, 0),
+                         duration > 0 ? duration : .greatestFiniteMagnitude)
+        showToast((delta >= 0 ? "快进至 " : "快退至 ") + timeLabel(target))
+    }
+
     private func showToast(_ text: String) {
         withAnimation { toast = text }
         Task { @MainActor in
@@ -593,6 +634,21 @@ final class NativeController: ObservableObject {
         if player.timeControlStatus == .playing { player.rate = value }
     }
 
+    /// Frame at an arbitrary position, for the seek-preview bubble.
+    /// Async generator API with a tolerant window so HLS doesn't have
+    /// to land the exact frame.
+    func previewImage(at seconds: Double) async -> UIImage? {
+        guard let item = player.currentItem else { return nil }
+        let generator = AVAssetImageGenerator(asset: item.asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 320, height: 180)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 2, preferredTimescale: 600)
+        let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
+        guard let result = try? await generator.image(at: time) else { return nil }
+        return UIImage(cgImage: result.image)
+    }
+
     func snapshot() -> UIImage? {
         guard let item = player.currentItem else { return nil }
         let generator = AVAssetImageGenerator(asset: item.asset)
@@ -644,6 +700,8 @@ private struct RoutePickerView: UIViewRepresentable {
 private struct SeekBar: View {
     let value: Double
     let duration: Double
+    var preview: UIImage?
+    var onDrag: ((Double) -> Void)?
     var onCommit: (Double) -> Void
     @State private var dragFraction: Double?
 
@@ -661,13 +719,18 @@ private struct SeekBar: View {
                 Circle().fill(Color.white)
                     .frame(width: 14, height: 14)
                     .offset(x: geo.size.width * fraction - 7)
+                if dragFraction != nil {
+                    bubble(width: geo.size.width)
+                }
             }
             .frame(height: 20)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        dragFraction = min(max(drag.location.x / geo.size.width, 0), 1)
+                        let f = min(max(drag.location.x / geo.size.width, 0), 1)
+                        dragFraction = f
+                        if duration > 0 { onDrag?(f * duration) }
                     }
                     .onEnded { drag in
                         let f = min(max(drag.location.x / geo.size.width, 0), 1)
@@ -677,6 +740,35 @@ private struct SeekBar: View {
             )
         }
         .frame(height: 20)
+    }
+
+    /// Floating preview while scrubbing the bar: target frame (native
+    /// engine) + the exact landing time, clamped inside the bar.
+    private func bubble(width: CGFloat) -> some View {
+        let bubbleWidth: CGFloat = 128
+        let x = min(max(width * fraction - bubbleWidth / 2, 0), max(width - bubbleWidth, 0))
+        return VStack(spacing: 5) {
+            if let preview {
+                Image(uiImage: preview)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: bubbleWidth, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            Text(timeText(fraction * duration))
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+        }
+        .padding(6)
+        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+        .offset(x: x, y: -96)
+    }
+
+    private func timeText(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "00:00" }
+        let s = Int(seconds)
+        return s >= 3600
+            ? String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+            : String(format: "%02d:%02d", s / 60, s % 60)
     }
 }
 
