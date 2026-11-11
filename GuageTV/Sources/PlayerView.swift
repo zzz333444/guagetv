@@ -7,6 +7,8 @@ import SwiftUI
 ///  - mpv (FFmpegKit's libmpv): everything else — MKV/FLV/AVI/TS/WebM,
 ///    ASS subtitles, AV1 — the formats AVPlayer refuses.
 /// Engine is picked by file extension; spider headers go to both.
+/// Engine choice honours the 播放设置 preference: "auto" picks by
+/// extension, "native" forces AVPlayer, "mpv" forces the FFmpeg engine.
 struct PlayerView: View {
     let urlString: String
     var header: [String: String] = [:]
@@ -17,9 +19,19 @@ struct PlayerView: View {
         "m2ts", "webm", "3gp", "asf", "vob", "f4v",
     ]
 
+    private var useMPV: Bool {
+        switch UserDefaults.standard.string(forKey: "enginePreference") ?? "auto" {
+        case "mpv": return true
+        case "native": return false
+        default:
+            guard let url = URL(string: urlString) else { return false }
+            return Self.mpvExtensions.contains(url.pathExtension.lowercased())
+        }
+    }
+
     var body: some View {
         if let url = URL(string: urlString) {
-            if Self.mpvExtensions.contains(url.pathExtension.lowercased()) {
+            if useMPV {
                 MPVPlayerView(url: url, header: header)
             } else {
                 NativePlayerView(url: url, header: header)

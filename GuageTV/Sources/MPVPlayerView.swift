@@ -40,6 +40,8 @@ final class MPVController: ObservableObject {
         }
         guard mpv_initialize(h) >= 0 else { return }
         createRenderContext()
+        let scale = UserDefaults.standard.object(forKey: "subtitleScale") as? Double ?? 1.0
+        setProperty("sub-scale", String(scale))
         command(["loadfile", url.absoluteString])
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.poll()
@@ -72,6 +74,10 @@ final class MPVController: ObservableObject {
 
     func seek(to seconds: Double) {
         command(["seek", String(seconds), "absolute"])
+    }
+
+    func seekRelative(_ delta: Double) {
+        command(["seek", String(delta), "relative"])
     }
 
     // MARK: rendering (called from the view's display link, main thread)
@@ -165,10 +171,12 @@ final class MPVController: ObservableObject {
     }
 }
 
-/// CALayer surface driven by a display link.
+/// CALayer surface driven by a display link. Gestures: single tap toggles
+/// play/pause; double tap on the left/right half seeks by the 操控 step.
 final class MPVRenderUIView: UIView {
     weak var controller: MPVController?
     private var link: CADisplayLink?
+    private var gesturesInstalled = false
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -176,17 +184,42 @@ final class MPVRenderUIView: UIView {
             let l = CADisplayLink(target: self, selector: #selector(tick))
             l.add(to: .main, forMode: .common)
             link = l
+            installGestures()
         } else if window == nil {
             link?.invalidate()
             link = nil
         }
     }
 
+    private func installGestures() {
+        guard !gesturesInstalled else { return }
+        gesturesInstalled = true
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
+        singleTap.require(toFail: doubleTap)
+        addGestureRecognizer(doubleTap)
+        addGestureRecognizer(singleTap)
+        isUserInteractionEnabled = true
+    }
+
+    @objc private func handleSingleTap() {
+        controller?.togglePlay()
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        guard bounds.width > 0 else { return }
+        let step = UserDefaults.standard.object(forKey: "seekStep") as? Double ?? 15.0
+        let x = gesture.location(in: self).x
+        controller?.seekRelative(x < bounds.width / 2 ? -step : step)
+    }
+
     @objc private func tick() {
         guard let c = controller, bounds.width > 0, bounds.height > 0 else { return }
+        layer.contentsGravity = UserDefaults.standard.string(forKey: "videoGravity") == "fill"
+            ? .resizeAspectFill : .resizeAspect
         if let img = c.renderFrame(maxSize: bounds.size, scale: window?.screen.scale ?? 2) {
             layer.contents = img
-            layer.contentsGravity = .resizeAspect
         }
     }
 }
