@@ -251,9 +251,7 @@ struct JSDetailLoaderView: View {
             return .failed(reason: ResolveOutcome.spiderReason(in: result) ?? "蜘蛛没有返回播放地址")
         }
         var header = site.header ?? [:]
-        if let extra = result["header"] as? [String: Any] {
-            for (key, value) in extra { header[key] = String(describing: value) }
-        }
+        for (key, value) in PySiteBrowseView.headerDict(from: result["header"]) { header[key] = value }
         if parse == 0 { return .ok(url: url, header: header) }
         guard let resolved = await ParseResolver.resolve(flag: flag, url: url, parses: parses)
         else { return .failed(reason: "解析接口没能解析出播放地址") }

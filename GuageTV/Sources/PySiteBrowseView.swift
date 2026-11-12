@@ -218,6 +218,26 @@ struct PySiteBrowseView: View {
         }
     }
 
+    /// Spider play headers arrive either as a JSON object or as a
+    /// JSON *string* (catvod's JSONObject.toString form — Wogg/Quark
+    /// returns {"Cookie":…,"Referer":…,"User-Agent":…} as a string).
+    /// Dropping the string form loses the drive Cookie + Referer and
+    /// the CDN answers 412, so accept both shapes.
+    static func headerDict(from raw: Any?) -> [String: String] {
+        if let dict = raw as? [String: Any] {
+            var out: [String: String] = [:]
+            for (key, value) in dict { out[key] = String(describing: value) }
+            return out
+        }
+        if let string = raw as? String, let data = string.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var out: [String: String] = [:]
+            for (key, value) in dict { out[key] = String(describing: value) }
+            return out
+        }
+        return [:]
+    }
+
     static func intValue(_ raw: Any?) -> Int? {
         if let number = raw as? NSNumber { return number.intValue }
         if let text = raw as? String { return Int(text) }
@@ -292,9 +312,7 @@ struct PyDetailLoaderView: View {
             return .failed(reason: ResolveOutcome.spiderReason(in: result) ?? "蜘蛛没有返回播放地址")
         }
         var header = site.header ?? [:]
-        if let extra = result["header"] as? [String: Any] {
-            for (key, value) in extra { header[key] = String(describing: value) }
-        }
+        for (key, value) in PySiteBrowseView.headerDict(from: result["header"]) { header[key] = value }
         if parse == 0 { return .ok(url: url, header: header) }
         guard let resolved = await ParseResolver.resolve(flag: flag, url: url, parses: parses)
         else { return .failed(reason: "解析接口没能解析出播放地址") }
