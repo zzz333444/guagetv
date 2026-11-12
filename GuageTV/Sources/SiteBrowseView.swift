@@ -110,6 +110,7 @@ struct SiteBrowseView: View {
             if isCMS { cmsBody }
             else if site.kind == .spiderPY { PySiteBrowseView(site: site, parses: parses) }
             else if site.kind == .spiderJS || site.kind == .drpyJS { JSSiteBrowseView(site: site, parses: parses) }
+            else if site.kind == .spiderJAR && JarProxyClient.configured { JarSiteBrowseView(site: site, parses: parses) }
             else { pendingBody }
         }
         .navigationTitle(site.name)
@@ -266,7 +267,7 @@ struct SiteBrowseView: View {
 
     private var pendingText: String {
         switch site.kind {
-        case .spiderJAR: return "Jar 源依赖 JVM，iOS 平台无法运行，此源不可用。"
+        case .spiderJAR: return "Jar 源要在你自己的 JarProxy 服务器上跑：先在设置页填入代理地址，这类站就能打开。"
         case .spiderPY: return "Python 源：内嵌 Python 运行时在阶段 1 接入中，接入后此站可直接浏览。"
         case .spiderJS, .drpyJS: return "JS 源：JavaScriptCore 运行时在阶段 2 接入中，接入后此站可直接浏览。"
         default: return "此站类型待识别。"

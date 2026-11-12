@@ -9,11 +9,13 @@ struct SettingsView: View {
     @Binding var config: TVBoxConfig?
     @State private var configURL = ""
     @State private var status = "还没有导入配置"
+    @AppStorage("jarProxyURL") private var jarProxyURL = ""
+    @State private var jarTestNote = ""
     @State private var entries: [ConfigLibrary.Entry] = []
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.16 · 下载检测与跨线搜索"
+    static let buildLabel = "v1.17 · Jar 代理"
 
     var body: some View {
         NavigationStack {
@@ -66,6 +68,29 @@ struct SettingsView: View {
                                 Text("已加载 \(config.sites.count) 个站点 · \(config.lives?.count ?? 0) 个直播源")
                                     .font(.footnote).foregroundStyle(Theme.textDim)
                             }
+                        }
+                    }
+
+                    group(title: "Jar 代理") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            TextField("JarProxy 地址：http://192.168.1.8:9977", text: $jarProxyURL)
+                                .textFieldStyle(.roundedBorder)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                            HStack(spacing: 10) {
+                                Button("测试连接") {
+                                    Task { jarTestNote = await JarProxyClient.healthCheck() }
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 18).padding(.vertical, 8)
+                                .background(Theme.glass, in: Capsule())
+                                .foregroundStyle(Theme.text)
+                                if !jarTestNote.isEmpty {
+                                    Text(jarTestNote).font(.footnote).foregroundStyle(Theme.textDim)
+                                }
+                            }
+                            Text("Jar（csp_）站点不在手机上跑，而是转发到你自己部署的 JarProxy 服务器（JDK）上执行。填好地址后，资源库里的 Jar 站点直接解锁。")
+                                .font(.footnote).foregroundStyle(Theme.textDim)
                         }
                     }
 

@@ -211,7 +211,7 @@ struct LibraryView: View {
     }
 
     private func routeText(_ site: TVBoxConfig.Site) -> String {
-        site.kind == .spiderJAR ? "主线路 · 本平台不支持" : "主线路"
+        site.kind == .spiderJAR ? (JarProxyClient.configured ? "主线路 · Jar 代理" : "主线路 · 需 Jar 代理") : "主线路"
     }
 
     private func kindText(_ kind: TVBoxConfig.Site.Kind) -> String {
@@ -220,7 +220,7 @@ struct LibraryView: View {
         case .spiderPY: return "Python 源"
         case .spiderJS: return "JS 源"
         case .drpyJS: return "drpy 源"
-        case .spiderJAR: return "Jar 源 · iOS 无 JVM"
+        case .spiderJAR: return JarProxyClient.configured ? "Jar 源 · 代理执行" : "Jar 源 · 需设置代理"
         case .unknown: return "未知类型"
         }
     }

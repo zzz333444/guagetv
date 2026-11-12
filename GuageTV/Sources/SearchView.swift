@@ -16,6 +16,9 @@ struct SearchView: View {
     /// Parse interfaces per site key, filled at search start: results
     /// from imported single-file lines need their own line's parses.
     @State private var parsesByKey: [String: [TVBoxConfig.Parse]] = [:]
+    /// The active line's jar URL when the Jar proxy is configured;
+    /// jar sites join the search only then.
+    @State private var searchJarURL = ""
 
     private var cmsSites: [TVBoxConfig.Site] {
         (config?.sites ?? []).filter { $0.kind == .cmsJSON || $0.kind == .cmsXML }
@@ -192,6 +195,8 @@ struct SearchView: View {
         switch site.kind {
         case .spiderPY:
             PyDetailLoaderView(site: site, item: item, parses: parses)
+        case .spiderJAR:
+            JarDetailLoaderView(site: site, item: item, parses: parses, jar: searchJarURL)
         case .spiderJS, .drpyJS:
             JSDetailLoaderView(site: site, item: item,
                                ruleRef: (try? JSSiteBrowseView.resolveRuleRef(site)) ?? "",
@@ -301,8 +306,16 @@ struct SearchView: View {
                 }
             }
         }
+        // Jar sites of the ACTIVE line join in when a proxy is set.
+        var jarPool: [TVBoxConfig.Site] = []
+        var jarURL = ""
+        if JarProxyClient.configured, let resolved = JarProxyClient.jarURL(from: config) {
+            jarURL = resolved
+            jarPool = (config?.sites ?? []).filter { $0.kind == .spiderJAR && $0.searchable != 0 }
+        }
+        searchJarURL = jarURL
         parsesByKey = parseMap
-        let total = cmsSites.count + pyPool.count + jsPool.count
+        let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count
         var done = 0
         var responded = 0
         var out: [(site: TVBoxConfig.Site, items: [VodItem])] = []
@@ -372,6 +385,15 @@ struct SearchView: View {
                 failureNote += "\n" + errorSamples.joined(separator: "\n")
             }
         }
+        for site in jarPool {
+            progressText = "正在搜 Jar 站：\(site.name)…"
+            let items = await hardTimeout(25) { await searchJar(site, jar: jarURL, keyword: kw) }
+            if let items {
+                responded += 1
+                if !items.isEmpty { out.append((site, items)); results = out }
+            }
+            tick()
+        }
         finalNote = "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
         searched = true
         searching = false
@@ -382,6 +404,16 @@ struct SearchView: View {
             let path = try await PySiteBrowseView.downloadSpider(for: site)
             _ = try await SpiderBridge.shared.loadSpider(path: path, extend: site.extJSONString)
             let result = try await SpiderBridge.shared.searchContent(key: keyword)
+            return PySiteBrowseView.mapItems(result["list"])
+        } catch {
+            return nil
+        }
+    }
+
+    private func searchJar(_ site: TVBoxConfig.Site, jar: String, keyword: String) async -> [VodItem]? {
+        do {
+            let result = try await JarProxyClient.run(jar: jar, site: site, action: "searchContent",
+                                                      extra: ["key": keyword, "quick": false, "searchPg": "1"])
             return PySiteBrowseView.mapItems(result["list"])
         } catch {
             return nil
