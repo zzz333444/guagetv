@@ -59,6 +59,33 @@ struct HistoryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
+                        if segment == 1 {
+                            NavigationLink {
+                                WatchlistView()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "calendar.badge.clock")
+                                        .foregroundStyle(Theme.accent)
+                                    Text("追剧总览")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Theme.text)
+                                    Spacer()
+                                    let count = history.favourites.filter(\.hasUpdate).count
+                                    if count > 0 {
+                                        Text("\(count) 部有更新")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Theme.accent)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Theme.textDim)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+                        }
                         ForEach(shownEntries) { entry in
                             row(entry)
                                 .listRowBackground(Color.clear)

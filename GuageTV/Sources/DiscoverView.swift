@@ -23,6 +23,7 @@ struct DiscoverView: View {
     @State private var feedConfig: TVBoxConfig?
     @State private var showLinePicker = false
     @ObservedObject private var history = HistoryStore.shared
+    @ObservedObject private var layout = HomeLayout.shared
     @State private var cwPlayEntry: HistoryStore.Entry?
 
     /// First CMS site of the HOME line feeds the Discover page (the
@@ -38,12 +39,15 @@ struct DiscoverView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
-                    hero
-                    continueWatchingRow
-                    ForEach(displaySections) { section in
-                        posterRow(title: section.title, items: section.items)
+                    ForEach(layout.visibleModules) { module in
+                        switch module {
+                        case .hero: hero
+                        case .continueWatching: continueWatchingRow
+                        case .updates: updatesRow
+                        case .sections: sectionsGroup
+                        case .categories: categoryBrowse
+                        }
                     }
-                    categoryBrowse
                 }
                 .padding(.bottom, 110)   // clear the floating tab bar
             }
@@ -101,6 +105,81 @@ struct DiscoverView: View {
         }
     }
 
+    /// The feed's poster rows, as one arrangeable module.
+    @ViewBuilder
+    private var sectionsGroup: some View {
+        ForEach(displaySections) { section in
+            posterRow(title: section.title, items: section.items)
+        }
+    }
+
+    /// 追剧更新 — favourited series, updated ones first; the header
+    /// opens the full 追剧 page. Hidden entirely with no favourites.
+    @ViewBuilder
+    private var updatesRow: some View {
+        let favs = history.favourites.sorted { a, b in
+            if a.hasUpdate != b.hasUpdate { return a.hasUpdate }
+            return a.updatedAt > b.updatedAt
+        }
+        if !favs.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("追剧更新").font(.title3.bold()).foregroundStyle(Theme.text)
+                    let count = favs.filter(\.hasUpdate).count
+                    if count > 0 {
+                        Text("\(count) 部有更新")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Theme.accent, in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                    NavigationLink {
+                        WatchlistView()
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("全部").font(.subheadline)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(Theme.textDim)
+                    }
+                }
+                .padding(.horizontal, 18)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(favs.prefix(12)) { entry in
+                            NavigationLink {
+                                EntryDetailDestination(entry: entry)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ZStack(alignment: .topTrailing) {
+                                        PosterImage(urlString: entry.pic)
+                                            .frame(width: 92, height: 138)
+                                            .posterFrame()
+                                        if entry.hasUpdate {
+                                            Circle().fill(Theme.accent)
+                                                .frame(width: 10, height: 10)
+                                                .padding(6)
+                                        }
+                                    }
+                                    Text(entry.name).font(.caption.weight(.semibold))
+                                        .foregroundStyle(Theme.text).lineLimit(1)
+                                    Text(entry.lastRemarks.isEmpty ? entry.siteName : entry.lastRemarks)
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textDim).lineLimit(1)
+                                }
+                                .frame(width: 92)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                }
+            }
+        }
+    }
+
     private var editButton: some View {
         Button { showLinePicker = true } label: {
             HStack(spacing: 6) {
@@ -120,34 +199,61 @@ struct DiscoverView: View {
     private var linePicker: some View {
         NavigationStack {
             List {
-                ForEach(ConfigLibrary.entries()) { entry in
-                    Button {
-                        ConfigLibrary.setHomeLineID(entry.id)
-                        feedLineID = entry.id
-                        feedConfig = ConfigLibrary.load(id: entry.id)
-                        liveHero = []
-                        liveSections = []
-                        showLinePicker = false
-                    } label: {
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.name).foregroundStyle(Theme.text)
-                                Text("\(entry.siteCount) 个站点")
-                                    .font(.caption).foregroundStyle(Theme.textDim)
-                            }
-                            Spacer()
-                            if entry.id == feedLineID {
-                                Text("首页").font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
-                                Image(systemName: "checkmark").foregroundStyle(Theme.ok)
+                Section {
+                    ForEach(ConfigLibrary.entries()) { entry in
+                        Button {
+                            ConfigLibrary.setHomeLineID(entry.id)
+                            feedLineID = entry.id
+                            feedConfig = ConfigLibrary.load(id: entry.id)
+                            liveHero = []
+                            liveSections = []
+                            showLinePicker = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.name).foregroundStyle(Theme.text)
+                                    Text("\(entry.siteCount) 个站点")
+                                        .font(.caption).foregroundStyle(Theme.textDim)
+                                }
+                                Spacer()
+                                if entry.id == feedLineID {
+                                    Text("首页").font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.ok)
+                                }
                             }
                         }
+                        .listRowBackground(Color.white.opacity(0.06))
                     }
-                    .listRowBackground(Color.white.opacity(0.06))
+                } header: {
+                    Text("首页线路")
+                }
+                Section {
+                    ForEach(layout.order) { module in
+                        HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundStyle(Theme.textDim)
+                            Text(module.title).foregroundStyle(Theme.text)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { layout.isVisible(module) },
+                                set: { layout.setVisible(module, $0) }))
+                                .labelsHidden()
+                        }
+                        .listRowBackground(Color.white.opacity(0.06))
+                    }
+                    .onMove { source, destination in
+                        layout.move(from: source, to: destination)
+                    }
+                } header: {
+                    Text("首页模块")
+                } footer: {
+                    Text("拖动调整模块在首页的顺序，关掉的模块不在首页显示。")
                 }
             }
+            .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
             .background(Theme.bg)
-            .navigationTitle("选择首页线路")
+            .navigationTitle("首页设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
