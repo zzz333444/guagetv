@@ -80,9 +80,25 @@ enum JarProxyClient {
             // after a short pause usually lands.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             return try await runOnce(jar: jar, site: site, action: action, extra: extra)
-        } catch let urlError as URLError where urlError.code == .timedOut {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        } catch let urlError as URLError where isRetryable(urlError) {
+            // A sleeping free-tier instance drops the first
+            // connection outright ("network connection was lost")
+            // while it boots — wait longer, then retry once; the
+            // retry lands on the awake server.
+            let pause: UInt64 = urlError.code == .networkConnectionLost
+                ? 5_000_000_000 : 2_000_000_000
+            try? await Task.sleep(nanoseconds: pause)
             return try await runOnce(jar: jar, site: site, action: action, extra: extra)
+        }
+    }
+
+    private static func isRetryable(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost,
+             .cannotFindHost, .dnsLookupFailed:
+            return true
+        default:
+            return false
         }
     }
 
@@ -164,11 +180,22 @@ struct JarSiteBrowseView: View {
         Group {
             if let errorText {
                 ScrollView {
-                    Text(errorText)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(Theme.textDim)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(errorText)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(Theme.textDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            Task { await prepare() }
+                        } label: {
+                            Label("重试", systemImage: "arrow.clockwise")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 18).padding(.vertical, 9)
+                                .background(Theme.card, in: Capsule())
+                                .foregroundStyle(Theme.text)
+                        }
+                    }
+                    .padding(18)
                 }
             } else if loading {
                 ProgressView().tint(Theme.text)
@@ -318,11 +345,22 @@ struct JarDetailLoaderView: View {
                                siteKey: site.key, siteName: site.name, vodId: item.id))
             } else if let errorText {
                 ScrollView {
-                    Text(errorText)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(Theme.textDim)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(errorText)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(Theme.textDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            Task { await load() }
+                        } label: {
+                            Label("重试", systemImage: "arrow.clockwise")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 18).padding(.vertical, 9)
+                                .background(Theme.card, in: Capsule())
+                                .foregroundStyle(Theme.text)
+                        }
+                    }
+                    .padding(18)
                 }
             } else {
                 ProgressView().tint(Theme.text)
@@ -330,22 +368,26 @@ struct JarDetailLoaderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
-        .task {
-            do {
-                guard !jarURL.isEmpty else {
-                    errorText = "这条线路没有带 jar 包地址，代理无从加载。"
-                    return
-                }
-                let result = try await JarProxyClient.run(jar: jarURL, site: site, action: "detailContent",
-                                                          extra: ["ids": [item.id]])
-                guard let first = (result["list"] as? [[String: Any]])?.first else {
-                    errorText = "详情为空"
-                    return
-                }
-                detail = CMSClient.mapDetail(first, fallbackID: item.id)
-            } catch {
-                errorText = "详情加载失败\n\n\(error.localizedDescription)"
+        .task { await load() }
+    }
+
+    private func load() async {
+        errorText = nil
+        detail = nil
+        do {
+            guard !jarURL.isEmpty else {
+                errorText = "这条线路没有带 jar 包地址，代理无从加载。"
+                return
             }
+            let result = try await JarProxyClient.run(jar: jarURL, site: site, action: "detailContent",
+                                                      extra: ["ids": [item.id]])
+            guard let first = (result["list"] as? [[String: Any]])?.first else {
+                errorText = "详情为空"
+                return
+            }
+            detail = CMSClient.mapDetail(first, fallbackID: item.id)
+        } catch {
+            errorText = "详情加载失败\n\n\(error.localizedDescription)"
         }
     }
 
