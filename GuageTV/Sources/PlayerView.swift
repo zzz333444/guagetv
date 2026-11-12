@@ -234,9 +234,11 @@ struct PlayerView: View {
         // and hold anywhere boosts to 2x until release. The drag
         // gesture needs real movement, a hold stays put — the two
         // don't fight; handleDrag also stands down while boosting.
-        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 12) {
-        } pressing: { isPressing in
+        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 12, pressing: { isPressing in
             if isPressing { engageBoost() } else { releaseBoost() }
+        }) {
+            // perform: fires when the long press is recognised; the
+            // pressing callback above already handles both edges.
         }
     }
 
