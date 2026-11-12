@@ -22,6 +22,7 @@ struct DetailView: View {
     @State private var playSelection: PlaySelection?
     @State private var resolving = false
     @State private var playNote: String?
+    @State private var downloadMode = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -105,6 +106,17 @@ struct DetailView: View {
                 }
                 .buttonStyle(.plain)
             }
+            Button {
+                downloadMode.toggle()
+                if downloadMode { playNote = "下载模式：点任意一集就下载，再点一次退出" }
+            } label: {
+                Image(systemName: downloadMode ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    .font(.title3)
+                    .foregroundStyle(downloadMode ? Theme.accent : Theme.textDim)
+                    .frame(width: 40, height: 40)
+                    .background(Theme.glass, in: Circle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
@@ -165,7 +177,10 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
-                        .onTapGesture { tapEpisode(ep, in: episodes) }
+                        .onTapGesture {
+                            if downloadMode { downloadEpisode(ep) }
+                            else { tapEpisode(ep, in: episodes) }
+                        }
                         .contextMenu {
                             Button { tapEpisode(ep, in: episodes) } label: {
                                 Label("播放", systemImage: "play.fill")
@@ -196,10 +211,7 @@ struct DetailView: View {
                 let resolved = await playerResolver(flag, ep.url)
                 resolving = false
                 if let resolved {
-                    DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
-                                                   pic: detail.pic, url: resolved.url,
-                                                   header: resolved.header)
-                    playNote = "已加入下载：\(ep.name)"
+                    enqueueChecked(url: resolved.url, header: resolved.header, ep: ep)
                 } else {
                     playNote = "这一集解析失败，下载不了"
                 }
@@ -215,19 +227,29 @@ struct DetailView: View {
                 if let parsed {
                     var finalHeader = header
                     for (k, v) in parsed.header { finalHeader[k] = v }
-                    DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
-                                                   pic: detail.pic, url: parsed.url,
-                                                   header: finalHeader)
-                    playNote = "已加入下载：\(ep.name)"
+                    enqueueChecked(url: parsed.url, header: finalHeader, ep: ep)
                 } else {
                     playNote = "这一集解析失败，下载不了"
                 }
             }
             return
         }
-        DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
-                                       pic: detail.pic, url: ep.url, header: header)
-        playNote = "已加入下载：\(ep.name)"
+        enqueueChecked(url: ep.url, header: header, ep: ep)
+    }
+
+    /// Every download path funnels through here: probe first (a web
+    /// page in disguise is refused with a plain reason), then enqueue.
+    private func enqueueChecked(url: String, header: [String: String], ep: VodDetail.Episode) {
+        playNote = "正在检测这一集能不能下载…"
+        Task {
+            if await DownloadManager.probeDownloadable(url: url, header: header) {
+                DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
+                                               pic: detail.pic, url: url, header: header)
+                playNote = "已加入下载：\(ep.name)"
+            } else {
+                playNote = "这个站点给的是网页地址，下载不了"
+            }
+        }
     }
 
     private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {

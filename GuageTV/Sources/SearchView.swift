@@ -12,6 +12,10 @@ struct SearchView: View {
     @State private var searched = false
     @State private var progressText = ""
     @State private var failureNote = ""
+    @State private var finalNote = ""
+    /// Parse interfaces per site key, filled at search start: results
+    /// from imported single-file lines need their own line's parses.
+    @State private var parsesByKey: [String: [TVBoxConfig.Parse]] = [:]
 
     private var cmsSites: [TVBoxConfig.Site] {
         (config?.sites ?? []).filter { $0.kind == .cmsJSON || $0.kind == .cmsXML }
@@ -29,6 +33,7 @@ struct SearchView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 searchBar
+                statusRow
                 content
             }
             .background(AmbientBackground(imageURL: nil))
@@ -104,6 +109,23 @@ struct SearchView: View {
     }
 
     @ViewBuilder
+    private var statusRow: some View {
+        if searching {
+            HStack(spacing: 8) {
+                ProgressView().tint(Theme.text)
+                Text(progressText.isEmpty ? "搜索中…" : progressText)
+                    .font(.footnote).foregroundStyle(Theme.textDim)
+                Spacer()
+            }
+            .padding(.horizontal, 18).padding(.vertical, 6)
+        } else if searched && !finalNote.isEmpty {
+            Text(finalNote).font(.footnote).foregroundStyle(Theme.textDim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18).padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
     private var content: some View {
         if !hasSites {
             hint("先在设置里导入一个配置，搜索才能开工")
@@ -166,15 +188,16 @@ struct SearchView: View {
 
     @ViewBuilder
     private func destination(for site: TVBoxConfig.Site, item: VodItem) -> some View {
+        let parses = parsesByKey[site.key] ?? config?.parses ?? []
         switch site.kind {
         case .spiderPY:
-            PyDetailLoaderView(site: site, item: item, parses: config?.parses ?? [])
+            PyDetailLoaderView(site: site, item: item, parses: parses)
         case .spiderJS, .drpyJS:
             JSDetailLoaderView(site: site, item: item,
                                ruleRef: (try? JSSiteBrowseView.resolveRuleRef(site)) ?? "",
-                               parses: config?.parses ?? [])
+                               parses: parses)
         default:
-            DetailLoaderView(site: site, item: item, parses: config?.parses ?? [])
+            DetailLoaderView(site: site, item: item, parses: parses)
         }
     }
 
@@ -230,6 +253,22 @@ struct SearchView: View {
         return text.count > 42 ? String(text.prefix(42)) + "…" : text
     }
 
+    /// A deadline a blocked bridge call cannot ignore: task-group
+    /// races still wait for a child stuck in a synchronous Python/JS
+    /// call, which is how a search could hang forever. The loser is
+    /// abandoned (it finishes or dies in the background).
+    private func hardTimeout(_ seconds: Double,
+                             _ work: @escaping @Sendable () async -> [VodItem]?) async -> [VodItem]? {
+        await withCheckedContinuation { cont in
+            let box = ResumeBox(cont)
+            Task.detached { box.resume(await work()) }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                box.resume(nil)
+            }
+        }
+    }
+
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
@@ -238,7 +277,32 @@ struct SearchView: View {
         searched = false
         results = []
         failureNote = ""
-        let total = cmsSites.count + pySites.count + jsSites.count
+        finalNote = ""
+        // Searchable py/JS pools: the active line's spider sites PLUS
+        // every imported single-file py/JS line in the library —
+        // those live as their own lines, and the user expects the
+        // files they imported to be searched too.
+        var pyPool = pySites
+        var jsPool = jsSites
+        var parseMap: [String: [TVBoxConfig.Parse]] = [:]
+        for site in (config?.sites ?? []) { parseMap[site.key] = config?.parses ?? [] }
+        let activeID = ConfigLibrary.activeID()
+        for entry in ConfigLibrary.entries() where entry.id != activeID
+            && (entry.sourceURL.hasPrefix("py-import://") || entry.sourceURL.hasPrefix("js-import://")) {
+            guard let cfg = ConfigLibrary.load(id: entry.id) else { continue }
+            for site in cfg.sites where site.searchable != 0 {
+                parseMap[site.key] = cfg.parses
+                if site.kind == .spiderPY, !pyPool.contains(where: { $0.key == site.key }) {
+                    pyPool.append(site)
+                }
+                if site.kind == .spiderJS || site.kind == .drpyJS,
+                   !jsPool.contains(where: { $0.key == site.key }) {
+                    jsPool.append(site)
+                }
+            }
+        }
+        parsesByKey = parseMap
+        let total = cmsSites.count + pyPool.count + jsPool.count
         var done = 0
         var responded = 0
         var out: [(site: TVBoxConfig.Site, items: [VodItem])] = []
@@ -283,17 +347,19 @@ struct SearchView: View {
             }
         }
         // The py and JS bridges each hold ONE loaded site, so their
-        // searches still run serially — but each has a deadline.
-        for site in pySites {
-            let items = await withTimeout(15) { await searchPy(site, keyword: kw) } ?? nil
+        // searches run serially under a HARD deadline (see hardTimeout).
+        for site in pyPool {
+            progressText = "正在搜 py 站：\(site.name)…"
+            let items = await hardTimeout(15) { await searchPy(site, keyword: kw) }
             if let items {
                 responded += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
             }
             tick()
         }
-        for site in jsSites {
-            let items = await withTimeout(15) { await searchJS(site, keyword: kw) } ?? nil
+        for site in jsPool {
+            progressText = "正在搜 JS 站：\(site.name)…"
+            let items = await hardTimeout(15) { await searchJS(site, keyword: kw) }
             if let items {
                 responded += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
@@ -306,6 +372,7 @@ struct SearchView: View {
                 failureNote += "\n" + errorSamples.joined(separator: "\n")
             }
         }
+        finalNote = "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
         searched = true
         searching = false
     }
@@ -353,5 +420,24 @@ private struct FlowChips: View {
                     .onTapGesture { onTap(word) }
             }
         }
+    }
+}
+
+
+/// Resume-once box for hardTimeout: whichever racer finishes first
+/// (the work or the deadline) resumes the continuation; the other
+/// resume is dropped.
+private final class ResumeBox: @unchecked Sendable {
+    private var cont: CheckedContinuation<[VodItem]?, Never>?
+    private let lock = NSLock()
+
+    init(_ cont: CheckedContinuation<[VodItem]?, Never>) { self.cont = cont }
+
+    func resume(_ value: [VodItem]?) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
     }
 }

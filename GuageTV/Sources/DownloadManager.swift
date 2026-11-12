@@ -88,6 +88,28 @@ final class DownloadManager: NSObject, ObservableObject {
         save()
     }
 
+    /// 下载前验货： media URLs (m3u8 / media file extensions) pass
+    /// instantly; anything else gets a HEAD probe — if the server
+    /// answers with a web page (text/html), the "stream" is a play
+    /// page in disguise and cannot be downloaded. Probe failures
+    /// never block a download; only a clear HTML answer does.
+    static func probeDownloadable(url remote: String, header: [String: String]) async -> Bool {
+        let lower = remote.lowercased()
+        if lower.contains(".m3u8") { return true }
+        let mediaExts = ["mp4", "mkv", "flv", "avi", "wmv", "ts", "mpg", "mpeg",
+                         "m2ts", "webm", "mov", "3gp", "rmvb", "f4v"]
+        if let ext = URL(string: remote)?.pathExtension.lowercased(),
+           mediaExts.contains(ext) { return true }
+        guard let url = URL(string: remote) else { return false }
+        var request = NetFetch.request(for: url, extraHeader: header)
+        request.httpMethod = "HEAD"
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return true }
+        if http.statusCode >= 400 { return true }
+        let type = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+        return !type.contains("text/html")
+    }
+
     /// Playable local file URL string for a finished download.
     func localURLString(_ item: Item) -> String? {
         guard item.state == "done", !item.localPath.isEmpty else { return nil }
