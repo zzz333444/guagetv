@@ -71,25 +71,45 @@ enum JarProxyClient {
     }
 
     static func run(jar: String, site: TVBoxConfig.Site, action: String,
-                    extra: [String: Any] = [:]) async throws -> [String: Any] {
-        do {
-            return try await runOnce(jar: jar, site: site, action: action, extra: extra)
-        } catch let failure as Failure where failure.message.contains("timeout") {
-            // The proxy may be waking from sleep or converting the
-            // jar on first use (free-tier cold start) — one retry
-            // after a short pause usually lands.
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            return try await runOnce(jar: jar, site: site, action: action, extra: extra)
-        } catch let urlError as URLError where isRetryable(urlError) {
-            // A sleeping free-tier instance drops the first
-            // connection outright ("network connection was lost")
-            // while it boots — wait longer, then retry once; the
-            // retry lands on the awake server.
-            let pause: UInt64 = urlError.code == .networkConnectionLost
-                ? 5_000_000_000 : 2_000_000_000
-            try? await Task.sleep(nanoseconds: pause)
-            return try await runOnce(jar: jar, site: site, action: action, extra: extra)
+                    extra: [String: Any] = [:], patient: Bool = false) async throws -> [String: Any] {
+        // Cold-start patience: a sleeping free-tier proxy needs
+        // wake + JVM boot + jar conversion + spider init before the
+        // first call can land — measured in minutes, not seconds
+        // (a single 95s attempt + one retry read as "spins forever"
+        // on device). Browse-class callers pass patient=true and
+        // get a ~5-minute retry budget with growing pauses; other
+        // callers keep the classic two attempts.
+        let deadline = Date.now.addingTimeInterval(patient ? 300 : 0)
+        var attempt = 0
+        var pause: UInt64 = 2_000_000_000
+        while true {
+            attempt += 1
+            do {
+                return try await runOnce(jar: jar, site: site, action: action, extra: extra)
+            } catch {
+                guard isColdStartFailure(error) else { throw error }
+                let mayRetry = patient ? Date.now < deadline : attempt < 2
+                guard mayRetry else { throw error }
+                try? await Task.sleep(nanoseconds: pause)
+                pause = min(pause * 2, 15_000_000_000)
+            }
         }
+    }
+
+    /// Failures that mean "the proxy is still waking / converting /
+    /// initialising" rather than "this call is wrong": server-side
+    /// 90s timeouts, transport drops from a booting instance, and
+    /// the hosting platform's wake-up interstitial page (which is
+    /// HTML, so the envelope parse fails).
+    private static func isColdStartFailure(_ error: Error) -> Bool {
+        if let failure = error as? Failure {
+            return failure.message.contains("timeout")
+                || failure.message.contains("无法识别的内容")
+        }
+        if let urlError = error as? URLError {
+            return isRetryable(urlError)
+        }
+        return false
     }
 
     private static func isRetryable(_ error: URLError) -> Bool {
@@ -102,9 +122,11 @@ enum JarProxyClient {
         }
     }
 
-    /// Lines already asked to warm this launch (the server skips
-    /// instances it already holds; this just saves the round trip).
-    private static var warmedLines = Set<String>()
+    /// When each line was last asked to warm. The TTL matters: the
+    /// proxy can fall back asleep mid-session (free tier), so a
+    /// line warmed at launch must be re-warmable later — a plain
+    /// "once per launch" set left evening sessions cold.
+    private static var warmedAt: [String: Date] = [:]
 
     /// Ask the proxy to initialise a line's jar spiders in the
     /// background. Probe-based spiders (the Pan family) can spend
@@ -113,7 +135,8 @@ enum JarProxyClient {
     /// any failure simply means the first real call pays the init
     /// itself, exactly like before.
     static func warmLine(id: String) {
-        guard configured, !warmedLines.contains(id) else { return }
+        guard configured else { return }
+        if let last = warmedAt[id], Date.now.timeIntervalSince(last) < 600 { return }
         guard let entry = ConfigLibrary.entries().first(where: { $0.id == id }),
               let config = ConfigLibrary.load(id: id),
               let jar = jarURL(from: config, base: entry.sourceURL) else { return }
@@ -121,7 +144,7 @@ enum JarProxyClient {
             .filter { $0.kind == .spiderJAR }
             .map { ["class": $0.api, "ext": $0.extJSONString] }
         guard !items.isEmpty else { return }
-        warmedLines.insert(id)
+        warmedAt[id] = .now
         let base = baseURL
         let tokenSnapshot = token
         Task.detached {
@@ -137,6 +160,13 @@ enum JarProxyClient {
                 withJSONObject: ["jarUrl": jar, "items": items])
             _ = try? await URLSession.shared.data(for: request)
         }
+    }
+
+    /// Warm whatever line is currently active (browse and detail
+    /// pages call this on appear; the 10-minute TTL in warmLine
+    /// keeps it cheap).
+    static func warmActiveLine() {
+        if let id = ConfigLibrary.activeID() { warmLine(id: id) }
     }
 
     private static func runOnce(jar: String, site: TVBoxConfig.Site, action: String,
@@ -181,7 +211,10 @@ enum JarProxyClient {
             return "先填 Jar 代理地址"
         }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 8
+        // 60s, not 8: a sleeping instance needs most of that just
+        // to wake, and an 8s probe reports "连不上" for a proxy
+        // that is merely cold.
+        request.timeoutInterval = 60
         if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "X-JarProxy-Token") }
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
@@ -189,6 +222,34 @@ enum JarProxyClient {
             return (object?["ok"] as? Bool) == true ? "连接成功，代理在线" : "代理有响应，但状态不对"
         } catch {
             return "连不上：\(error.localizedDescription)"
+        }
+    }
+}
+
+/// Spinner with a cold-start explainer: jar calls go to a
+/// free-tier proxy that sleeps when idle, so a long first load is
+/// expected behaviour — say so (with an elapsed counter) instead
+/// of leaving the user staring at a bare spinner.
+struct ColdStartSpinner: View {
+    let since: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = max(0, Int(context.date.timeIntervalSince(since)))
+            VStack(spacing: 12) {
+                ProgressView().tint(Theme.text)
+                if elapsed >= 8 {
+                    Text("服务器可能在冷启动：免费机唤醒加初始化要一两分钟，正在自动重试")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textDim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Text("已等待 \(elapsed) 秒")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textDim)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
@@ -208,6 +269,7 @@ struct JarSiteBrowseView: View {
     @State private var loading = true
     @State private var loadingMore = false
     @State private var errorText: String?
+    @State private var loadSince = Date.now
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
@@ -235,8 +297,7 @@ struct JarSiteBrowseView: View {
                     .padding(18)
                 }
             } else if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ColdStartSpinner(since: loadSince)
             } else {
                 VStack(spacing: 0) {
                     if !classes.isEmpty { classChips }
@@ -245,7 +306,10 @@ struct JarSiteBrowseView: View {
             }
         }
         .background(AmbientBackground(imageURL: items.first?.pic))
-        .task { await prepare() }
+        .task {
+            JarProxyClient.warmActiveLine()
+            await prepare()
+        }
     }
 
     private var classChips: some View {
@@ -298,6 +362,7 @@ struct JarSiteBrowseView: View {
 
     private func prepare() async {
         loading = true
+        loadSince = .now
         errorText = nil
         guard !jarURL.isEmpty else {
             errorText = "这条线路没有带 jar 包地址（配置里的 spider 字段），代理无从加载。"
@@ -306,11 +371,11 @@ struct JarSiteBrowseView: View {
         }
         do {
             let home = try await JarProxyClient.run(jar: jarURL, site: site, action: "homeContent",
-                                                    extra: ["filter": false])
+                                                    extra: ["filter": false], patient: true)
             classes = PySiteBrowseView.mapClasses(home["class"])
             items = PySiteBrowseView.mapItems(home["list"])
             if items.isEmpty {
-                if let video = try? await JarProxyClient.run(jar: jarURL, site: site, action: "homeVideoContent") {
+                if let video = try? await JarProxyClient.run(jar: jarURL, site: site, action: "homeVideoContent", patient: true) {
                     items = PySiteBrowseView.mapItems(video["list"])
                 }
             }
@@ -326,15 +391,17 @@ struct JarSiteBrowseView: View {
         selectedTid = tid
         page = 1
         loading = true
+        loadSince = .now
         do {
             if tid.isEmpty {
                 let home = try await JarProxyClient.run(jar: jarURL, site: site, action: "homeContent",
-                                                        extra: ["filter": false])
+                                                        extra: ["filter": false], patient: true)
                 items = PySiteBrowseView.mapItems(home["list"])
                 pageCount = 1
             } else {
                 let result = try await JarProxyClient.run(jar: jarURL, site: site, action: "categoryContent",
-                                                          extra: ["tid": tid, "pg": "1", "filter": true, "extend": [String: String]()])
+                                                          extra: ["tid": tid, "pg": "1", "filter": true, "extend": [String: String]()],
+                                                          patient: true)
                 items = PySiteBrowseView.mapItems(result["list"])
                 pageCount = PySiteBrowseView.intValue(result["pagecount"]) ?? 1
             }
@@ -369,6 +436,7 @@ struct JarDetailLoaderView: View {
     var jar: String = ""
     @State private var detail: VodDetail?
     @State private var errorText: String?
+    @State private var loadSince = Date.now
 
     private var jarURL: String { jar.isEmpty ? (JarProxyClient.activeJarURL() ?? "") : jar }
 
@@ -400,24 +468,28 @@ struct JarDetailLoaderView: View {
                     .padding(18)
                 }
             } else {
-                ProgressView().tint(Theme.text)
+                ColdStartSpinner(since: loadSince)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
-        .task { await loadDetail() }
+        .task {
+            JarProxyClient.warmActiveLine()
+            await loadDetail()
+        }
     }
 
     private func loadDetail() async {
         errorText = nil
         detail = nil
+        loadSince = .now
         do {
             guard !jarURL.isEmpty else {
                 errorText = "这条线路没有带 jar 包地址，代理无从加载。"
                 return
             }
             let result = try await JarProxyClient.run(jar: jarURL, site: site, action: "detailContent",
-                                                      extra: ["ids": [item.id]])
+                                                      extra: ["ids": [item.id]], patient: true)
             guard let first = (result["list"] as? [[String: Any]])?.first else {
                 errorText = "详情为空"
                 return

@@ -52,6 +52,18 @@ struct PlayerView: View {
     @State private var showRemaining = false
     @State private var didResume = false
     @State private var hudGeneration = 0
+    /// Where a freshly (re)built engine should land: set on engine
+    /// switches and failure recovery so playback continues at the
+    /// same position instead of restarting from zero.
+    @State private var pendingStart: Double?
+    /// Failure recovery ladder: 0 = rebuild same engine, 1 = switch
+    /// engine, 2 = surface the error. Reset by progress / episode
+    /// change / manual engine switch.
+    @State private var recoveryStep = 0
+    @State private var lastFailureAt: Date?
+    @State private var boostActive = false
+    @State private var rateBeforeBoost: Double = 1
+    @State private var toastGeneration = 0
 
     private enum DragMode { case scrub, brightness, volume }
     @Environment(\.dismiss) private var dismiss
@@ -152,17 +164,27 @@ struct PlayerView: View {
         .onAppear {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
+            mpv.onFailure = { handlePlaybackFailure($0) }
+            mpv.onEnded = { advanceToNext() }
+            native.onFailure = { handlePlaybackFailure($0) }
+            native.onEnded = { advanceToNext() }
             scheduleChromeHide()
         }
         .onChange(of: duration) { _ in
+            applyPendingStartIfNeeded()
             applyResumeIfNeeded()
             applyIntroSkipIfNeeded()
         }
-        .onChange(of: currentTime) { _ in checkOutroSkip() }
+        .onChange(of: currentTime) { _ in
+            if currentTime > 3, recoveryStep != 0 { recoveryStep = 0 }
+            checkOutroSkip()
+        }
         .task { await saveProgressLoop() }
         .onDisappear { saveProgress(accumulate: false) }
         .onChange(of: index) { _ in
             didSkipIntro = false
+            pendingStart = nil
+            recoveryStep = 0
             pokeChrome()
         }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
@@ -174,7 +196,8 @@ struct PlayerView: View {
     private var engineLayer: some View {
         if let url = URL(string: current.url) {
             if isMPV {
-                MPVPlayerView(url: url, header: header, controller: mpv)
+                MPVPlayerView(url: url, header: header,
+                              startAt: pendingStart ?? resumeAt, controller: mpv)
             } else {
                 AVPlayerLayerView(player: native.player,
                                   onLayer: { native.setupPiP(layer: $0) })
@@ -207,6 +230,28 @@ struct PlayerView: View {
                 .onChanged { value in handleDrag(value, size: size) }
                 .onEnded { _ in endDrag() }
         )
+        // Hold to fast-forward (mainstream player behaviour): press
+        // and hold anywhere boosts to 2x until release. The drag
+        // gesture needs real movement, a hold stays put — the two
+        // don't fight; handleDrag also stands down while boosting.
+        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 12) {
+        } pressing: { isPressing in
+            if isPressing { engageBoost() } else { releaseBoost() }
+        }
+    }
+
+    private func engageBoost() {
+        guard !boostActive, isPlaying else { return }
+        boostActive = true
+        rateBeforeBoost = currentRate
+        setRate(2.0)
+        showToast("2 倍速播放中，松开恢复")
+    }
+
+    private func releaseBoost() {
+        guard boostActive else { return }
+        boostActive = false
+        setRate(rateBeforeBoost)
     }
 
     /// One drag, three jobs (mainstream player behaviour): horizontal
@@ -214,6 +259,7 @@ struct PlayerView: View {
     /// half volume. Direction locks on first clear movement; a HUD
     /// shows the value only while adjusting — nothing stays on screen.
     private func handleDrag(_ value: DragGesture.Value, size: CGSize) {
+        if boostActive { return }
         let dx = value.translation.width
         let dy = value.translation.height
         if dragMode == nil {
@@ -446,7 +492,7 @@ struct PlayerView: View {
                         Section {
                             Button { seekBy(-seekStep) } label: { Label("快退 \(Int(seekStep)) 秒", systemImage: "gobackward") }
                             Button { seekBy(seekStep) } label: { Label("快进 \(Int(seekStep)) 秒", systemImage: "goforward") }
-                            Button { engineOverride = !isMPV; pokeChrome() } label: {
+                            Button { switchEngine(manual: true) } label: {
                                 Label(isMPV ? "切换到原生引擎" : "切换到 FFmpeg 引擎", systemImage: "arrow.triangle.2.circlepath")
                             }
                         }
@@ -547,10 +593,67 @@ struct PlayerView: View {
     private var currentRate: Double { isMPV ? mpv.speed : Double(native.rate) }
 
     private func togglePlay() { isMPV ? mpv.togglePlay() : native.toggle() }
-    private func seek(to seconds: Double) { isMPV ? mpv.seek(to: seconds) : native.seek(to: seconds) }
+    private func seek(to seconds: Double, tolerant: Bool = false) {
+        if isMPV { mpv.seek(to: seconds) } else { native.seek(to: seconds, tolerant: tolerant) }
+    }
     private func seekBy(_ delta: Double) { isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
     private func setRate(_ rate: Double) {
         if isMPV { mpv.setSpeed(rate) } else { native.setRate(Float(rate)) }
+    }
+
+    /// Engine switch that keeps the playhead: the fresh engine
+    /// layer lands on pendingStart (mpv via its start option, the
+    /// native engine via applyPendingStartIfNeeded).
+    private func switchEngine(manual: Bool) {
+        let targetMPV = !isMPV
+        pendingStart = currentTime
+        didSkipIntro = true
+        engineOverride = targetMPV
+        if manual {
+            recoveryStep = 0
+            showToast(targetMPV ? "已切换到 FFmpeg 引擎" : "已切换到原生引擎")
+        }
+        pokeChrome()
+    }
+
+    private func advanceToNext() {
+        guard index < episodes.count - 1 else { return }
+        index += 1
+    }
+
+    /// Failure ladder, driven by both engines' failure callbacks:
+    /// rebuild the same engine once, then switch engines (keeping
+    /// the playhead), then give up and surface the error. Progress
+    /// past a few seconds resets the ladder (see the currentTime
+    /// change handler), so a stream that dies an hour in gets the
+    /// full treatment again.
+    private func handlePlaybackFailure(_ message: String) {
+        if let last = lastFailureAt, Date.now.timeIntervalSince(last) < 3 { return }
+        lastFailureAt = .now
+        switch recoveryStep {
+        case 0:
+            recoveryStep = 1
+            showToast("播放出错，正在自动重试…")
+            reloadCurrentEngine()
+        case 1:
+            recoveryStep = 2
+            showToast("正在切换引擎重试…")
+            switchEngine(manual: false)
+        default:
+            showToast("播放失败：" + message)
+        }
+    }
+
+    private func reloadCurrentEngine() {
+        guard let url = URL(string: current.url) else { return }
+        if isMPV {
+            mpv.reload(url: url, header: header, startAt: currentTime)
+        } else {
+            // The native engine has no start option; pendingStart
+            // lands it back at the playhead once duration reports.
+            pendingStart = currentTime
+            native.reload(url: url, header: header)
+        }
     }
 
     private func rotate(toLandscape: Bool) {
@@ -608,10 +711,22 @@ struct PlayerView: View {
 
     // MARK: history / resume
 
+    /// Engine switches and same-engine rebuilds land here: once
+    /// the fresh item reports a duration, jump back to where the
+    /// previous engine left off.
+    private func applyPendingStartIfNeeded() {
+        guard let target = pendingStart, duration > 0 else { return }
+        pendingStart = nil
+        if target > 5 {
+            seek(to: target, tolerant: true)
+            showToast("已从 " + timeLabel(target) + " 继续播放")
+        }
+    }
+
     private func applyResumeIfNeeded() {
         guard !didResume, resumeAt > 5, duration > 0 else { return }
         didResume = true
-        seek(to: resumeAt)
+        seek(to: resumeAt, tolerant: true)
         showToast("已续播至 " + timeLabel(resumeAt))
     }
 
@@ -630,7 +745,7 @@ struct PlayerView: View {
         let outro = Double(skipOutroSeconds)
         guard outro > 0, duration > 0, index < episodes.count - 1 else { return }
         let remaining = duration - currentTime
-        if remaining > 0, remaining <= outro { index += 1 }
+        if remaining > 0, remaining <= outro { advanceToNext() }
     }
 
     private func saveProgress(accumulate: Bool = true) {
@@ -649,10 +764,12 @@ struct PlayerView: View {
     }
 
     private func showToast(_ text: String) {
+        toastGeneration += 1
+        let gen = toastGeneration
         withAnimation { toast = text }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_600_000_000)
-            withAnimation { toast = nil }
+            if gen == toastGeneration { withAnimation { toast = nil } }
         }
     }
 
@@ -696,6 +813,41 @@ final class NativeController: NSObject, ObservableObject {
     @Published var isPiPActive = false
     private var pipController: AVPictureInPictureController?
 
+    /// Playback failure / natural end, wired by PlayerView (which
+    /// owns recovery: retry, then engine switch, then surface).
+    var onFailure: ((String) -> Void)?
+    var onEnded: (() -> Void)?
+    private var statusObservation: NSKeyValueObservation?
+    private var itemObservers: [NSObjectProtocol] = []
+
+    private func detachItemObservers() {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        for token in itemObservers { NotificationCenter.default.removeObserver(token) }
+        itemObservers = []
+    }
+
+    private func attachItemObservers(_ item: AVPlayerItem) {
+        detachItemObservers()
+        statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            let message = item.error?.localizedDescription ?? "原生引擎播放失败"
+            DispatchQueue.main.async { self?.onFailure?(message) }
+        }
+        let center = NotificationCenter.default
+        itemObservers.append(center.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
+        ) { [weak self] note in
+            let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            self?.onFailure?(error?.localizedDescription ?? "原生引擎播放失败")
+        })
+        itemObservers.append(center.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            self?.onEnded?()
+        })
+    }
+
     /// Wire PiP to the rendering layer. Called again with a fresh
     /// layer when the episode (and thus the view) changes.
     func setupPiP(layer: AVPlayerLayer) {
@@ -716,6 +868,13 @@ final class NativeController: NSObject, ObservableObject {
     private var lastBytes: Int64 = 0
     private var lastBytesAt: Date?
 
+    /// Force a fresh item for the same URL (failure recovery) —
+    /// load() alone would short-circuit and just replay the corpse.
+    func reload(url: URL, header: [String: String]) {
+        loadedURL = nil
+        load(url: url, header: header)
+    }
+
     func load(url: URL, header: [String: String]) {
         specText = ""
         if loadedURL == url, player.currentItem != nil {
@@ -723,10 +882,15 @@ final class NativeController: NSObject, ObservableObject {
             return
         }
         loadedURL = url
+        currentTime = 0
+        duration = 0
         // Literal key: the AVURLAssetHTTPHeaderFieldsKey constant is not
         // exposed in the iOS 26 SDK's Swift interface.
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": header])
-        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 30
+        attachItemObservers(item)
+        player.replaceCurrentItem(with: item)
         if timeObserver == nil {
             timeObserver = player.addPeriodicTimeObserver(
                 forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
@@ -791,13 +955,18 @@ final class NativeController: NSObject, ObservableObject {
         isPlaying = player.timeControlStatus == .playing
     }
 
-    func seek(to seconds: Double) {
+    func seek(to seconds: Double, tolerant: Bool = false) {
+        // Frame-exact seeks make HLS wait for keyframe alignment;
+        // resume / engine-switch landings use a tolerance window
+        // and arrive noticeably faster.
+        let tolerance = tolerant
+            ? CMTime(seconds: 5, preferredTimescale: 600) : .zero
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
+                    toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 
     func seekRelative(_ delta: Double) {
-        seek(to: max(0, currentTime + delta))
+        seek(to: max(0, currentTime + delta), tolerant: true)
     }
 
     func setRate(_ value: Float) {

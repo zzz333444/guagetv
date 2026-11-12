@@ -23,6 +23,13 @@ final class MPVController: ObservableObject {
     /// "1920×1080 · hevc" once mpv reports the video size.
     @Published var specText: String = ""
 
+    /// Playback failure / natural end, wired by PlayerView (which
+    /// owns recovery: retry, then engine switch, then surface).
+    var onFailure: ((String) -> Void)?
+    var onEnded: (() -> Void)?
+    private var lastFileError = ""
+    private var wasEOF = false
+
     func setSpeed(_ value: Double) {
         speed = value
         setProperty("speed", String(value))
@@ -42,15 +49,20 @@ final class MPVController: ObservableObject {
 
     // MARK: lifecycle
 
-    func start(url: URL, header: [String: String]) {
+    func start(url: URL, header: [String: String], startAt: Double = 0) {
         guard handle == nil, let h = mpv_create() else { return }
         handle = h
+        lastFileError = ""
+        wasEOF = false
         setOption("vo", "libmpv")
         setOption("hwdec", "auto-safe")
         setOption("terminal", "no")
         setOption("msg-level", "all=warn")
         setOption("cache", "yes")
-        setOption("demuxer-max-bytes", "64MiB")
+        setOption("cache-secs", "60")
+        setOption("demuxer-max-bytes", "128MiB")
+        setOption("demuxer-max-back-bytes", "32MiB")
+        if startAt > 1 { setOption("start", String(startAt)) }
         if !header.isEmpty {
             let fields = header.map { "\($0.key): \($0.value)" }.joined(separator: ",")
             mpv_set_property_string(h, "http-header-fields", fields)
@@ -64,6 +76,13 @@ final class MPVController: ObservableObject {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.poll()
         }
+    }
+
+    /// Rebuild from scratch (failure recovery): the view layer
+    /// stays put, only the mpv handle is recycled.
+    func reload(url: URL, header: [String: String], startAt: Double = 0) {
+        stop()
+        start(url: url, header: header, startAt: startAt)
     }
 
     func stop() {
@@ -196,6 +215,14 @@ final class MPVController: ObservableObject {
                 || stringProperty("seeking") == "yes"
                 || stringProperty("core-idle") == "yes")
         netSpeedBytes = stringProperty("cache-speed").flatMap(Double.init) ?? 0
+        // Failure + end surfacing for PlayerView's recovery flow.
+        let fileError = stringProperty("file-error") ?? ""
+        if !fileError.isEmpty, fileError != lastFileError {
+            lastFileError = fileError
+            onFailure?(fileError)
+        }
+        if eof, !wasEOF, duration > 0 { onEnded?() }
+        wasEOF = eof
         if specText.isEmpty,
            let w = stringProperty("width"), let h = stringProperty("height"),
            w != "0", h != "0" {
@@ -278,6 +305,7 @@ private struct MPVRenderRepresentable: UIViewRepresentable {
 struct MPVPlayerView: View {
     let url: URL
     var header: [String: String] = [:]
+    var startAt: Double = 0
     let controller: MPVController
 
     var body: some View {
@@ -286,7 +314,7 @@ struct MPVPlayerView: View {
             MPVRenderRepresentable(controller: controller)
                 .ignoresSafeArea()
         }
-        .onAppear { controller.start(url: url, header: header) }
+        .onAppear { controller.start(url: url, header: header, startAt: startAt) }
         .onDisappear { controller.stop() }
     }
 }
