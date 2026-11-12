@@ -119,7 +119,12 @@ final class CMSClient {
 
     func search(keyword: String, page: Int = 1) async throws -> [VodItem] {
         let r = try await fetch(params: ["ac": "list", "wd": keyword, "pg": String(page)])
-        return Self.mapList(r)
+        let items = Self.mapList(r)
+        if !items.isEmpty { return items }
+        // Some MacCMS forks answer ac=list+wd with an empty list but
+        // honour the same keyword under ac=detail.
+        let r2 = try await fetch(params: ["ac": "detail", "wd": keyword, "pg": String(page)])
+        return Self.mapList(r2)
     }
 
     /// Poster backfill for the many采集站 whose LIST responses omit

@@ -195,6 +195,41 @@ struct SearchView: View {
         }
     }
 
+    /// Timeout race that keeps the error: withTimeout() alone turns
+    /// every failure into a bare nil, which is why "search finds
+    /// nothing" was undiagnosable from the user's side.
+    private func withTimeoutError<T>(_ seconds: Double,
+                                     _ work: @escaping () async -> Result<T, Error>) async -> Result<T, Error>? {
+        await withTaskGroup(of: Result<T, Error>?.self) { group in
+            group.addTask { await work() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private func shortError(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain || ns.domain.contains("JSON") {
+            return "返回内容不是 JSON（可能被站方拦截）"
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut: return "请求超时"
+            case .notConnectedToInternet, .networkConnectionLost: return "网络不通"
+            case .cannotFindHost, .dnsLookupFailed: return "域名解析失败"
+            case .badServerResponse: return "服务器返回错误状态"
+            default: return "网络错误"
+            }
+        }
+        let text = ns.localizedDescription
+        return text.count > 42 ? String(text.prefix(42)) + "…" : text
+    }
+
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
@@ -216,21 +251,32 @@ struct SearchView: View {
         // CMS sites are independent HTTP calls: search them all at
         // once instead of one by one.
         let cms = cmsSites
-        await withTaskGroup(of: (TVBoxConfig.Site, [VodItem]?).self) { group in
+        var errorSamples: [String] = []
+        await withTaskGroup(of: (TVBoxConfig.Site, Result<[VodItem], Error>?).self) { group in
             for site in cms {
                 group.addTask {
-                    let items = await withTimeout(12) {
-                        try? await CMSClient(site: site).search(keyword: kw)
+                    let raced = await withTimeoutError(12) {
+                        do { return .success(try await CMSClient(site: site).search(keyword: kw)) }
+                        catch { return .failure(error) }
                     }
-                    return (site, items)
+                    return (site, raced)
                 }
             }
-            for await (site, items) in group {
-                if let items {
+            for await (site, raced) in group {
+                switch raced {
+                case .success(let items):
                     responded += 1
                     if !items.isEmpty {
                         out.append((site, items))
                         results = out
+                    }
+                case .failure(let error):
+                    if errorSamples.count < 3 {
+                        errorSamples.append("\(site.name)：\(shortError(error))")
+                    }
+                case nil:
+                    if errorSamples.count < 3 {
+                        errorSamples.append("\(site.name)：12 秒超时")
                     }
                 }
                 tick()
@@ -256,6 +302,9 @@ struct SearchView: View {
         }
         if out.isEmpty {
             failureNote = "共搜了 \(total) 个站，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
+            if !errorSamples.isEmpty {
+                failureNote += "\n" + errorSamples.joined(separator: "\n")
+            }
         }
         searched = true
         searching = false

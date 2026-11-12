@@ -33,8 +33,11 @@ final class DownloadManager: NSObject, ObservableObject {
 
     @Published private(set) var items: [Item] = []
 
-    private var fileSession: URLSession!
-    private var hlsSession: AVAssetDownloadURLSession!
+    private lazy var fileSession: URLSession =
+        URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+    private lazy var hlsSession: AVAssetDownloadURLSession =
+        AVAssetDownloadURLSession(configuration: .background(withIdentifier: "tv.guage.hls-downloads"),
+                                  assetDownloadDelegate: self, delegateQueue: .main)
     private var fileTaskIDs: [Int: String] = [:]            // task id → item id
     private var hlsTasks: [String: AVAssetDownloadTask] = [:]
     private var progressTimer: Timer?
@@ -53,10 +56,6 @@ final class DownloadManager: NSObject, ObservableObject {
     override init() {
         super.init()
         load()
-        fileSession = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
-        hlsSession = AVAssetDownloadURLSession(configuration: .default,
-                                               assetDownloadDelegate: self,
-                                               delegateQueue: .main)
     }
 
     // MARK: public API
@@ -221,7 +220,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
             markFailed(id)
             fileTaskIDs[task.taskIdentifier] = nil
         }
-        for (id, hlsTask) in hlsTasks where hlsTask === task {
+        let hlsIDs = hlsTasks.filter { $0.value === task }.map { $0.key }
+        for id in hlsIDs {
             markFailed(id)
             hlsTasks[id] = nil
         }
@@ -233,7 +233,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
 extension DownloadManager: AVAssetDownloadDelegate {
     func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        for (id, task) in hlsTasks where task === assetDownloadTask {
+        let finishedIDs = hlsTasks.filter { $0.value === assetDownloadTask }.map { $0.key }
+        for id in finishedIDs {
             update(id) {
                 $0.state = "done"
                 $0.progress = 1

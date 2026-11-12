@@ -310,6 +310,9 @@ struct PlayerView: View {
     private func chrome(isLandscape: Bool) -> some View {
         VStack {
             topBar(isLandscape: isLandscape)
+            HStack(spacing: 8) { speedPill; specPill; Spacer() }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
             Spacer()
             bottomBar
         }
@@ -338,7 +341,6 @@ struct PlayerView: View {
                 }
             }
             .background(.ultraThinMaterial, in: Capsule())
-            speedPill
             Spacer()
             HStack(spacing: 2) {
                 Button { showSkipSheet = true; pokeChrome() } label: {
@@ -477,6 +479,8 @@ struct PlayerView: View {
                 .font(.system(size: 10, weight: .bold))
             Text(Self.formatSpeed(netSpeedBytes))
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .foregroundStyle(Theme.text)
         .padding(.horizontal, 11).padding(.vertical, 8)
