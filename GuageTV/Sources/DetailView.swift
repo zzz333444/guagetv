@@ -1,5 +1,26 @@
 import SwiftUI
 
+/// What a spider's playerContent resolution produced: either a
+/// playable URL, or the reason there is none. The reason is the
+/// spider's own msg/errMsg whenever it sent one (drives say things
+/// like "还未登录夸克账号，请前往【配置中心】登录") — it must reach
+/// the user verbatim; a bare nil used to hide it entirely.
+enum ResolveOutcome {
+    case ok(url: String, header: [String: String])
+    case failed(reason: String)
+
+    /// The spider's stated reason in a playerContent result, if any.
+    static func spiderReason(in result: [String: Any]) -> String? {
+        for key in ["msg", "errMsg"] {
+            if let text = result[key] as? String,
+               !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                return text
+            }
+        }
+        return nil
+    }
+}
+
 /// 详情 (Detail) — Rex-style: ambient backdrop header, meta block, synopsis,
 /// play-line chips, episode grid. Tapping an episode hands its URL (plus the
 /// site's required headers) to the player; parse-needed sites resolve through
@@ -7,10 +28,12 @@ import SwiftUI
 struct DetailView: View {
     let detail: VodDetail
     var header: [String: String] = [:]
-    /// When set (py spiders), episode taps resolve through this first:
-    /// episode urls are opaque ids until playerContent answers. A nil
-    /// result means the episode needs a parse interface (later stage).
-    var playerResolver: ((String, String) async -> (url: String, header: [String: String])?)?
+    /// When set (py / JS / jar spiders), episode taps resolve through
+    /// this first: episode urls are opaque ids until playerContent
+    /// answers. Failures carry the spider's own reason (its msg —
+    /// e.g. a drive asking the user to log in) so it can be shown
+    /// verbatim instead of vanishing behind a generic note.
+    var playerResolver: ((String, String) async -> ResolveOutcome)?
     /// Set by the loaders so playback lands in the history list with
     /// enough context to resume straight from there.
     var historySeed: HistorySeed?
@@ -64,16 +87,23 @@ struct DetailView: View {
                 Text(playNote)
                     .font(.subheadline)
                     .foregroundStyle(Theme.text)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.black.opacity(0.7), in: Capsule())
+                    .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 24)
                     .padding(.bottom, 30)
                     .frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
         .task(id: playNote) {
-            guard playNote != nil else { return }
-            try? await Task.sleep(nanoseconds: 2_600_000_000)
-            playNote = nil
+            guard let note = playNote else { return }
+            // Failure reasons (a spider's msg can be a full sentence)
+            // stay up long enough to actually read; short status
+            // notes keep the quick fade.
+            let seconds: UInt64 = note.count > 24 ? 7_000_000_000 : 2_600_000_000
+            try? await Task.sleep(nanoseconds: seconds)
+            if playNote == note { playNote = nil }
         }
     }
 
@@ -208,12 +238,13 @@ struct DetailView: View {
             guard !resolving else { return }
             resolving = true
             Task {
-                let resolved = await playerResolver(flag, ep.url)
+                let outcome = await playerResolver(flag, ep.url)
                 resolving = false
-                if let resolved {
-                    enqueueChecked(url: resolved.url, header: resolved.header, ep: ep)
-                } else {
-                    playNote = "这一集解析失败，下载不了"
+                switch outcome {
+                case .ok(let url, let resolvedHeader):
+                    enqueueChecked(url: url, header: resolvedHeader, ep: ep)
+                case .failed(let reason):
+                    playNote = "下载不了：\(reason)"
                 }
             }
             return
@@ -288,16 +319,17 @@ struct DetailView: View {
         resolving = true
         let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
         Task {
-            let resolved = await playerResolver(flag, ep.url)
+            let outcome = await playerResolver(flag, ep.url)
             resolving = false
-            if let resolved {
-                let resume = recordHistory(episode: ep, episodeURL: resolved.url, flag: flag, playHeader: resolved.header)
+            switch outcome {
+            case .ok(let url, let resolvedHeader):
+                let resume = recordHistory(episode: ep, episodeURL: url, flag: flag, playHeader: resolvedHeader)
                 playSelection = PlaySelection(
-                    episodes: [PlayerView.EpisodeRef(name: ep.name, url: resolved.url)],
-                    index: 0, playHeader: resolved.header,
+                    episodes: [PlayerView.EpisodeRef(name: ep.name, url: url)],
+                    index: 0, playHeader: resolvedHeader,
                     historyID: historyEntryID(), resumeAt: resume)
-            } else {
-                playNote = "这一集需要解析接口，下一阶段接入"
+            case .failed(let reason):
+                playNote = reason
             }
         }
     }

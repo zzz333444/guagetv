@@ -279,20 +279,26 @@ struct PyDetailLoaderView: View {
     /// playerContent(flag, id) → playable URL. parse=0 answers go
     /// straight to the player; parse=1 hands the page URL to the
     /// line's parse interfaces.
-    private func resolve(flag: String, episodeID: String) async -> (url: String, header: [String: String])? {
-        guard let result = try? await SpiderBridge.shared.playerContent(flag: flag, id: episodeID)
-        else { return nil }
+    private func resolve(flag: String, episodeID: String) async -> ResolveOutcome {
+        let result: [String: Any]
+        do {
+            result = try await SpiderBridge.shared.playerContent(flag: flag, id: episodeID)
+        } catch {
+            return .failed(reason: "py 蜘蛛调用失败：\(error.localizedDescription)")
+        }
         let parse = PySiteBrowseView.intValue(result["parse"]) ?? 0
         let url = result["url"] as? String ?? ""
-        guard !url.isEmpty else { return nil }
+        guard !url.isEmpty else {
+            return .failed(reason: ResolveOutcome.spiderReason(in: result) ?? "蜘蛛没有返回播放地址")
+        }
         var header = site.header ?? [:]
         if let extra = result["header"] as? [String: Any] {
             for (key, value) in extra { header[key] = String(describing: value) }
         }
-        if parse == 0 { return (url, header) }
+        if parse == 0 { return .ok(url: url, header: header) }
         guard let resolved = await ParseResolver.resolve(flag: flag, url: url, parses: parses)
-        else { return nil }
+        else { return .failed(reason: "解析接口没能解析出播放地址") }
         for (key, value) in resolved.header { header[key] = value }
-        return (resolved.url, header)
+        return .ok(url: resolved.url, header: header)
     }
 }

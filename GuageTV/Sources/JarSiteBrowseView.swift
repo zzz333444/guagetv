@@ -349,23 +349,29 @@ struct JarDetailLoaderView: View {
         }
     }
 
-    private func resolve(flag: String, episodeID: String) async -> (url: String, header: [String: String])? {
+    private func resolve(flag: String, episodeID: String) async -> ResolveOutcome {
         let vipFlags = ConfigLibrary.activeID().flatMap { ConfigLibrary.load(id: $0) }?.flags ?? []
-        guard let result = try? await JarProxyClient.run(jar: jarURL, site: site, action: "playerContent",
-                                                         extra: ["flag": flag, "id": episodeID, "vipFlags": vipFlags])
-        else { return nil }
+        let result: [String: Any]
+        do {
+            result = try await JarProxyClient.run(jar: jarURL, site: site, action: "playerContent",
+                                                  extra: ["flag": flag, "id": episodeID, "vipFlags": vipFlags])
+        } catch {
+            return .failed(reason: "Jar 代理调用失败：\(error.localizedDescription)")
+        }
         let parse = PySiteBrowseView.intValue(result["parse"]) ?? 0
         let jx = PySiteBrowseView.intValue(result["jx"]) ?? 0
         let url = result["url"] as? String ?? ""
-        guard !url.isEmpty else { return nil }
+        guard !url.isEmpty else {
+            return .failed(reason: ResolveOutcome.spiderReason(in: result) ?? "蜘蛛没有返回播放地址")
+        }
         var header = site.header ?? [:]
         if let extra = result["header"] as? [String: Any] {
             for (key, value) in extra { header[key] = String(describing: value) }
         }
-        if parse == 0 && jx == 0 { return (url, header) }
+        if parse == 0 && jx == 0 { return .ok(url: url, header: header) }
         guard let resolved = await ParseResolver.resolve(flag: flag, url: url, parses: parses)
-        else { return nil }
+        else { return .failed(reason: "解析接口没能解析出播放地址") }
         for (key, value) in resolved.header { header[key] = value }
-        return (resolved.url, header)
+        return .ok(url: resolved.url, header: header)
     }
 }
