@@ -10,12 +10,19 @@ struct SettingsView: View {
     @State private var configURL = ""
     @State private var status = "还没有导入配置"
     @AppStorage("jarProxyURL") private var jarProxyURL = ""
+    @AppStorage("drive.quark_cookie") private var driveQuarkCookie = ""
+    @AppStorage("drive.uc_cookie") private var driveUcCookie = ""
+    @AppStorage("drive.uc_token") private var driveUcToken = ""
+    @AppStorage("drive.aliyun") private var driveAliyun = ""
+    @AppStorage("drive.baidu") private var driveBaidu = ""
+    @AppStorage("drive.bili_cookie") private var driveBiliCookie = ""
+    @AppStorage("drive.xunlei") private var driveXunlei = ""
     @State private var jarTestNote = ""
     @State private var entries: [ConfigLibrary.Entry] = []
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.17 · Jar 代理"
+    static let buildLabel = "v1.18 · 网盘配置"
 
     var body: some View {
         NavigationStack {
@@ -91,6 +98,25 @@ struct SettingsView: View {
                             }
                             Text("Jar（csp_）站点不在手机上跑，而是转发到你自己部署的 JarProxy 服务器（JDK）上执行。填好地址后，资源库里的 Jar 站点直接解锁。")
                                 .font(.footnote).foregroundStyle(Theme.textDim)
+                        }
+                    }
+
+                    group(title: "网盘配置") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("网盘线路解析分享链接时要用你自己网盘的登录凭证，和 FongMi「配置中心」里填的是同一套。只保存在本机，打开 Jar 站点时经加密连接发给你的 JarProxy 使用；不用的盘留空即可。")
+                                .font(.footnote).foregroundStyle(Theme.textDim)
+                            driveField("夸克 Cookie", $driveQuarkCookie)
+                            driveField("UC Cookie", $driveUcCookie)
+                            driveField("UC Token", $driveUcToken)
+                            driveField("阿里云盘 Refresh Token", $driveAliyun)
+                            driveField("百度网盘 Cookie", $driveBaidu)
+                            driveField("Bilibili Cookie", $driveBiliCookie)
+                            driveField("迅雷 Token", $driveXunlei)
+                            Button("清空全部网盘配置", role: .destructive) {
+                                driveQuarkCookie = ""; driveUcCookie = ""; driveUcToken = ""
+                                driveAliyun = ""; driveBaidu = ""; driveBiliCookie = ""; driveXunlei = ""
+                            }
+                            .font(.footnote.weight(.semibold))
                         }
                     }
 
@@ -189,6 +215,17 @@ struct SettingsView: View {
                 Text(title).font(.footnote).foregroundStyle(Theme.text.opacity(0.85))
             }
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func driveField(_ title: String, _ value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline).foregroundStyle(Theme.text)
+            TextField(title, text: value)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .font(.footnote.monospaced())
         }
     }
 

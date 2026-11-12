@@ -41,8 +41,40 @@ enum JarProxyClient {
         return jarURL(from: config)
     }
 
+    /// Drive credentials the user saved under 设置 → 网盘配置. Sent
+    /// with every /run call; the proxy files them where jar spiders
+    /// read them (its SharedPreferences store + TVBox/*.txt files).
+    /// Only non-empty values are sent.
+    static func drivePrefs() -> [String: String] {
+        let keys = ["quark_cookie", "uc_cookie", "uc_token", "aliyun",
+                    "baidu", "bili_cookie", "xunlei"]
+        var prefs: [String: String] = [:]
+        for key in keys {
+            let value = (UserDefaults.standard.string(forKey: "drive." + key) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { prefs[key] = value }
+        }
+        return prefs
+    }
+
     static func run(jar: String, site: TVBoxConfig.Site, action: String,
                     extra: [String: Any] = [:]) async throws -> [String: Any] {
+        do {
+            return try await runOnce(jar: jar, site: site, action: action, extra: extra)
+        } catch let failure as Failure where failure.message.contains("timeout") {
+            // The proxy may be waking from sleep or converting the
+            // jar on first use (free-tier cold start) — one retry
+            // after a short pause usually lands.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            return try await runOnce(jar: jar, site: site, action: action, extra: extra)
+        } catch let urlError as URLError where urlError.code == .timedOut {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            return try await runOnce(jar: jar, site: site, action: action, extra: extra)
+        }
+    }
+
+    private static func runOnce(jar: String, site: TVBoxConfig.Site, action: String,
+                                extra: [String: Any]) async throws -> [String: Any] {
         let base = baseURL
         guard !base.isEmpty, let url = URL(string: base + "/run") else {
             throw Failure(message: "没有填写 Jar 代理地址（设置页 → Jar 代理）")
@@ -53,10 +85,12 @@ enum JarProxyClient {
             "action": action,
             "ext": site.extJSONString,
         ]
+        let prefs = drivePrefs()
+        if !prefs.isEmpty { body["prefs"] = prefs }
         for (key, value) in extra { body[key] = value }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 50
+        request.timeoutInterval = 95
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await URLSession.shared.data(for: request)
