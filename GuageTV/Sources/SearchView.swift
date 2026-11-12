@@ -19,6 +19,9 @@ struct SearchView: View {
     /// The active line's jar URL when the Jar proxy is configured;
     /// jar sites join the search only then.
     @State private var searchJarURL = ""
+    /// Per-site jar URLs: cross-line search pulls jar sites from
+    /// every library line, and each line ships its own spider jar.
+    @State private var jarURLByKey: [String: String] = [:]
 
     private var cmsSites: [TVBoxConfig.Site] {
         (config?.sites ?? []).filter { $0.kind == .cmsJSON || $0.kind == .cmsXML }
@@ -196,7 +199,8 @@ struct SearchView: View {
         case .spiderPY:
             PyDetailLoaderView(site: site, item: item, parses: parses)
         case .spiderJAR:
-            JarDetailLoaderView(site: site, item: item, parses: parses, jar: searchJarURL)
+            JarDetailLoaderView(site: site, item: item, parses: parses,
+                                jar: jarURLByKey[site.key] ?? searchJarURL)
         case .spiderJS, .drpyJS:
             JSDetailLoaderView(site: site, item: item,
                                ruleRef: (try? JSSiteBrowseView.resolveRuleRef(site)) ?? "",
@@ -306,14 +310,37 @@ struct SearchView: View {
                 }
             }
         }
-        // Jar sites of the ACTIVE line join in when a proxy is set.
+        // Jar sites join in when a proxy is set: the active line
+        // first, then every other full config line in the library —
+        // each line resolves its OWN spider jar, and results keep a
+        // per-site jar map so details open against the right jar.
         var jarPool: [TVBoxConfig.Site] = []
-        var jarURL = ""
-        if JarProxyClient.configured, let resolved = JarProxyClient.jarURL(from: config) {
-            jarURL = resolved
-            jarPool = (config?.sites ?? []).filter { $0.kind == .spiderJAR && $0.searchable != 0 }
+        var jarMap: [String: String] = [:]
+        var activeJar = ""
+        if JarProxyClient.configured {
+            if let resolved = JarProxyClient.jarURL(from: config) {
+                activeJar = resolved
+                for site in (config?.sites ?? []) where site.kind == .spiderJAR && site.searchable != 0 {
+                    jarMap[site.key] = resolved
+                    jarPool.append(site)
+                }
+            }
+            for entry in ConfigLibrary.entries() where entry.id != activeID
+                && !entry.sourceURL.hasPrefix("py-import://") && !entry.sourceURL.hasPrefix("js-import://") {
+                if jarPool.count >= 130 { break }
+                guard let cfg = ConfigLibrary.load(id: entry.id),
+                      let resolved = JarProxyClient.jarURL(from: cfg, base: entry.sourceURL) else { continue }
+                for site in cfg.sites where site.kind == .spiderJAR && site.searchable != 0 {
+                    if jarMap[site.key] == nil {
+                        jarMap[site.key] = resolved
+                        jarPool.append(site)
+                        if parseMap[site.key] == nil { parseMap[site.key] = cfg.parses }
+                    }
+                }
+            }
         }
-        searchJarURL = jarURL
+        searchJarURL = activeJar
+        jarURLByKey = jarMap
         parsesByKey = parseMap
         let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count
         var done = 0
@@ -379,20 +406,20 @@ struct SearchView: View {
             }
             tick()
         }
-        if out.isEmpty {
-            failureNote = "共搜了 \(total) 个站，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
-            if !errorSamples.isEmpty {
-                failureNote += "\n" + errorSamples.joined(separator: "\n")
-            }
-        }
         for site in jarPool {
             progressText = "正在搜 Jar 站：\(site.name)…"
-            let items = await hardTimeout(25) { await searchJar(site, jar: jarURL, keyword: kw) }
+            let items = await hardTimeout(25) { await searchJar(site, jar: jarMap[site.key] ?? activeJar, keyword: kw) }
             if let items {
                 responded += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
             }
             tick()
+        }
+        if out.isEmpty {
+            failureNote = "共搜了 \(total) 个站，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
+            if !errorSamples.isEmpty {
+                failureNote += "\n" + errorSamples.joined(separator: "\n")
+            }
         }
         finalNote = "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
         searched = true

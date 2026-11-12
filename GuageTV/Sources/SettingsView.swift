@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var configURL = ""
     @State private var status = "还没有导入配置"
     @AppStorage("jarProxyURL") private var jarProxyURL = ""
+    @AppStorage("jarProxyToken") private var jarProxyToken = ""
     @AppStorage("drive.quark_cookie") private var driveQuarkCookie = ""
     @AppStorage("drive.uc_cookie") private var driveUcCookie = ""
     @AppStorage("drive.uc_token") private var driveUcToken = ""
@@ -22,7 +23,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.18 · 网盘配置"
+    static let buildLabel = "v1.19 · 跨线搜索"
 
     var body: some View {
         NavigationStack {
@@ -84,6 +85,11 @@ struct SettingsView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
+                            TextField("口令（服务器开启校验时填，平时留空）", text: $jarProxyToken)
+                                .textFieldStyle(.roundedBorder)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .font(.footnote.monospaced())
                             HStack(spacing: 10) {
                                 Button("测试连接") {
                                     Task { jarTestNote = await JarProxyClient.healthCheck() }

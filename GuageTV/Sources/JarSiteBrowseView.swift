@@ -14,6 +14,13 @@ enum JarProxyClient {
 
     static var configured: Bool { !baseURL.isEmpty }
 
+    /// Optional shared token (设置 → Jar 代理 → 口令), sent as a
+    /// header when the server has JARPROXY_TOKEN switched on.
+    static var token: String {
+        (UserDefaults.standard.string(forKey: "jarProxyToken") ?? "")
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     struct Failure: LocalizedError {
         let message: String
         var errorDescription: String? { message }
@@ -23,11 +30,17 @@ enum JarProxyClient {
     /// looks like "./jar/spider.jar;md5;<hex>" — keep the path part
     /// and resolve it against the config's own URL.
     static func jarURL(from config: TVBoxConfig?) -> String? {
+        jarURL(from: config, base: UserDefaults.standard.string(forKey: "configSourceURL"))
+    }
+
+    /// Same, resolving a relative jar path against an explicit
+    /// config source URL — cross-line search needs each line's own
+    /// base, not the active line's.
+    static func jarURL(from config: TVBoxConfig?, base sourceURL: String?) -> String? {
         guard let raw = config?.spider, !raw.isEmpty else { return nil }
         let path = raw.split(separator: ";").first.map(String.init) ?? raw
         if path.hasPrefix("http") { return path }
-        if let baseText = UserDefaults.standard.string(forKey: "configSourceURL"),
-           let base = URL(string: baseText),
+        if let baseText = sourceURL, let base = URL(string: baseText),
            let resolved = URL(string: path, relativeTo: base)?.absoluteURL {
             return resolved.absoluteString
         }
@@ -92,6 +105,7 @@ enum JarProxyClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 95
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "X-JarProxy-Token") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await URLSession.shared.data(for: request)
         guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -115,6 +129,7 @@ enum JarProxyClient {
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
+        if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "X-JarProxy-Token") }
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
