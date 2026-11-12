@@ -43,7 +43,10 @@ struct ContentView: View {
                 .padding(.bottom, 10)
         }
         .preferredColorScheme(colorScheme)
-        .onAppear { clampTab() }
+        .onAppear {
+            clampTab()
+            if let id = ConfigLibrary.activeID() { JarProxyClient.warmLine(id: id) }
+        }
         .onChange(of: showRecordsTab) { _ in clampTab() }
         .onChange(of: showLibraryTab) { _ in clampTab() }
         .sheet(isPresented: $showSearch) {

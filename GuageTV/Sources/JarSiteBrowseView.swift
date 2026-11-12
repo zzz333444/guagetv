@@ -102,6 +102,43 @@ enum JarProxyClient {
         }
     }
 
+    /// Lines already asked to warm this launch (the server skips
+    /// instances it already holds; this just saves the round trip).
+    private static var warmedLines = Set<String>()
+
+    /// Ask the proxy to initialise a line's jar spiders in the
+    /// background. Probe-based spiders (the Pan family) can spend
+    /// ~90s in their first init; warming on launch / activation
+    /// moves that wait off the user's first tap. Fire-and-forget:
+    /// any failure simply means the first real call pays the init
+    /// itself, exactly like before.
+    static func warmLine(id: String) {
+        guard configured, !warmedLines.contains(id) else { return }
+        guard let entry = ConfigLibrary.entries().first(where: { $0.id == id }),
+              let config = ConfigLibrary.load(id: id),
+              let jar = jarURL(from: config, base: entry.sourceURL) else { return }
+        let items: [[String: String]] = config.sites
+            .filter { $0.kind == .spiderJAR }
+            .map { ["class": $0.api, "ext": $0.extJSONString] }
+        guard !items.isEmpty else { return }
+        warmedLines.insert(id)
+        let base = baseURL
+        let tokenSnapshot = token
+        Task.detached {
+            guard let url = URL(string: base + "/warm") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if !tokenSnapshot.isEmpty {
+                request.setValue(tokenSnapshot, forHTTPHeaderField: "X-JarProxy-Token")
+            }
+            request.httpBody = try? JSONSerialization.data(
+                withJSONObject: ["jarUrl": jar, "items": items])
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
     private static func runOnce(jar: String, site: TVBoxConfig.Site, action: String,
                                 extra: [String: Any]) async throws -> [String: Any] {
         let base = baseURL

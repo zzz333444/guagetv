@@ -161,6 +161,7 @@ struct LibraryView: View {
         .onTapGesture {
             guard !isActive else { return }
             config = ConfigLibrary.activate(id: entry.id)
+            JarProxyClient.warmLine(id: entry.id)
             refreshLibrary()
         }
         .contextMenu {
