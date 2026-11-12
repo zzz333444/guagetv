@@ -36,6 +36,19 @@ struct VodDetail: Identifiable {
                 return Episode(name: kv[0], url: kv[1])
             }
         }
+        // Spiders (the pan family especially) emit one line per
+        // share found, and dead shares come back with an empty
+        // episode group — the user then lands on a dud first line
+        // that shows 暂无选集 while a sibling line has the film.
+        // When at least one line has episodes, drop the empty ones
+        // (labels and groups together, alignment kept). All-empty
+        // and misaligned payloads pass through untouched.
+        if lines.count == groups.count, groups.count > 1,
+           groups.contains(where: { !$0.isEmpty }),
+           groups.contains(where: { $0.isEmpty }) {
+            let kept = zip(lines, groups).filter { !$0.1.isEmpty }
+            return (kept.map { $0.0 }, kept.map { $0.1 })
+        }
         return (lines, groups)
     }
 }
