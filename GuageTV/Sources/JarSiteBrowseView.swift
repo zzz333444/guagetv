@@ -345,22 +345,11 @@ struct JarDetailLoaderView: View {
                                siteKey: site.key, siteName: site.name, vodId: item.id))
             } else if let errorText {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(errorText)
-                            .font(.footnote.monospaced())
-                            .foregroundStyle(Theme.textDim)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button {
-                            Task { await load() }
-                        } label: {
-                            Label("重试", systemImage: "arrow.clockwise")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 18).padding(.vertical, 9)
-                                .background(Theme.card, in: Capsule())
-                                .foregroundStyle(Theme.text)
-                        }
-                    }
-                    .padding(18)
+                    Text(errorText)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(18)
                 }
             } else {
                 ProgressView().tint(Theme.text)
@@ -368,26 +357,22 @@ struct JarDetailLoaderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
-        .task { await load() }
-    }
-
-    private func load() async {
-        errorText = nil
-        detail = nil
-        do {
-            guard !jarURL.isEmpty else {
-                errorText = "这条线路没有带 jar 包地址，代理无从加载。"
-                return
+        .task {
+            do {
+                guard !jarURL.isEmpty else {
+                    errorText = "这条线路没有带 jar 包地址，代理无从加载。"
+                    return
+                }
+                let result = try await JarProxyClient.run(jar: jarURL, site: site, action: "detailContent",
+                                                          extra: ["ids": [item.id]])
+                guard let first = (result["list"] as? [[String: Any]])?.first else {
+                    errorText = "详情为空"
+                    return
+                }
+                detail = CMSClient.mapDetail(first, fallbackID: item.id)
+            } catch {
+                errorText = "详情加载失败\n\n\(error.localizedDescription)"
             }
-            let result = try await JarProxyClient.run(jar: jarURL, site: site, action: "detailContent",
-                                                      extra: ["ids": [item.id]])
-            guard let first = (result["list"] as? [[String: Any]])?.first else {
-                errorText = "详情为空"
-                return
-            }
-            detail = CMSClient.mapDetail(first, fallbackID: item.id)
-        } catch {
-            errorText = "详情加载失败\n\n\(error.localizedDescription)"
         }
     }
 
