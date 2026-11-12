@@ -114,7 +114,11 @@ struct PlayerView: View {
                     .frame(width: 2, height: 2)
                     .opacity(0.02)
                     .allowsHitTesting(false)
-                if hudVisible { hud }
+                if hudVisible, dragMode == .scrub {
+                    VStack { scrubPill; Spacer() }
+                } else if hudVisible {
+                    hud
+                }
                 if isBuffering {
                     VStack(spacing: 10) {
                         ProgressView().tint(Theme.text).scaleEffect(1.5)
@@ -261,25 +265,35 @@ struct PlayerView: View {
         }
     }
 
+    /// Scrub feedback, modelled on the reference the user sent:
+    /// a floating pill at the top centre — target / total on the
+    /// first line, the signed offset from where the drag started
+    /// on the second. No thumbnail, no icon.
+    private var scrubPill: some View {
+        VStack(spacing: 2) {
+            Text("\(timeLabel(scrubTarget)) / \(timeLabel(duration))")
+                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+            Text(deltaLabel)
+                .font(.system(size: 13, weight: .medium).monospacedDigit())
+                .foregroundStyle(Theme.text.opacity(0.75))
+        }
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 18).padding(.vertical, 8)
+        .background(Color(white: 0.16).opacity(0.88), in: Capsule())
+        .padding(.top, 12)
+    }
+
+    private var deltaLabel: String {
+        let delta = Int(scrubTarget - dragStartTime)
+        return (delta >= 0 ? "+" : "-") + timeLabel(Double(abs(delta)))
+    }
+
     @ViewBuilder
     private var hud: some View {
         VStack(spacing: 8) {
             switch dragMode {
             case .scrub:
-                if let previewImage {
-                    Image(uiImage: previewImage)
-                        .resizable().aspectRatio(contentMode: .fill)
-                        .frame(width: 148, height: 84)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                Image(systemName: scrubTarget >= dragStartTime ? "goforward" : "gobackward")
-                    .font(.title3)
-                Text(timeLabel(scrubTarget))
-                    .font(.system(size: 20, weight: .semibold).monospacedDigit())
-                let delta = Int(scrubTarget - dragStartTime)
-                Text(delta >= 0 ? "+\(delta) 秒" : "\(delta) 秒")
-                    .font(.caption)
-                    .foregroundStyle(Theme.text.opacity(0.75))
+                EmptyView()
             case .brightness:
                 hudBar(icon: "sun.max.fill", level: dragLevel)
             case .volume:
