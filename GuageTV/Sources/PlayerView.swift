@@ -729,7 +729,12 @@ struct PlayerView: View {
         let idx = order.firstIndex { abs($0 - currentRate) < 0.01 } ?? 0
         let next = order[(idx + 1) % order.count]
         setRate(next)
-        showToast("倍速 \(next, specifier: "%.2g")x")
+        // NOTE: `\(x, specifier:)` only compiles inside a
+        // Text/LocalizedStringKey literal — in a plain String it
+        // fails with "incorrect argument label (have '_:specifier:',
+        // expected '_:default:')" (broke CI #113/#114). Use
+        // String(format:) here.
+        showToast("倍速 \(String(format: "%.2g", next))x")
     }
 
     /// Top-right capsule's first slot: 画面适配 ↔ 画面填充，
