@@ -175,7 +175,7 @@ struct PlayerView: View {
                 }
                 if !showChrome {
                     VStack {
-                        HStack(spacing: 8) { speedPill; specPill; Spacer() }
+                        HStack(spacing: 8) { speedPill; specPill; if showClock { clockPill }; Spacer() }
                         Spacer()
                     }
                     .padding(.horizontal, 14)
@@ -422,7 +422,7 @@ struct PlayerView: View {
     private func chrome(isLandscape: Bool) -> some View {
         VStack {
             topBar(isLandscape: isLandscape)
-            HStack(spacing: 8) { speedPill; specPill; Spacer() }
+            HStack(spacing: 8) { speedPill; specPill; if showClock { clockPill }; Spacer() }
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
             Spacer()
@@ -454,7 +454,6 @@ struct PlayerView: View {
             }
             .playerGlassCapsule()
             Spacer()
-            if showClock { clockPill }
             if showGravityButton || showScreenshotButton || !isMPV {
                 HStack(spacing: 2) {
                     if showGravityButton {
@@ -533,7 +532,12 @@ struct PlayerView: View {
                 // Quick episode switch （上一集 / 下一集）: its own
                 // capsule in the spot the user circled on the
                 // reference shot, just left of the rate capsule.
-                if showEpisodeSwitch, episodes.count > 1 {
+                // Shown whenever the title has episodes at all —
+                // v1.35 gated it on >1 episode, so on a movie it
+                // vanished and the user reported the button
+                // "still not there"; the arrows dim at the bounds
+                // instead (both dim on a single-episode title).
+                if showEpisodeSwitch, !episodes.isEmpty {
                     HStack(spacing: 2) {
                         Button { prevEpisode(); pokeChrome() } label: {
                             Image(systemName: "backward.end.fill")
@@ -594,15 +598,17 @@ struct PlayerView: View {
         return f
     }()
 
-    /// Current wall-clock time for the top-right corner (the
-    /// reference players show it; 设置 → 播放 can hide it).
-    /// TimelineView re-renders it on a slow tick.
+    /// Current wall-clock time, sitting in the top-left pill row
+    /// next to 网速 / 分辨率 (moved there at the user's request —
+    /// it stays visible with the standalone pills even when the
+    /// chrome hides). 设置 → 播放 can hide it. TimelineView
+    /// re-renders it on a slow tick.
     private var clockPill: some View {
         TimelineView(.periodic(from: .now, by: 20)) { context in
             Text(Self.clockFormatter.string(from: context.date))
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 .foregroundStyle(Theme.text)
-                .padding(.horizontal, 12).padding(.vertical, 9)
+                .padding(.horizontal, 11).padding(.vertical, 8)
                 .playerGlassCapsule()
         }
     }

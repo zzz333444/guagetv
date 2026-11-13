@@ -308,27 +308,16 @@ struct DiscoverView: View {
     /// view ignores the top safe area).
     private var discoverHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // No search entries up here (user's call): the
+            // header is just the title + category chips. Search
+            // lives on the floating button by the tab bar, and
+            // TMDB posters still tap straight into search.
             HStack(alignment: .center, spacing: 10) {
                 Text("发现")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(Theme.text)
                 Spacer()
-                headerCircleButton(icon: "magnifyingglass") { searchSeed = ""; showSearch = true }
             }
-            Button { searchSeed = ""; showSearch = true } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                    Text("搜索电影、剧集…")
-                    Spacer()
-                }
-                .font(.subheadline)
-                .foregroundStyle(Theme.textDim)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .glassCapsule()
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
             if let site = activeSite, !feedClasses.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {

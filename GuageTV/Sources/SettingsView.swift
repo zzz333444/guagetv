@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.35 · 详情融图与内核拉满"
+    static let buildLabel = "v1.36 · 渐隐封面与切集常显"
 
     var body: some View {
         NavigationStack {

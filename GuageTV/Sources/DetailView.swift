@@ -134,30 +134,44 @@ struct DetailView: View {
     /// still) when enrichment found one, else the feed's poster.
     private var heroPic: String {
         if let backdrop = tmdbInfo?.backdrop, !backdrop.isEmpty { return backdrop }
+        if detail.pic.isEmpty, let poster = tmdbInfo?.poster, !poster.isEmpty { return poster }
         return detail.pic
     }
 
     /// Full-bleed poster hero, Rex-style: the cover runs to the
-    /// very top of the screen (under the status bar and the
-    /// floating back button) and its lower third melts gradually
-    /// into the page background — no hard seam anywhere.
+    /// very top of the screen and DISSOLVES into the page — the
+    /// image itself carries an alpha fade over its lower half, so
+    /// it melts into the ambient-blurred background behind the
+    /// page. (v1.35 melted it into flat Theme.bg instead, which
+    /// left a visible straight edge where the hero block ended
+    /// and the tinted content area began.)
     private var heroHeader: some View {
         ZStack(alignment: .bottom) {
             if !heroPic.isEmpty {
                 PosterImage(urlString: heroPic)
                     .frame(height: 500)
                     .clipped()
+                    .mask(
+                        LinearGradient(stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.50),
+                            .init(color: .clear, location: 0.98),
+                        ], startPoint: .top, endPoint: .bottom)
+                    )
+                // Legibility shade at the very top only (status
+                // bar / back button zone); transparent elsewhere
+                // so it never re-introduces an edge.
+                LinearGradient(stops: [
+                    .init(color: .black.opacity(0.22), location: 0),
+                    .init(color: .clear, location: 0.28),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 500)
             } else {
-                Rectangle().fill(Theme.glass).frame(height: 500)
+                // No artwork at all: don't open the page with a
+                // 500pt void — a short spacer is enough.
+                Color.clear.frame(height: 150)
             }
-            LinearGradient(gradient: Gradient(stops: [
-                .init(color: .black.opacity(0.22), location: 0),
-                .init(color: .clear, location: 0.30),
-                .init(color: Theme.bg.opacity(0.18), location: 0.55),
-                .init(color: Theme.bg.opacity(0.72), location: 0.80),
-                .init(color: Theme.bg, location: 1),
-            ]), startPoint: .top, endPoint: .bottom)
-                .frame(height: 500)
         }
         .frame(maxWidth: .infinity)
     }
