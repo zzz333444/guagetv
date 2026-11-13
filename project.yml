@@ -34,8 +34,8 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "1.37"
-        CFBundleVersion: "137"
+        CFBundleShortVersionString: "1.38"
+        CFBundleVersion: "138"
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         UILaunchScreen: {}
         # TVBox configs, CMS APIs and media streams are very often plain
@@ -43,6 +43,25 @@ targets:
         # (the "requires the use of a secure connection" import error).
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        # Share-sheet / "Open in" support (v1.38): .py / .js / .json
+        # files can be sent straight into GuageTV from Files or any
+        # app's share sheet; the app copies the file and offers the
+        # import in an alert (see SharedImport.swift).
+        LSSupportsOpeningDocumentsInPlace: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Spider / 配置文件
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            CFBundleTypeExtensions:
+              - py
+              - js
+              - json
+              - txt
+            LSItemContentTypes:
+              - public.python-script
+              - public.json
+              - public.javascript
+              - public.plain-text
     settings:
       TARGETED_DEVICE_FAMILY: "1,2"
       # Python (BeeWare python-apple-support, fetched by CI to the
