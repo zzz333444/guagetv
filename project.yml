@@ -34,8 +34,8 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "1.28"
-        CFBundleVersion: "128"
+        CFBundleShortVersionString: "1.29"
+        CFBundleVersion: "129"
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         UILaunchScreen: {}
         # TVBox configs, CMS APIs and media streams are very often plain
