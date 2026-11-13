@@ -11,6 +11,11 @@ struct ContentView: View {
     @AppStorage("themeMode.v1") private var themeMode = "dark"
     @AppStorage("tabShowRecords") private var showRecordsTab = true
     @AppStorage("tabShowLibrary") private var showLibraryTab = true
+    /// Share-sheet import offer (SharedImportCenter bumps the
+    /// counter from onOpenURL; the alert below consumes it).
+    @AppStorage(SharedImportCenter.counterKey) private var sharedImportCounter = 0
+    @State private var shareOfferName: String?
+    @State private var shareResult: String?
 
     private var colorScheme: ColorScheme? {
         switch themeMode {
@@ -47,11 +52,36 @@ struct ContentView: View {
         .onAppear {
             clampTab()
             if let id = ConfigLibrary.activeID() { JarProxyClient.warmLine(id: id) }
+            ConfigLibrary.refreshStaleEntries()
         }
         .onChange(of: showRecordsTab) { _ in clampTab() }
         .onChange(of: showLibraryTab) { _ in clampTab() }
         .sheet(isPresented: $showSearch) {
             SearchView(config: config)
+        }
+        .onChange(of: sharedImportCounter) { _ in
+            shareOfferName = SharedImportCenter.pendingFileName
+        }
+        .alert("收到分享的文件", isPresented: Binding(
+            get: { shareOfferName != nil },
+            set: { if !$0 { shareOfferName = nil } }
+        )) {
+            Button("加入资源库") {
+                shareResult = SharedImportCenter.performImport()
+                config = ConfigLibrary.loadActive()
+                shareOfferName = nil
+            }
+            Button("取消", role: .cancel) { shareOfferName = nil }
+        } message: {
+            Text("把「\(shareOfferName ?? "")」导入为线路？")
+        }
+        .alert("导入结果", isPresented: Binding(
+            get: { shareResult != nil },
+            set: { if !$0 { shareResult = nil } }
+        )) {
+            Button("好") { shareResult = nil }
+        } message: {
+            Text(shareResult ?? "")
         }
     }
 

@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.37 · Rex 播放器与 py 加强"
+    static let buildLabel = "v1.38 · 换线选轨与 py 全能"
 
     var body: some View {
         NavigationStack {
@@ -210,6 +210,7 @@ struct TVBoxConfigSettingsView: View {
     @State private var configURL = ""
     @State private var status = "还没有导入配置"
     @State private var showFileImporter = false
+    @AppStorage("configAutoRefresh") private var configAutoRefresh = true
     @State private var pendingImport: PendingImport?
     @State private var importName = ""
     @State private var importHandled = false
@@ -241,6 +242,14 @@ struct TVBoxConfigSettingsView: View {
                     }
                 }
             }
+            SettingsGroup(title: "配置更新") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("配置自动更新", isOn: $configAutoRefresh)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("订阅地址导入的配置（蝴蝶、jsm 这类）每 12 小时自动拉一次新版，内容确实变了而且能正常解析才替换，备注名和分组不受影响。从文件导入的配置不参与。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
         }
         .onAppear {
             if configURL.isEmpty, let saved = ConfigStore.savedSourceURL() {
@@ -249,7 +258,15 @@ struct TVBoxConfigSettingsView: View {
         }
         .sheet(isPresented: $showFileImporter) {
             DocumentPicker(
-                onPick: { url in Task { await importPickedFile(url) } },
+                onPick: { urls in
+                    Task {
+                        if urls.count == 1, let first = urls.first {
+                            await importPickedFile(first)
+                        } else {
+                            await importPickedFiles(urls)
+                        }
+                    }
+                },
                 onCancel: { status = "已取消文件导入" })
                 .ignoresSafeArea()
         }
@@ -421,36 +438,62 @@ struct TVBoxConfigSettingsView: View {
         }
     }
 
+    /// Multi-file import (picker allows multiple selection): every
+    /// file goes in directly under its file-derived name — the
+    /// rename sheet is a single-file courtesy and would be unusable
+    /// per file in a batch. Outcomes are summarised in one line.
+    private func importPickedFiles(_ urls: [URL]) async {
+        status = "批量导入中（\(urls.count) 个文件）…"
+        var okNames: [String] = []
+        var failed: [String] = []
+        for fileURL in urls {
+            let ext = fileURL.pathExtension.lowercased()
+            do {
+                let scoped = fileURL.startAccessingSecurityScopedResource()
+                let data = try Data(contentsOf: fileURL)
+                if scoped { fileURL.stopAccessingSecurityScopedResource() }
+                switch ext {
+                case "py", "js":
+                    try await registerSingleFile(data: data,
+                                                 fileName: fileURL.lastPathComponent,
+                                                 kind: ext,
+                                                 displayName: prefillName(forFileName: fileURL.lastPathComponent))
+                    okNames.append(fileURL.lastPathComponent)
+                case "json", "txt", "":
+                    let parsed: TVBoxConfig
+                    if MaoYuanAdapter.looksLikeMaoYuan(data) {
+                        parsed = try MaoYuanAdapter.convert(from: data)
+                    } else {
+                        parsed = try ConfigLoader.load(from: data)
+                    }
+                    let entry = ConfigLibrary.add(
+                        data: data,
+                        sourceURL: "file-import://" + fileURL.lastPathComponent,
+                        siteCount: parsed.sites.count)
+                    applyImportedName(prefillName(forFileName: fileURL.lastPathComponent), to: entry)
+                    okNames.append(fileURL.lastPathComponent)
+                default:
+                    failed.append("\(fileURL.lastPathComponent)（不支持 .\(ext)）")
+                }
+            } catch {
+                failed.append(fileURL.lastPathComponent)
+            }
+        }
+        var parts = ["批量导入完成：成功 \(okNames.count) 个"]
+        if !okNames.isEmpty { parts.append(okNames.joined(separator: "、")) }
+        if !failed.isEmpty { parts.append("失败 \(failed.count) 个：\(failed.joined(separator: "、"))") }
+        status = parts.joined(separator: " · ")
+    }
+
     /// Store the file and add its synthetic one-site config line.
     /// The on-disk file name (and the site key) stay file-derived so
     /// re-imports refresh in place; displayName is what the site and
     /// the line are called.
     private func registerSingleFile(data: Data, fileName: String, kind: String,
                                     displayName: String) async throws {
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dirName = kind == "py" ? "spiders" : "jsrules"
-        let dir = support.appendingPathComponent(dirName)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
-        let base = (fileName as NSString).deletingPathExtension
-        let siteName = displayName.isEmpty ? base : displayName
-        let site: [String: Any]
-        if kind == "py" {
-            site = ["key": "pyfile_" + base, "name": siteName, "type": 3,
-                    "api": "local-spider://" + fileName, "searchable": 1, "quickSearch": 1]
-        } else {
-            site = ["key": "jsfile_" + base, "name": siteName, "type": 3,
-                    "api": "bundled-engine.js", "ext": "local-rule://" + fileName,
-                    "searchable": 1, "quickSearch": 1]
-        }
-        let configData = try JSONSerialization.data(withJSONObject: ["sites": [site]])
-        let parsed = try ConfigLoader.load(from: configData)
-        config = parsed
-        let entry = ConfigLibrary.add(data: configData,
-                                      sourceURL: (kind == "py" ? "py-import://" : "js-import://") + fileName,
-                                      siteCount: 1)
-        applyImportedName(displayName, to: entry)
+        let entry = try SingleFileLine.register(data: data, fileName: fileName,
+                                                kind: kind, displayName: displayName)
+        config = ConfigLibrary.load(id: entry.id)
         status = (kind == "py" ? "py 文件已导入为单站线路：" : "JS 规则已导入为单站线路：")
             + ConfigLibrary.shownName(entry)
     }
@@ -818,13 +861,13 @@ struct ConfigLibrarySettingsView: View {
 /// any file type is selectable, the copy lands in our sandbox, and
 /// cancel is reported like any other outcome.
 struct DocumentPicker: UIViewControllerRepresentable {
-    var onPick: (URL) -> Void
+    var onPick: ([URL]) -> Void
     var onCancel: () -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
         picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = false
+        picker.allowsMultipleSelection = true
         return picker
     }
 
@@ -837,7 +880,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
         init(_ parent: DocumentPicker) { self.parent = parent }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            if let url = urls.first { parent.onPick(url) }
+            parent.onPick(urls)
         }
 
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -895,7 +938,18 @@ struct AppearanceSettingsView: View {
 
 /// 关于呱壳 — version and both runtime statuses live here (moved out
 /// of the settings list at the user's request).
+/// Result box for the Python ping race in AboutView: the ping
+/// itself can hang forever on a wedged queue, so the checker
+/// polls the box after a fixed sleep instead of awaiting it.
+final class PingBox: @unchecked Sendable {
+    var done = false
+    var ok = false
+}
+
 struct AboutView: View {
+    @State private var diagCount = Diagnostics.entries().count
+    @State private var pyHealth = ""
+
     var body: some View {
         SettingsPage(title: "关于呱壳") {
             GlassCard {
@@ -908,8 +962,65 @@ struct AboutView: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     aboutRow("Python 运行时", PythonRuntime.shared.statusText)
+                    HStack(spacing: 10) {
+                        Button("Python 健康检查") {
+                            pyHealth = "检查中…"
+                            Task {
+                                let box = PingBox()
+                                Task.detached {
+                                    box.ok = (try? PythonRuntime.shared.invoke("ping", [])) != nil
+                                    box.done = true
+                                }
+                                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                                if !box.done {
+                                    pyHealth = "3 秒无响应：队列可能被某个蜘蛛占死，重启呱壳恢复"
+                                } else {
+                                    pyHealth = box.ok ? "响应正常" : "调用失败（看诊断日志）"
+                                }
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                        .foregroundStyle(Theme.text)
+                        Button("重置蜘蛛熔断") {
+                            SpiderBridge.shared.resetBreaker()
+                            pyHealth = "熔断已重置"
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                        .foregroundStyle(Theme.text)
+                    }
+                    if !pyHealth.isEmpty {
+                        Text(pyHealth).font(.footnote).foregroundStyle(Theme.textDim)
+                    }
                     Divider().background(Color.white.opacity(0.12))
                     aboutRow("JS 运行时", "drpy2 3.9.52 · JavaScriptCore")
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("诊断日志").font(.headline).foregroundStyle(Theme.text)
+                    Text("记录最近的 py 蜘蛛报错与播放失败（最多 200 条）。哪个站挂了，把日志导出发出来就能直接定位。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                    HStack(spacing: 10) {
+                        ShareLink(item: Diagnostics.exportText()) {
+                            Text("导出日志").font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 16).padding(.vertical, 8)
+                                .background(Theme.glass, in: Capsule())
+                                .foregroundStyle(Theme.text)
+                        }
+                        Button("清除") {
+                            Diagnostics.clear()
+                            diagCount = 0
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                        .foregroundStyle(Theme.text)
+                        Text("当前 \(diagCount) 条").font(.footnote).foregroundStyle(Theme.textDim)
+                    }
                 }
             }
             Text("个人自用壳：内容来自你自己导入的线路与文件，呱壳不提供任何影视内容。")

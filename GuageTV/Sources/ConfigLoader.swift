@@ -514,6 +514,56 @@ enum ConfigLibrary {
         return try? ConfigLoader.load(from: data)
     }
 
+    // MARK: auto-refresh （订阅配置自动更新）
+
+    private static let refreshStampKey = "configRefreshStamps.v1"
+
+    /// Subscription lines (http/https sourceURL) re-fetch themselves
+    /// at most once per 12h when the app comes to the front: fetched
+    /// bytes replace the stored copy only when they parse AND
+    /// differ, so a dead or hijacked endpoint can never clobber a
+    /// working line. Aliases, groups and the active choice are
+    /// untouched. Settings → TVBox 配置 →「配置自动更新」gates it.
+    static func refreshStaleEntries() {
+        guard UserDefaults.standard.object(forKey: "configAutoRefresh") as? Bool ?? true else { return }
+        let now = Date().timeIntervalSince1970
+        var stamps = (UserDefaults.standard.dictionary(forKey: refreshStampKey)
+            as? [String: TimeInterval]) ?? [:]
+        var stamped = false
+        for entry in entries() {
+            guard entry.sourceURL.hasPrefix("http://") || entry.sourceURL.hasPrefix("https://"),
+                  let url = URL(string: entry.sourceURL) else { continue }
+            if now - (stamps[entry.id] ?? 0) < 12 * 3600 { continue }
+            stamps[entry.id] = now
+            stamped = true
+            let id = entry.id
+            Task.detached(priority: .background) {
+                guard let data = try? await NetFetch.dataForConfig(from: url) else { return }
+                storeRefreshed(data: data, id: id)
+            }
+        }
+        if stamped { UserDefaults.standard.set(stamps, forKey: refreshStampKey) }
+    }
+
+    private static func storeRefreshed(data: Data, id: String) {
+        guard let file = file(for: id) else { return }
+        let old = try? Data(contentsOf: file)
+        if old == data { return }
+        let parsed: TVBoxConfig?
+        if MaoYuanAdapter.looksLikeMaoYuan(data) {
+            parsed = try? MaoYuanAdapter.convert(from: data)
+        } else {
+            parsed = try? ConfigLoader.load(from: data)
+        }
+        guard let parsed else { return }
+        try? data.write(to: file, options: .atomic)
+        var list = entries()
+        if let i = list.firstIndex(where: { $0.id == id }) {
+            list[i].siteCount = parsed.sites.count
+            saveEntries(list)
+        }
+    }
+
     /// v7's single active-config.json becomes the library's first line,
     /// so an upgrade never loses the config the user already imported.
     private static func migrateLegacyIfNeeded() {

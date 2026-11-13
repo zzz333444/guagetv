@@ -19,6 +19,14 @@ import UIKit
 /// - Software (fallback): mpv's render API into a CPU buffer
 ///   blitted to a CALayer. Used when the setting forces it, or
 ///   automatically when the Metal context fails to initialise.
+/// One selectable audio/subtitle track, shared by both engines'
+/// controllers and the player's track picker.
+struct PlayerTrack: Identifiable, Equatable {
+    let id: Int
+    let label: String
+    var selected: Bool
+}
+
 final class MPVController: ObservableObject {
     /// Which surface the view layer should show. Starts at the
     /// user's preference; flips to false if Metal init fails so
@@ -234,6 +242,23 @@ final class MPVController: ObservableObject {
         backgroundObservers = []
     }
 
+    /// Resident-handle load (v1.38): episode and line switches
+    /// reuse the live mpv handle — only the file changes, no
+    /// mpv_create / render-context rebuild, so switching is as
+    /// fast as the network allows. Falls back to a full start
+    /// when no handle is up yet; the heavy rebuild stays reload().
+    func load(url: URL, header: [String: String], startAt: Double = 0) {
+        guard let h = handle else {
+            start(url: url, header: header, startAt: startAt)
+            return
+        }
+        let fields = header.map { "\($0.key): \($0.value)" }.joined(separator: ",")
+        _ = mpv_set_property_string(h, "http-header-fields", fields)
+        _ = mpv_set_property_string(h, "start", startAt > 1 ? String(startAt) : "none")
+        specText = ""
+        command(["loadfile", url.absoluteString])
+    }
+
     /// Rebuild from scratch (failure recovery): the view layer
     /// stays put, only the mpv handle is recycled.
     func reload(url: URL, header: [String: String], startAt: Double = 0) {
@@ -258,6 +283,57 @@ final class MPVController: ObservableObject {
             buffer = nil
             bufferBytes = 0
         }
+    }
+
+    // MARK: tracks （音轨 / 字幕）
+
+    @Published var audioTracks: [PlayerTrack] = []
+    @Published var subTracks: [PlayerTrack] = []
+    @Published var currentAudioID = -1
+    @Published var currentSubID = -1
+    private var pollCount = 0
+
+    /// track-list via per-index string properties (mpv exposes
+    /// them read-only); refreshed on a 1s cadence from poll().
+    private func refreshTracks() {
+        guard let count = stringProperty("track-list/count").flatMap(Int.init) else { return }
+        var audios: [PlayerTrack] = []
+        var subs: [PlayerTrack] = []
+        var curA = -1
+        var curS = -1
+        for i in 0..<count {
+            let base = "track-list/\(i)"
+            guard let type = stringProperty("\(base)/type"),
+                  type == "audio" || type == "sub",
+                  let tid = stringProperty("\(base)/id").flatMap(Int.init) else { continue }
+            let title = stringProperty("\(base)/title") ?? ""
+            let lang = stringProperty("\(base)/lang") ?? ""
+            let label = !title.isEmpty ? title
+                : (!lang.isEmpty ? lang : (type == "audio" ? "音轨 \(tid)" : "字幕 \(tid)"))
+            let selected = stringProperty("\(base)/selected") == "yes"
+            let track = PlayerTrack(id: tid, label: label, selected: selected)
+            if type == "audio" {
+                audios.append(track)
+                if selected { curA = tid }
+            } else {
+                subs.append(track)
+                if selected { curS = tid }
+            }
+        }
+        if audios != audioTracks { audioTracks = audios }
+        if subs != subTracks { subTracks = subs }
+        currentAudioID = curA
+        currentSubID = curS
+    }
+
+    func selectAudio(_ id: Int) {
+        setProperty("aid", id < 0 ? "no" : "\(id)")
+        currentAudioID = id
+    }
+
+    func selectSub(_ id: Int) {
+        setProperty("sid", id < 0 ? "no" : "\(id)")
+        currentSubID = id
     }
 
     // MARK: controls
@@ -369,6 +445,8 @@ final class MPVController: ObservableObject {
     }
 
     private func poll() {
+        pollCount += 1
+        if pollCount % 4 == 0 { refreshTracks() }
         duration = stringProperty("duration").flatMap(Double.init) ?? 0
         currentTime = stringProperty("time-pos").flatMap(Double.init) ?? 0
         let userPaused = stringProperty("pause") == "yes"
@@ -544,7 +622,10 @@ struct MPVPlayerView: View {
                     .ignoresSafeArea()
             }
         }
-        .onAppear { controller.start(url: url, header: header, startAt: startAt) }
+        .onAppear { controller.load(url: url, header: header, startAt: startAt) }
+        .onChange(of: url) { next in
+            controller.load(url: next, header: header, startAt: startAt)
+        }
         .onDisappear { controller.stop() }
     }
 }

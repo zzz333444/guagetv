@@ -21,10 +21,42 @@ struct PlayerView: View {
         var id: String { name + "|" + url }
     }
 
-    let episodes: [EpisodeRef]
+    /// Outcome of resolving one episode: the playable URL plus its
+    /// headers, or the resolver's own failure text (spider errors
+    /// surface verbatim, per the v1.20 diagnostics rule).
+    enum ResolveResult {
+        case ok(url: String, header: [String: String])
+        case failed(String)
+    }
+
+    /// Resolves one episode (line, episode) to a playable URL —
+    /// DetailView builds it from the site's playerContent / parse
+    /// path. Spider lines hand the player only raw episode ids, so
+    /// next-episode and line switches resolve on demand through it.
+    typealias Resolver = (Int, Int) async -> ResolveResult
+
+    @State private var episodes: [EpisodeRef]
     var pic: String = ""
-    var header: [String: String] = [:]
+    let baseHeader: [String: String]
     var title: String = ""
+    /// All play lines (names + raw episode lists) for in-player
+    /// line switching; empty for single-shot players.
+    let lineNames: [String]
+    let lineEpisodes: [[EpisodeRef]]
+    let episodeResolver: Resolver?
+    /// (line, episode, resolvedURL, header) — DetailView refreshes
+    /// the history entry when playback moves to another episode.
+    let onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)?
+    @State private var activeLine: Int
+    @State private var resolved: [Int: (url: String, header: [String: String])]
+    @State private var resolvingEpisode = false
+    let initialLine: Int
+    let initialIndex: Int
+
+    /// Effective play header for the current episode: its own
+    /// resolved header when it went through a resolver, else the
+    /// header the player was opened with.
+    var header: [String: String] { resolved[index]?.header ?? baseHeader }
     /// When set, playback reports its position to HistoryStore and
     /// resumes at resumeAt once the duration is known.
     var historyID: String?
@@ -80,21 +112,42 @@ struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(urlString: String, header: [String: String] = [:], title: String = "") {
-        self.episodes = [EpisodeRef(name: "", url: urlString)]
-        self.header = header
+        _episodes = State(initialValue: [EpisodeRef(name: "", url: urlString)])
+        self.baseHeader = header
         self.title = title
+        self.lineNames = []
+        self.lineEpisodes = []
+        self.episodeResolver = nil
+        self.onEpisodeChange = nil
+        self.initialLine = 0
+        self.initialIndex = 0
+        _activeLine = State(initialValue: 0)
+        _resolved = State(initialValue: [:])
         _index = State(initialValue: 0)
     }
 
     init(episodes: [EpisodeRef], startIndex: Int, header: [String: String] = [:], title: String = "",
-         historyID: String? = nil, resumeAt: Double = 0, pic: String = "") {
-        self.episodes = episodes
-        self.header = header
+         historyID: String? = nil, resumeAt: Double = 0, pic: String = "",
+         lineNames: [String] = [], lineIndex: Int = 0, lineEpisodes: [[EpisodeRef]] = [],
+         initialResolved: (url: String, header: [String: String])? = nil,
+         resolver: Resolver? = nil,
+         onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)? = nil) {
+        let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
+        _episodes = State(initialValue: episodes)
+        self.baseHeader = header
         self.title = title
         self.historyID = historyID
         self.resumeAt = resumeAt
         self.pic = pic
-        _index = State(initialValue: min(max(startIndex, 0), max(episodes.count - 1, 0)))
+        self.lineNames = lineNames
+        self.lineEpisodes = lineEpisodes
+        self.episodeResolver = resolver
+        self.onEpisodeChange = onEpisodeChange
+        self.initialLine = lineIndex
+        self.initialIndex = start
+        _activeLine = State(initialValue: lineIndex)
+        _resolved = State(initialValue: initialResolved.map { [start: $0] } ?? [:])
+        _index = State(initialValue: start)
     }
 
     /// Engine heuristic (auto mode): the HLS/MP4 family stays on
@@ -109,7 +162,13 @@ struct PlayerView: View {
         "m2ts", "webm", "3gp", "asf", "vob", "f4v",
     ]
 
-    private var current: EpisodeRef { episodes[min(index, episodes.count - 1)] }
+    private var current: EpisodeRef {
+        let raw = episodes[min(index, episodes.count - 1)]
+        if let hit = resolved[index] {
+            return EpisodeRef(name: raw.name, url: hit.url)
+        }
+        return raw
+    }
 
     private var isMPV: Bool {
         if let engineOverride { return engineOverride }
@@ -158,7 +217,7 @@ struct PlayerView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 engineLayer
-                    .id(current.url + (isMPV ? "#mpv" : "#av"))
+                    .id(isMPV ? "mpv" : "av")
                 gestureLayer(size: geo.size)
                 VolumeHost()
                     .frame(width: 2, height: 2)
@@ -169,7 +228,7 @@ struct PlayerView: View {
                 } else if hudVisible {
                     hud
                 }
-                if isBuffering {
+                if isBuffering || resolvingEpisode {
                     bufferingDots
                 } else if !isPlaying && duration > 0 {
                     // Paused: one big plain play glyph in the centre
@@ -244,17 +303,32 @@ struct PlayerView: View {
 
     // MARK: engine layers
 
+    /// Where a (re)load should land: an explicit pending start
+    /// (engine switch / recovery / line switch) wins; the history
+    /// resume point applies ONLY to the episode the player was
+    /// opened with — before the resident-engine refactor every
+    /// episode rebuild re-applied it to the wrong episode.
+    private var effectiveStartAt: Double {
+        if let pendingStart { return pendingStart }
+        return (activeLine == initialLine && index == initialIndex) ? resumeAt : 0
+    }
+
     @ViewBuilder
     private var engineLayer: some View {
         if let url = URL(string: current.url) {
             if isMPV {
                 MPVPlayerView(url: url, header: header,
-                              startAt: pendingStart ?? resumeAt, controller: mpv)
+                              startAt: effectiveStartAt, controller: mpv)
             } else {
                 AVPlayerLayerView(player: native.player,
                                   onLayer: { native.setupPiP(layer: $0) })
                     .ignoresSafeArea()
                     .onAppear { native.load(url: url, header: header) }
+                    .onChange(of: current.url) { _ in
+                        if let next = URL(string: current.url) {
+                            native.load(url: next, header: header)
+                        }
+                    }
                     .onDisappear { native.pause() }
             }
         } else {
@@ -689,8 +763,8 @@ struct PlayerView: View {
             List {
                 ForEach(episodes.indices, id: \.self) { i in
                     Button {
-                        index = i
                         showEpisodes = false
+                        goToEpisode(i)
                     } label: {
                         HStack {
                             Text(episodes[i].name.isEmpty ? "第\(i + 1)集" : episodes[i].name)
@@ -713,6 +787,39 @@ struct PlayerView: View {
         .preferredColorScheme(.dark)
     }
 
+    /// One track picker section （音轨 / 字幕）: hidden entirely
+    /// when the stream has no such tracks; 字幕 gets a 关闭 row.
+    @ViewBuilder
+    private func trackSection(title: String, tracks: [PlayerTrack], current: Int,
+                                allowOff: Bool, select: @escaping (Int) -> Void) -> some View {
+        if !tracks.isEmpty {
+            Section(title) {
+                if allowOff {
+                    Button { select(-1) } label: {
+                        HStack {
+                            Text("关闭").foregroundStyle(Theme.text)
+                            Spacer()
+                            if current == -1 {
+                                Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                            }
+                        }
+                    }
+                }
+                ForEach(tracks) { track in
+                    Button { select(track.id) } label: {
+                        HStack {
+                            Text(track.label).foregroundStyle(Theme.text).lineLimit(1)
+                            Spacer()
+                            if track.id == current {
+                                Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// In-player settings (the bottom-right gear): everything the
     /// old ellipsis menu held — rate, seek steps, engine switch —
     /// plus the live feature toggles and the fill mode, bound to
@@ -720,6 +827,43 @@ struct PlayerView: View {
     private var playerSettingsSheet: some View {
         NavigationStack {
             List {
+                if isMPV {
+                    trackSection(title: "音轨", tracks: mpv.audioTracks,
+                                 current: mpv.currentAudioID, allowOff: false) {
+                        mpv.selectAudio($0)
+                    }
+                    trackSection(title: "字幕", tracks: mpv.subTracks,
+                                 current: mpv.currentSubID, allowOff: true) {
+                        mpv.selectSub($0)
+                    }
+                } else {
+                    trackSection(title: "音轨", tracks: native.audioTracks,
+                                 current: native.currentAudioID, allowOff: false) {
+                        native.selectAudio($0)
+                    }
+                    trackSection(title: "字幕", tracks: native.subTracks,
+                                 current: native.currentSubID, allowOff: true) {
+                        native.selectSub($0)
+                    }
+                }
+                if lineNames.count > 1 {
+                    Section("播放线路") {
+                        ForEach(lineNames.indices, id: \.self) { i in
+                            Button {
+                                showPlayerSettings = false
+                                switchLine(i)
+                            } label: {
+                                HStack {
+                                    Text(lineNames[i]).foregroundStyle(Theme.text)
+                                    Spacer()
+                                    if i == activeLine {
+                                        Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Section("倍速") {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
                         Button {
@@ -875,18 +1019,84 @@ struct PlayerView: View {
     /// auto-next switch gates all of them. Off = stay at the end.
     private func advanceToNext() {
         guard autoNextEnabled, index < episodes.count - 1 else { return }
-        index += 1
+        goToEpisode(index + 1)
     }
 
-    /// Manual episode stepping from the quick-switch capsule —
-    /// deliberately NOT gated by the autoNext setting (that one
-    /// only governs hands-free advance when an episode ends).
+    /// Manual episode stepping — deliberately NOT gated by the
+    /// autoNext setting (that one only governs hands-free advance
+    /// when an episode ends).
     private func prevEpisode() {
-        if index > 0 { index -= 1 } else { showToast("已经是第一集") }
+        if index > 0 { goToEpisode(index - 1) } else { showToast("已经是第一集") }
     }
 
     private func nextEpisode() {
-        if index < episodes.count - 1 { index += 1 } else { showToast("已经是最后一集") }
+        if index < episodes.count - 1 { goToEpisode(index + 1) } else { showToast("已经是最后一集") }
+    }
+
+    /// Jump to an episode of the current line, resolving its play
+    /// URL first when this line's episodes are raw spider ids.
+    /// Without a resolver the raw URL plays as-is (CMS behaviour,
+    /// unchanged). A failed resolve keeps the current episode.
+    private func goToEpisode(_ target: Int) {
+        guard episodes.indices.contains(target), target != index else { return }
+        guard episodeResolver != nil, resolved[target] == nil else {
+            index = target
+            notifyEpisodeChange()
+            return
+        }
+        resolvingEpisode = true
+        pokeChrome()
+        Task {
+            let result = await episodeResolver?(activeLine, target) ?? .failed("没有可用的解析通道")
+            resolvingEpisode = false
+            switch result {
+            case .ok(let url, let header):
+                resolved[target] = (url, header)
+                index = target
+                notifyEpisodeChange()
+            case .failed(let reason):
+                showToast(reason)
+                Diagnostics.log("播放", "集解析失败 · \(title) 第\(target + 1)集：\(reason)")
+            }
+        }
+    }
+
+    /// Switch play line mid-playback (播放设置 → 播放线路）: the
+    /// same episode index is resolved on the new line first, then
+    /// playback continues at the current position.
+    private func switchLine(_ target: Int) {
+        guard lineEpisodes.indices.contains(target), target != activeLine else { return }
+        let targetEpisodes = lineEpisodes[target]
+        guard !targetEpisodes.isEmpty else { showToast("这条线路没有集数"); return }
+        let targetIndex = min(index, targetEpisodes.count - 1)
+        let keepPosition = currentTime
+        resolvingEpisode = true
+        Task {
+            var hit: (url: String, header: [String: String])?
+            if let episodeResolver {
+                switch await episodeResolver(target, targetIndex) {
+                case .ok(let url, let header):
+                    hit = (url, header)
+                case .failed(let reason):
+                    resolvingEpisode = false
+                    showToast(reason)
+                    return
+                }
+            }
+            resolvingEpisode = false
+            activeLine = target
+            episodes = targetEpisodes
+            resolved = hit.map { [targetIndex: $0] } ?? [:]
+            pendingStart = keepPosition > 5 ? keepPosition : nil
+            index = targetIndex
+            notifyEpisodeChange()
+            showToast("已切换到 \(lineNames.indices.contains(target) ? lineNames[target] : "线路 \(target + 1)")")
+        }
+    }
+
+    private func notifyEpisodeChange() {
+        guard let hit = resolved[index] else { return }
+        onEpisodeChange?(activeLine, index, hit.url, hit.header)
     }
 
     /// Failure ladder, driven by both engines' failure callbacks:
@@ -898,6 +1108,7 @@ struct PlayerView: View {
     private func handlePlaybackFailure(_ message: String) {
         if let last = lastFailureAt, Date.now.timeIntervalSince(last) < 3 { return }
         lastFailureAt = .now
+        Diagnostics.log("播放", "\(isMPV ? "mpv" : "原生") · \(title) \(current.name)：\(message)")
         switch recoveryStep {
         case 0:
             recoveryStep = 1
@@ -1136,6 +1347,72 @@ final class NativeController: NSObject, ObservableObject {
     @Published var isPiPActive = false
     private var pipController: AVPictureInPictureController?
 
+    // MARK: tracks （音轨 / 字幕，via media selection groups)
+
+    @Published var audioTracks: [PlayerTrack] = []
+    @Published var subTracks: [PlayerTrack] = []
+    @Published var currentAudioID = -1
+    @Published var currentSubID = -1
+    private var audibleGroup: AVMediaSelectionGroup?
+    private var legibleGroup: AVMediaSelectionGroup?
+
+    /// Called when an item is ready and again after selection:
+    /// the groups only exist once the asset has loaded its
+    /// characteristics, so this runs from the item observers.
+    func refreshTracks() {
+        guard let item = player.currentItem else { return }
+        let asset = item.asset
+        var audios: [PlayerTrack] = []
+        var subs: [PlayerTrack] = []
+        var curA = -1
+        var curS = -1
+        if let group = asset.mediaSelectionGroup(for: .audible) {
+            audibleGroup = group
+            let selected = item.selectedMediaOption(in: group)
+            for (i, option) in group.options.enumerated() {
+                let isSel = option == selected
+                audios.append(PlayerTrack(id: i, label: option.displayName, selected: isSel))
+                if isSel { curA = i }
+            }
+        }
+        if let group = asset.mediaSelectionGroup(for: .legible) {
+            legibleGroup = group
+            let selected = item.selectedMediaOption(in: group)
+            for (i, option) in group.options.enumerated() {
+                let isSel = option == selected
+                subs.append(PlayerTrack(id: i, label: option.displayName, selected: isSel))
+                if isSel { curS = i }
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if audios != self.audioTracks { self.audioTracks = audios }
+            if subs != self.subTracks { self.subTracks = subs }
+            self.currentAudioID = curA
+            self.currentSubID = curS
+        }
+    }
+
+    func selectAudio(_ id: Int) {
+        guard let item = player.currentItem, let group = audibleGroup,
+              group.options.indices.contains(id) else { return }
+        item.select(group.options[id], in: group)
+        currentAudioID = id
+        refreshTracks()
+    }
+
+    func selectSub(_ id: Int) {
+        guard let item = player.currentItem, let group = legibleGroup else { return }
+        if id < 0 {
+            item.select(nil, in: group)
+            currentSubID = -1
+        } else if group.options.indices.contains(id) {
+            item.select(group.options[id], in: group)
+            currentSubID = id
+        }
+        refreshTracks()
+    }
+
     /// Playback failure / natural end, wired by PlayerView (which
     /// owns recovery: retry, then engine switch, then surface).
     var onFailure: ((String) -> Void)?
@@ -1153,6 +1430,10 @@ final class NativeController: NSObject, ObservableObject {
     private func attachItemObservers(_ item: AVPlayerItem) {
         detachItemObservers()
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            if item.status == .readyToPlay {
+                self?.refreshTracks()
+                return
+            }
             guard item.status == .failed else { return }
             let message = item.error?.localizedDescription ?? "原生引擎播放失败"
             DispatchQueue.main.async { self?.onFailure?(message) }

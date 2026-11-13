@@ -92,7 +92,12 @@ struct DetailView: View {
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
                        header: sel.playHeader ?? header, title: detail.name,
-                       historyID: sel.historyID, resumeAt: sel.resumeAt, pic: detail.pic)
+                       historyID: sel.historyID, resumeAt: sel.resumeAt, pic: detail.pic,
+                       lineNames: sel.lineNames, lineIndex: sel.lineIndex,
+                       lineEpisodes: sel.lineEpisodes,
+                       initialResolved: sel.initialResolved,
+                       resolver: sel.resolver,
+                       onEpisodeChange: sel.onEpisodeChange)
         }
         .overlay {
             if resolving {
@@ -517,51 +522,84 @@ struct DetailView: View {
         }
     }
 
-    private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
-        guard let playerResolver else {
-            let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
-            // CMS episode that is a web page, not a stream: run it
-            // through the line's parse interfaces first.
-            if !parses.isEmpty, !ParseResolver.isMediaURL(ep.url) {
-                guard !resolving else { return }
-                resolving = true
-                Task {
-                    let parsed = await ParseResolver.resolve(flag: flag, url: ep.url, parses: parses)
-                    resolving = false
-                    let finalURL = parsed?.url ?? ep.url
-                    var finalHeader = header
-                    if let parsed { for (k, v) in parsed.header { finalHeader[k] = v } }
-                    let resume = recordHistory(episode: ep, episodeURL: finalURL, flag: flag, playHeader: finalHeader)
-                    playSelection = PlaySelection(
-                        episodes: episodes.map {
-                            PlayerView.EpisodeRef(name: $0.name, url: $0.id == ep.id ? finalURL : $0.url)
-                        },
-                        index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0,
-                        playHeader: parsed != nil ? finalHeader : nil,
-                        historyID: historyEntryID(), resumeAt: resume)
-                }
-                return
+    /// The resolver the in-player episode/line switching runs on:
+    /// exactly the two paths tap-to-play has always taken (spider
+    /// playerContent, or CMS parse interfaces / raw URL), packaged
+    /// per (line, episode) so the player can resolve on demand.
+    /// Before v1.38 a spider line handed the player ONLY the tapped
+    /// episode — the next-episode button had nothing to switch to.
+    private func makeEpisodeResolver() -> PlayerView.Resolver {
+        let resolver = playerResolver
+        let parsesCopy = parses
+        let baseHeader = header
+        let groups = detail.playGroups
+        let flags = detail.playFrom
+        return { line, epIndex in
+            guard groups.indices.contains(line), groups[line].indices.contains(epIndex) else {
+                return .failed("集数不存在")
             }
-            let resume = recordHistory(episode: ep, episodeURL: ep.url, flag: "", playHeader: header)
-            playSelection = PlaySelection(
-                episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },
-                index: episodes.firstIndex(where: { $0.id == ep.id }) ?? 0,
-                historyID: historyEntryID(), resumeAt: resume)
-            return
+            let ep = groups[line][epIndex]
+            let flag = flags.indices.contains(line) ? flags[line] : ""
+            if let resolver {
+                switch await resolver(flag, ep.url) {
+                case .ok(let url, let h): return .ok(url: url, header: h)
+                case .failed(let reason): return .failed(reason)
+                }
+            }
+            if !parsesCopy.isEmpty, !ParseResolver.isMediaURL(ep.url) {
+                if let parsed = await ParseResolver.resolve(flag: flag, url: ep.url, parses: parsesCopy) {
+                    var h = baseHeader
+                    for (k, v) in parsed.header { h[k] = v }
+                    return .ok(url: parsed.url, header: h)
+                }
+                return .ok(url: ep.url, header: baseHeader)
+            }
+            return .ok(url: ep.url, header: baseHeader)
         }
+    }
+
+    /// Playback moved inside the player (episode jump / line
+    /// switch): file the history entry for the episode now on
+    /// screen so resume and 追剧进度 keep pointing at the truth.
+    private func episodeChanged(line: Int, index: Int, url: String,
+                                header: [String: String]) {
+        guard detail.playGroups.indices.contains(line),
+              detail.playGroups[line].indices.contains(index) else { return }
+        let ep = detail.playGroups[line][index]
+        let flag = detail.playFrom.indices.contains(line) ? detail.playFrom[line] : ""
+        recordHistory(episode: ep, episodeURL: url, flag: flag, playHeader: header)
+    }
+
+    private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
         guard !resolving else { return }
         resolving = true
-        let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
+        let startLine = lineIndex
+        let startIndex = episodes.firstIndex(where: { $0.id == ep.id }) ?? 0
+        let resolver = makeEpisodeResolver()
         Task {
-            let outcome = await playerResolver(flag, ep.url)
+            let outcome = await resolver(startLine, startIndex)
             resolving = false
             switch outcome {
             case .ok(let url, let resolvedHeader):
-                let resume = recordHistory(episode: ep, episodeURL: url, flag: flag, playHeader: resolvedHeader)
+                let flag = detail.playFrom.indices.contains(startLine)
+                    ? detail.playFrom[startLine] : ""
+                let resume = recordHistory(episode: ep, episodeURL: url,
+                                           flag: flag, playHeader: resolvedHeader)
                 playSelection = PlaySelection(
-                    episodes: [PlayerView.EpisodeRef(name: ep.name, url: url)],
-                    index: 0, playHeader: resolvedHeader,
-                    historyID: historyEntryID(), resumeAt: resume)
+                    episodes: episodes.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) },
+                    index: startIndex,
+                    playHeader: resolvedHeader,
+                    historyID: historyEntryID(), resumeAt: resume,
+                    lineNames: detail.playFrom,
+                    lineIndex: startLine,
+                    lineEpisodes: detail.playGroups.map { group in
+                        group.map { PlayerView.EpisodeRef(name: $0.name, url: $0.url) }
+                    },
+                    initialResolved: (url: url, header: resolvedHeader),
+                    resolver: resolver,
+                    onEpisodeChange: { line, idx, url, h in
+                        episodeChanged(line: line, index: idx, url: url, header: h)
+                    })
             case .failed(let reason):
                 playNote = reason
             }
@@ -601,5 +639,11 @@ private struct PlaySelection: Identifiable {
     var playHeader: [String: String]?
     var historyID: String?
     var resumeAt: Double = 0
+    var lineNames: [String] = []
+    var lineIndex: Int = 0
+    var lineEpisodes: [[PlayerView.EpisodeRef]] = []
+    var initialResolved: (url: String, header: [String: String])?
+    var resolver: PlayerView.Resolver?
+    var onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)?
     var id: String { episodes[index].url + "#\(index)" }
 }
