@@ -134,7 +134,6 @@ struct DetailView: View {
     /// still) when enrichment found one, else the feed's poster.
     private var heroPic: String {
         if let backdrop = tmdbInfo?.backdrop, !backdrop.isEmpty { return backdrop }
-        if detail.pic.isEmpty, let poster = tmdbInfo?.poster, !poster.isEmpty { return poster }
         return detail.pic
     }
 
