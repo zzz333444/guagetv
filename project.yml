@@ -2,7 +2,7 @@ name: GuageTV
 options:
   bundleIdPrefix: com.guage
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
 packages:
   # FFmpegKit (kingslay fork): its libmpv product ships a real iOS-device
   # slice (checked: ios-arm64 present) — FFmpeg demux/decode + libass +
@@ -34,8 +34,8 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "1.30"
-        CFBundleVersion: "130"
+        CFBundleShortVersionString: "1.31"
+        CFBundleVersion: "131"
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         UILaunchScreen: {}
         # TVBox configs, CMS APIs and media streams are very often plain
