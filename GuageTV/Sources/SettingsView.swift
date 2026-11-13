@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.30 · 精致化与搜索修复"
+    static let buildLabel = "v1.31 · 流式搜索与性能玻璃"
 
     var body: some View {
         NavigationStack {
@@ -590,7 +590,11 @@ struct TMDBSettingsView: View {
 struct ConfigLibrarySettingsView: View {
     @Binding var config: TVBoxConfig?
     @State private var entries: [ConfigLibrary.Entry] = []
+    @State private var groupsList: [ConfigLibrary.Group] = []
     @State private var status = ""
+    @State private var showNewGroup = false
+    @State private var newGroupName = ""
+    @State private var deletingGroup: ConfigLibrary.Group?
 
     var body: some View {
         SettingsPage(title: "配置库") {
@@ -603,64 +607,185 @@ struct ConfigLibrarySettingsView: View {
                         Text("还没有导入任何线路。先到「TVBox 配置」里导入地址或文件，导入过的线路都会存放在这里。")
                             .font(.footnote).foregroundStyle(Theme.textDim)
                     }
-                    ForEach(entries) { entry in
-                        HStack(spacing: 10) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .foregroundStyle(Theme.textDim).frame(width: 22)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(ConfigLibrary.shownName(entry)).foregroundStyle(Theme.text).lineLimit(1)
-                                Text("\(entry.siteCount) 个站点")
-                                    .font(.caption).foregroundStyle(Theme.textDim)
-                            }
-                            Spacer()
-                            if entry.id == ConfigLibrary.activeID() {
-                                Text("使用中")
-                                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
-                            } else {
-                                Button("启用") {
-                                    config = ConfigLibrary.activate(id: entry.id)
-                                    entries = ConfigLibrary.entries()
-                                    status = "已切换到 \(entry.name)"
-                                }
-                                .font(.caption.weight(.semibold))
+                    HStack {
+                        Spacer()
+                        Button {
+                            newGroupName = ""
+                            showNewGroup = true
+                        } label: {
+                            Label("新建分组", systemImage: "plus")
+                                .font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
                                 .padding(.horizontal, 12).padding(.vertical, 6)
                                 .background(Theme.glass, in: Capsule())
-                                .foregroundStyle(Theme.text)
-                            }
-                            Button {
-                                refreshEntry(entry)
-                            } label: {
-                                Image(systemName: "arrow.clockwise").foregroundStyle(Theme.textDim)
-                            }
-                            Button(role: .destructive) {
-                                config = ConfigLibrary.remove(id: entry.id)
-                                entries = ConfigLibrary.entries()
-                                status = "已删除 \(entry.name)"
-                            } label: {
-                                Image(systemName: "trash").foregroundStyle(.red.opacity(0.85))
-                            }
-                        }
-                        .contextMenu {
-                            Button {
-                                if let source = ConfigLibrary.sourceURL(id: entry.id) {
-                                    UIPasteboard.general.string = source
-                                    status = "已复制 \(entry.name) 的地址"
-                                }
-                            } label: { Label("复制地址", systemImage: "doc.on.doc") }
-                            Button { refreshEntry(entry) } label: {
-                                Label("刷新", systemImage: "arrow.clockwise")
-                            }
-                            Button(role: .destructive) {
-                                config = ConfigLibrary.remove(id: entry.id)
-                                entries = ConfigLibrary.entries()
-                                status = "已删除 \(entry.name)"
-                            } label: { Label("删除", systemImage: "trash") }
                         }
                     }
                 }
             }
+            ForEach(sections()) { section in
+                sectionBlock(section)
+            }
         }
-        .onAppear { entries = ConfigLibrary.entries() }
+        .onAppear { reload() }
+        .alert("新建分组", isPresented: $showNewGroup) {
+            TextField("分组名称", text: $newGroupName)
+            Button("创建") {
+                let name = newGroupName.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty {
+                    ConfigLibrary.addGroup(name: name)
+                    status = "已新建分组「\(name)」"
+                    reload()
+                }
+            }
+            Button("取消", role: .cancel) {}
+        }
+        .alert("删除分组", isPresented: Binding(get: { deletingGroup != nil },
+                                                set: { if !$0 { deletingGroup = nil } })) {
+            Button("删除", role: .destructive) {
+                if let group = deletingGroup {
+                    ConfigLibrary.removeGroup(id: group.id)
+                    status = "已删除分组「\(group.name)」，组内线路已回到未分组"
+                }
+                deletingGroup = nil
+                reload()
+            }
+            Button("取消", role: .cancel) { deletingGroup = nil }
+        } message: {
+            if let group = deletingGroup {
+                Text("删除分组「\(group.name)」？组内线路不会被删，会回到未分组。")
+            }
+        }
+    }
+
+    private func reload() {
+        entries = ConfigLibrary.entries()
+        groupsList = ConfigLibrary.groups()
+    }
+
+    /// One display section: a user group (long-press its header to
+    /// delete), the automatic Python 文件 group, or 未分组. Same
+    /// grouping data the Library page uses (ConfigLibrary groups).
+    private struct LineSection: Identifiable {
+        let id: String
+        let title: String
+        let group: ConfigLibrary.Group?
+        let items: [ConfigLibrary.Entry]
+    }
+
+    private func sections() -> [LineSection] {
+        var out: [LineSection] = []
+        for group in groupsList {
+            let items = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == group.id }
+            if !items.isEmpty {
+                out.append(LineSection(id: group.id, title: group.name, group: group, items: items))
+            }
+        }
+        let pyItems = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == ConfigLibrary.pyAutoGroupID }
+        if !pyItems.isEmpty {
+            out.append(LineSection(id: ConfigLibrary.pyAutoGroupID, title: "Python 文件", group: nil, items: pyItems))
+        }
+        let loose = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == nil }
+        if !loose.isEmpty {
+            out.append(LineSection(id: ConfigLibrary.noGroupID, title: "未分组", group: nil, items: loose))
+        }
+        return out
+    }
+
+    @ViewBuilder
+    private func sectionBlock(_ section: LineSection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(section.title).font(.headline).foregroundStyle(Theme.textDim)
+                Spacer()
+                if section.group != nil {
+                    Text("长按可删除分组").font(.caption2).foregroundStyle(Theme.textDim)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.6) {
+                if let group = section.group { deletingGroup = group }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(section.items) { entry in
+                        entryRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    private func entryRow(_ entry: ConfigLibrary.Entry) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundStyle(Theme.textDim).frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ConfigLibrary.shownName(entry)).foregroundStyle(Theme.text).lineLimit(1)
+                Text("\(entry.siteCount) 个站点")
+                    .font(.caption).foregroundStyle(Theme.textDim)
+            }
+            Spacer()
+            if entry.id == ConfigLibrary.activeID() {
+                Text("使用中")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+            } else {
+                Button("启用") {
+                    config = ConfigLibrary.activate(id: entry.id)
+                    reload()
+                    status = "已切换到 \(entry.name)"
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Theme.glass, in: Capsule())
+                .foregroundStyle(Theme.text)
+            }
+            Button {
+                refreshEntry(entry)
+            } label: {
+                Image(systemName: "arrow.clockwise").foregroundStyle(Theme.textDim)
+            }
+            Button(role: .destructive) {
+                config = ConfigLibrary.remove(id: entry.id)
+                reload()
+                status = "已删除 \(entry.name)"
+            } label: {
+                Image(systemName: "trash").foregroundStyle(.red.opacity(0.85))
+            }
+        }
+        .contextMenu {
+            Button {
+                if let source = ConfigLibrary.sourceURL(id: entry.id) {
+                    UIPasteboard.general.string = source
+                    status = "已复制 \(entry.name) 的地址"
+                }
+            } label: { Label("复制地址", systemImage: "doc.on.doc") }
+            Button { refreshEntry(entry) } label: {
+                Label("刷新", systemImage: "arrow.clockwise")
+            }
+            Menu("移动到分组") {
+                Button("未分组") {
+                    ConfigLibrary.setGroup(entryID: entry.id, groupID: ConfigLibrary.noGroupID)
+                    reload()
+                }
+                if ConfigLibrary.isPyFileEntry(entry) {
+                    Button("Python 文件（自动）") {
+                        ConfigLibrary.setGroup(entryID: entry.id, groupID: ConfigLibrary.pyAutoGroupID)
+                        reload()
+                    }
+                }
+                ForEach(groupsList) { group in
+                    Button(group.name) {
+                        ConfigLibrary.setGroup(entryID: entry.id, groupID: group.id)
+                        reload()
+                    }
+                }
+            }
+            Button(role: .destructive) {
+                config = ConfigLibrary.remove(id: entry.id)
+                reload()
+                status = "已删除 \(entry.name)"
+            } label: { Label("删除", systemImage: "trash") }
+        }
     }
 
     /// 刷新一条线路：按原地址重新拉取、校验、覆盖本地副本；
@@ -677,7 +802,7 @@ struct ConfigLibrarySettingsView: View {
                 let data = try await NetFetch.dataForConfig(from: url)
                 let parsed = try ConfigLoader.load(from: data)
                 let updated = ConfigLibrary.add(data: data, sourceURL: source, siteCount: parsed.sites.count)
-                entries = ConfigLibrary.entries()
+                reload()
                 if updated.id == ConfigLibrary.activeID() { config = parsed }
                 status = "已刷新 \(entry.name)：\(parsed.sites.count) 个站点"
             } catch {

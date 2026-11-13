@@ -25,7 +25,13 @@ struct DiscoverView: View {
     @State private var feedConfig: TVBoxConfig?
     @State private var showLinePicker = false
     @State private var showSitePicker = false
+    @State private var showSearch = false
     @State private var siteQuery = ""
+    /// The feed site's classes, cached by loadFeed for the header's
+    /// category chips (tid, name pairs straight from homeContent).
+    @State private var feedClasses: [(String, String)] = []
+    /// Last header class chip tapped ("" = none yet).
+    @State private var selectedClassID = ""
     @ObservedObject private var history = HistoryStore.shared
     @ObservedObject private var layout = HomeLayout.shared
     @State private var cwPlayEntry: HistoryStore.Entry?
@@ -43,6 +49,7 @@ struct DiscoverView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
+                    discoverHeader
                     ForEach(layout.visibleModules) { module in
                         switch module {
                         case .hero: hero
@@ -53,10 +60,9 @@ struct DiscoverView: View {
                         }
                     }
                 }
-                // The scroll view bleeds to the top edge for the
-                // hero; when the hero is hidden or not first, keep
-                // the first module clear of the status bar instead.
-                .padding(.top, layout.visibleModules.first == .hero ? 0 : 54)
+                // The Hamo header at the top of the stack owns the
+                // status-bar clearance now (its own top padding),
+                // whatever order the modules are arranged in.
                 .padding(.bottom, 110)   // clear the floating tab bar
             }
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
@@ -71,6 +77,7 @@ struct DiscoverView: View {
             }
             .sheet(isPresented: $showLinePicker) { linePicker }
             .sheet(isPresented: $showSitePicker) { sitePicker }
+            .sheet(isPresented: $showSearch) { SearchView(config: config) }
             .fullScreenCover(item: $cwPlayEntry) { entry in
                 PlayerView(
                     episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
@@ -112,11 +119,14 @@ struct DiscoverView: View {
                                 }
                             }
                             .frame(width: 92)
+                            .padding(8)
+                            .glassPanel(cornerRadius: 18)
                             .contentShape(Rectangle())
                             .onTapGesture { cwPlayEntry = entry }
                         }
                     }
                     .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
                 }
             }
         }
@@ -154,11 +164,13 @@ struct DiscoverView: View {
                     NavigationLink {
                         WatchlistView()
                     } label: {
-                        HStack(spacing: 2) {
-                            Text("全部").font(.subheadline)
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        HStack(spacing: 3) {
+                            Text("全部").font(.caption.weight(.semibold))
+                            Image(systemName: "chevron.right").font(.caption2.weight(.bold))
                         }
-                        .foregroundStyle(Theme.textDim)
+                        .foregroundStyle(Theme.text.opacity(0.85))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .glassCapsule()
                     }
                 }
                 .padding(.horizontal, 18)
@@ -187,14 +199,102 @@ struct DiscoverView: View {
                                         .foregroundStyle(Theme.textDim).lineLimit(1)
                                 }
                                 .frame(width: 92)
+                                .padding(8)
+                                .glassPanel(cornerRadius: 18)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
                 }
             }
         }
+    }
+
+    // MARK: Hamo-style header
+
+    /// 「发现」title with glass round buttons (site picker + search),
+    /// a full-width glass search capsule and the feed site's class
+    /// chips. Always at the top of the page, above the arrangeable
+    /// modules; its top padding clears the status bar (the scroll
+    /// view ignores the top safe area).
+    private var discoverHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                Text("发现")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                headerCircleButton(icon: "rectangle.stack") { showSitePicker = true }
+                headerCircleButton(icon: "magnifyingglass") { showSearch = true }
+            }
+            Button { showSearch = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text("搜索电影、剧集…")
+                    Spacer()
+                }
+                .font(.subheadline)
+                .foregroundStyle(Theme.textDim)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassCapsule()
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            if let site = activeSite, !feedClasses.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(feedClasses.enumerated()), id: \.offset) { entry in
+                            classChip(entry.element, site: site)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 54)
+    }
+
+    private func headerCircleButton(icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .frame(width: 42, height: 42)
+                .glassCircle()
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// One feed-class chip: glass when idle, white with black text
+    /// once it was tapped. Tapping pushes the feed site's browse
+    /// page — SiteBrowseView owns the in-site class switching, so
+    /// the chip is an entry point, not a filter.
+    private func classChip(_ cls: (String, String), site: TVBoxConfig.Site) -> some View {
+        let selected = selectedClassID == cls.0
+        return NavigationLink {
+            SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
+        } label: {
+            if selected {
+                Text(cls.1)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.white, in: Capsule())
+            } else {
+                Text(cls.1)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .glassCapsule()
+            }
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded { selectedClassID = cls.0 })
     }
 
     private var editButton: some View {
@@ -205,9 +305,7 @@ struct DiscoverView: View {
             }
             .foregroundStyle(Theme.text)
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+            .glassCapsule()
         }
     }
 
@@ -222,6 +320,8 @@ struct DiscoverView: View {
                             feedConfig = ConfigLibrary.load(id: entry.id)
                             liveHero = []
                             liveSections = []
+                            feedClasses = []
+                            selectedClassID = ""
                             showLinePicker = false
                         } label: {
                             HStack(spacing: 10) {
@@ -288,9 +388,7 @@ struct DiscoverView: View {
             }
             .foregroundStyle(Theme.text)
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+            .glassCapsule()
         }
     }
 
@@ -361,8 +459,7 @@ struct DiscoverView: View {
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11)
-                .background(Theme.glass, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+                .glassCapsule()
                 .padding(.horizontal, 18)
                 .padding(.bottom, 14)
             }
@@ -393,6 +490,7 @@ struct DiscoverView: View {
         let client = CMSClient(site: site)
         guard let home = try? await client.home() else { return }
         liveHero = Array(home.list.prefix(5))
+        feedClasses = home.classes
         var secs: [DiscoverSection] = []
         if !home.list.isEmpty {
             secs.append(DiscoverSection(title: "最新更新 · \(site.name)", items: home.list))
@@ -495,13 +593,6 @@ struct DiscoverView: View {
                     .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
                     .lineLimit(2)
                     .padding(.horizontal, 28)
-                HStack(spacing: 8) {
-                    if !item.remarks.isEmpty { Text(item.remarks) }
-                    if !item.year.isEmpty { Text(item.year) }
-                }
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.text.opacity(0.85))
-                .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
                 if let overview = info?.overview, !overview.isEmpty {
                     Text(overview)
                         .font(.footnote)
@@ -511,8 +602,17 @@ struct DiscoverView: View {
                         .lineLimit(2)
                         .padding(.horizontal, 40)
                 }
-                if !item.score.isEmpty || !(info?.score.isEmpty ?? true) {
+                // Meta line + rating badges ride on one glass
+                // info strip over the hero's bottom gradient.
+                if !item.remarks.isEmpty || !item.year.isEmpty
+                    || !item.score.isEmpty || !(info?.score.isEmpty ?? true) {
                     HStack(spacing: 8) {
+                        if !item.remarks.isEmpty {
+                            Text(item.remarks).font(.subheadline.weight(.medium))
+                        }
+                        if !item.year.isEmpty {
+                            Text(item.year).font(.subheadline.weight(.medium))
+                        }
                         if !item.score.isEmpty {
                             HStack(spacing: 5) {
                                 Image(systemName: "star.fill").font(.caption2)
@@ -532,6 +632,9 @@ struct DiscoverView: View {
                             .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
                         }
                     }
+                    .foregroundStyle(Theme.text.opacity(0.92))
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .glassCapsule()
                 }
                 Spacer().frame(height: 30)
             }
@@ -557,9 +660,13 @@ struct DiscoverView: View {
                     HStack {
                         Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.textDim)
+                        HStack(spacing: 3) {
+                            Text("查看全部").font(.caption.weight(.semibold))
+                            Image(systemName: "chevron.right").font(.caption2.weight(.bold))
+                        }
+                        .foregroundStyle(Theme.text.opacity(0.85))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .glassCapsule()
                     }
                     .padding(.horizontal, 18)
                     .contentShape(Rectangle())
@@ -592,6 +699,7 @@ struct DiscoverView: View {
                     }
                 }
                 .padding(.horizontal, 18)
+                .padding(.vertical, 8)
             }
         }
     }
@@ -622,6 +730,8 @@ struct DiscoverView: View {
                 Text(item.year).font(.caption).foregroundStyle(Theme.textDim)
             }
         }
+        .padding(8)
+        .glassPanel(cornerRadius: 18)
     }
 
     private var posterPlaceholder: some View {
@@ -682,7 +792,9 @@ struct DiscoverView: View {
         let pics = Array(section.items.map(\.pic).filter { !$0.isEmpty }.prefix(3))
         return ZStack(alignment: .bottomLeading) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Theme.glass)
+                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.07))
             HStack {
                 Spacer()
                 ZStack {
@@ -705,8 +817,9 @@ struct DiscoverView: View {
         }
         .frame(height: 92)
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(Theme.glassStroke, lineWidth: 1))
+            .strokeBorder(Theme.glassEdge, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
     }
 
     /// The poster wall under the category tiles （高分精选 when the
@@ -750,7 +863,7 @@ struct DiscoverView: View {
                 NavigationLink {
                     SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
                 } label: {
-                    GlassCard(padding: 14) {
+                    GlassPanel(padding: 14, cornerRadius: 16) {
                         HStack {
                             Image(systemName: "rectangle.stack")
                                 .foregroundStyle(Theme.accent)

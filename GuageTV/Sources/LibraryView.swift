@@ -13,6 +13,9 @@ struct LibraryView: View {
     /// Per-line "CMS 12 · py 3 · Jar 5" summaries, computed on appear
     /// from the stored configs (local files, cheap).
     @State private var kindSummary: [String: String] = [:]
+    /// Line cards precomputed at refresh time: the grid renders
+    /// these models only and never re-derives card content in body.
+    @State private var cardSections: [(title: String, models: [LineCardModel])] = []
     @State private var renamingEntry: ConfigLibrary.Entry?
     @State private var renameText = ""
     /// Which line card currently has its swipe-delete revealed.
@@ -40,16 +43,34 @@ struct LibraryView: View {
                         }
                 }
 
-                ForEach(lineSections(), id: \.title) { section in
+                ForEach(cardSections, id: \.title) { section in
                     Text(section.title).font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(section.items) { entry in
-                            SwipeRevealDelete(id: entry.id, openID: $swipeOpenID, onDelete: {
-                                config = ConfigLibrary.remove(id: entry.id)
+                        ForEach(section.models) { model in
+                            SwipeRevealDelete(id: model.id, openID: $swipeOpenID, onDelete: {
+                                config = ConfigLibrary.remove(id: model.id)
                                 swipeOpenID = nil
                                 refreshLibrary()
                             }) {
-                                lineCard(entry)
+                                LineCardView(model: model, groups: groups,
+                                             onTap: { handleLineTap(model) },
+                                             onRename: {
+                                                 renameText = ConfigLibrary.alias(for: model.id) ?? ""
+                                                 renamingEntry = model.entry
+                                             },
+                                             onSetHome: {
+                                                 ConfigLibrary.setHomeLineID(model.id)
+                                                 refreshLibrary()
+                                             },
+                                             onMoveToGroup: { groupID in
+                                                 ConfigLibrary.setGroup(entryID: model.id, groupID: groupID)
+                                                 refreshLibrary()
+                                             },
+                                             onDelete: {
+                                                 config = ConfigLibrary.remove(id: model.id)
+                                                 refreshLibrary()
+                                             })
+                                    .equatable()
                             }
                         }
                     }
@@ -112,7 +133,7 @@ struct LibraryView: View {
             .padding(.top, 8)
             .padding(.bottom, 110)
         }
-        .background(AmbientBackground(imageURL: nil))
+        .background(StaticPageBackground())
         .onAppear { refreshLibrary() }
         .alert("线路备注名", isPresented: Binding(get: { renamingEntry != nil },
                                                 set: { if !$0 { renamingEntry = nil } })) {
@@ -143,6 +164,7 @@ struct LibraryView: View {
     /// (rebuilt from the live entry list, so imports/deletes
     /// invalidate stale rows automatically).
     private static let kindSummaryCacheKey = "libraryKindSummary.v2"
+    private static let kindSummaryTimestampKey = "libraryKindSummary.v2.ts"
 
     private func refreshLibrary() {
         entries = ConfigLibrary.entries()
@@ -152,11 +174,24 @@ struct LibraryView: View {
         if let cached = UserDefaults.standard.dictionary(forKey: Self.kindSummaryCacheKey) as? [String: String] {
             kindSummary = cached.filter { liveIDs.contains($0.key) }
         }
+        rebuildCardModels()
+        // Throttle the off-main recompute: a cache younger than
+        // 5 minutes is trusted on repeat appears, unless a live line
+        // is missing from it (a fresh import must not wait 5 min).
+        let cacheCoversAll = liveIDs.allSatisfy { kindSummary[$0] != nil }
+        let cacheAge = Date().timeIntervalSince1970
+            - UserDefaults.standard.double(forKey: Self.kindSummaryTimestampKey)
+        guard !cacheCoversAll || cacheAge > 300 else { return }
         let snapshot = entries
         Task.detached(priority: .utility) {
             let summary = Self.computeKindSummary(for: snapshot)
             UserDefaults.standard.set(summary, forKey: Self.kindSummaryCacheKey)
-            await MainActor.run { kindSummary = summary }
+            UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                      forKey: Self.kindSummaryTimestampKey)
+            await MainActor.run {
+                kindSummary = summary
+                rebuildCardModels()
+            }
         }
     }
 
@@ -195,7 +230,7 @@ struct LibraryView: View {
     }
 
     /// "今天 / 昨天 / N天前 / N周前 / N月前" for a line's import day.
-    private func relativeDay(_ ts: TimeInterval) -> String {
+    private static func relativeDay(_ ts: TimeInterval) -> String {
         let days = Calendar.current.dateComponents(
             [.day], from: Date(timeIntervalSince1970: ts), to: Date()).day ?? 0
         switch days {
@@ -207,126 +242,61 @@ struct LibraryView: View {
         }
     }
 
-    /// Section order: custom groups (creation order) → the automatic
-    /// Python 文件 group → ungrouped lines.
-    private func lineSections() -> [(title: String, items: [ConfigLibrary.Entry])] {
-        guard !entries.isEmpty else { return [] }
-        var sections: [(title: String, items: [ConfigLibrary.Entry])] = []
+    /// Rebuild the precomputed card sections from the current
+    /// entries / groups / summaries. Section order: custom groups
+    /// (creation order) → the automatic Python 文件 group →
+    /// ungrouped lines. Everything a card shows (name, icon letter,
+    /// freshness, role, kind summary) is frozen into the model here
+    /// so the grid's body never re-derives it while scrolling.
+    private func rebuildCardModels() {
+        let homeID = ConfigLibrary.homeLineID()
+        func model(_ entry: ConfigLibrary.Entry) -> LineCardModel {
+            let shown = ConfigLibrary.shownName(entry)
+            let isActive = entry.id == activeID
+            let isHome = entry.id == homeID
+            let isFile = ConfigLibrary.isPyFileEntry(entry) || entry.sourceURL.hasPrefix("js-import://")
+            let role = isActive ? "主线路" : (isHome ? "首页线路" : (isFile ? "点按打开" : "点按启用"))
+            return LineCardModel(entry: entry,
+                                 shownName: shown,
+                                 iconText: String(shown.prefix(1)),
+                                 freshnessText: Self.relativeDay(entry.addedAt),
+                                 isActive: isActive, isHome: isHome, isFile: isFile,
+                                 roleText: role,
+                                 kindText: kindSummary[entry.id] ?? "\(entry.siteCount) 个站点")
+        }
+        var sections: [(title: String, models: [LineCardModel])] = []
         for group in groups {
             let items = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == group.id }
-            if !items.isEmpty { sections.append((group.name, items)) }
+            if !items.isEmpty { sections.append((group.name, items.map(model))) }
         }
         let pyItems = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == ConfigLibrary.pyAutoGroupID }
-        if !pyItems.isEmpty { sections.append(("Python 文件", pyItems)) }
+        if !pyItems.isEmpty { sections.append(("Python 文件", pyItems.map(model))) }
         let loose = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == nil }
         if !loose.isEmpty {
-            sections.append((sections.isEmpty ? "我的线路" : "未分组", loose))
+            sections.append((sections.isEmpty ? "我的线路" : "未分组", loose.map(model)))
         }
-        return sections
+        cardSections = sections
     }
 
-    /// One line = one big card (Rex's 资源库 layout): icon, freshness
-    /// + status dot, name, route role, content mix. Tapping a card
-    /// makes it the active config everywhere (发现/搜索 follow); its
-    /// sites are stored separately and load instantly, no
-    /// re-download. Long-press: rename （备注名）, set home line,
-    /// move to a group, or delete.
-    private func lineCard(_ entry: ConfigLibrary.Entry) -> some View {
-        let isActive = entry.id == activeID
-        let isHome = entry.id == ConfigLibrary.homeLineID()
-        let isFile = ConfigLibrary.isPyFileEntry(entry) || entry.sourceURL.hasPrefix("js-import://")
-        let shown = ConfigLibrary.shownName(entry)
-        return LightGlassCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .top) {
-                    ZStack {
-                        Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
-                        Text(String(shown.prefix(1)))
-                            .font(.headline).foregroundStyle(Theme.text)
-                    }
-                    Spacer()
-                    HStack(spacing: 5) {
-                        Text(relativeDay(entry.addedAt))
-                            .font(.caption2).foregroundStyle(Theme.textDim)
-                        Circle().fill(isActive ? Theme.ok : Color.gray.opacity(0.55))
-                            .frame(width: 7, height: 7)
-                    }
-                }
-                Text(shown)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.text).lineLimit(2)
-                Text(isActive ? "主线路" : (isHome ? "首页线路" : (isFile ? "点按打开" : "点按启用")))
-                    .font(.caption)
-                    .foregroundStyle(isActive ? Theme.ok : (isHome ? Theme.accent : Theme.textDim))
-                Text(kindSummary[entry.id] ?? "\(entry.siteCount) 个站点")
-                    .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    /// Card tap (from LineCardView): a tap while any card's delete
+    /// is revealed just closes it; single-file lines (py / JS
+    /// imports) open their one site directly; other lines activate.
+    private func handleLineTap(_ model: LineCardModel) {
+        if swipeOpenID != nil {
+            withAnimation(.easeOut(duration: 0.18)) { swipeOpenID = nil }
+            return
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // A tap while any card's delete is revealed just closes
-            // it (the usual swipe-list behaviour).
-            if swipeOpenID != nil {
-                withAnimation(.easeOut(duration: 0.18)) { swipeOpenID = nil }
-                return
-            }
-            Haptics.tap()
-            // Single-file lines (py / JS imports) open their one
-            // site directly — no activate-and-hunt in the grid below.
-            if let route = fileRoute(for: entry) {
-                directRoute = route
-                return
-            }
-            guard !isActive else { return }
-            config = ConfigLibrary.activate(id: entry.id)
-            JarProxyClient.warmLine(id: entry.id)
-            refreshLibrary()
+        Haptics.tap()
+        if let route = fileRoute(for: model.entry) {
+            directRoute = route
+            return
         }
-        .contextMenu {
-            Button {
-                renameText = ConfigLibrary.alias(for: entry.id) ?? ""
-                renamingEntry = entry
-            } label: {
-                Label("改备注名", systemImage: "pencil")
-            }
-            if !isHome {
-                Button {
-                    ConfigLibrary.setHomeLineID(entry.id)
-                    refreshLibrary()
-                } label: {
-                    Label("设为首页线路", systemImage: "house")
-                }
-            }
-            Menu("移动到分组") {
-                Button("未分组") {
-                    ConfigLibrary.setGroup(entryID: entry.id, groupID: ConfigLibrary.noGroupID)
-                    refreshLibrary()
-                }
-                if ConfigLibrary.isPyFileEntry(entry) {
-                    Button("Python 文件（自动）") {
-                        ConfigLibrary.setGroup(entryID: entry.id, groupID: ConfigLibrary.pyAutoGroupID)
-                        refreshLibrary()
-                    }
-                }
-                ForEach(groups) { group in
-                    Button(group.name) {
-                        ConfigLibrary.setGroup(entryID: entry.id, groupID: group.id)
-                        refreshLibrary()
-                    }
-                }
-            }
-            Button(role: .destructive) {
-                config = ConfigLibrary.remove(id: entry.id)
-                refreshLibrary()
-            } label: {
-                Label("删除线路", systemImage: "trash")
-            }
-        }
+        guard !model.isActive else { return }
+        config = ConfigLibrary.activate(id: model.id)
+        JarProxyClient.warmLine(id: model.id)
+        refreshLibrary()
     }
+
 
     private func sourceCard(_ site: TVBoxConfig.Site) -> some View {
         LightGlassCard(padding: 14) {
@@ -598,5 +568,132 @@ private struct LightGlassCard<Content: View>: View {
             .background(Theme.glass, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.glassStroke, lineWidth: 1))
+    }
+}
+
+/// Everything one line card renders, frozen at refresh time:
+/// shown name, icon letter, freshness text, role line and kind
+/// summary. Identifiable by line id; equality covers only the
+/// rendered fields, so .equatable() can skip unchanged cards.
+private struct LineCardModel: Identifiable, Equatable {
+    let entry: ConfigLibrary.Entry
+    let shownName: String
+    let iconText: String
+    let freshnessText: String
+    let isActive: Bool
+    let isHome: Bool
+    let isFile: Bool
+    let roleText: String
+    let kindText: String
+
+    var id: String { entry.id }
+
+    static func == (lhs: LineCardModel, rhs: LineCardModel) -> Bool {
+        lhs.entry.id == rhs.entry.id
+            && lhs.shownName == rhs.shownName
+            && lhs.iconText == rhs.iconText
+            && lhs.freshnessText == rhs.freshnessText
+            && lhs.isActive == rhs.isActive
+            && lhs.isHome == rhs.isHome
+            && lhs.isFile == rhs.isFile
+            && lhs.roleText == rhs.roleText
+            && lhs.kindText == rhs.kindText
+    }
+}
+
+/// One line = one big card (Rex's 资源库 layout), rendered purely
+/// from its LineCardModel; all actions route back to LibraryView
+/// through closures (excluded from equality). Long-press menu:
+/// rename （备注名）, set home line, move to a group, or delete.
+private struct LineCardView: View, Equatable {
+    let model: LineCardModel
+    let groups: [ConfigLibrary.Group]
+    let onTap: () -> Void
+    let onRename: () -> Void
+    let onSetHome: () -> Void
+    let onMoveToGroup: (String) -> Void
+    let onDelete: () -> Void
+
+    static func == (lhs: LineCardView, rhs: LineCardView) -> Bool {
+        lhs.model == rhs.model
+            && lhs.groups.map(\.id) == rhs.groups.map(\.id)
+            && lhs.groups.map(\.name) == rhs.groups.map(\.name)
+    }
+
+    var body: some View {
+        LightGlassCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top) {
+                    ZStack {
+                        Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
+                        Text(model.iconText)
+                            .font(.headline).foregroundStyle(Theme.text)
+                    }
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Text(model.freshnessText)
+                            .font(.caption2).foregroundStyle(Theme.textDim)
+                        Circle().fill(model.isActive ? Theme.ok : Color.gray.opacity(0.55))
+                            .frame(width: 7, height: 7)
+                    }
+                }
+                Text(model.shownName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text).lineLimit(2)
+                Text(model.roleText)
+                    .font(.caption)
+                    .foregroundStyle(model.isActive ? Theme.ok : (model.isHome ? Theme.accent : Theme.textDim))
+                Text(model.kindText)
+                    .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(model.isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+        .contextMenu {
+            Button {
+                onRename()
+            } label: {
+                Label("改备注名", systemImage: "pencil")
+            }
+            if !model.isHome {
+                Button {
+                    onSetHome()
+                } label: {
+                    Label("设为首页线路", systemImage: "house")
+                }
+            }
+            Menu("移动到分组") {
+                Button("未分组") { onMoveToGroup(ConfigLibrary.noGroupID) }
+                if ConfigLibrary.isPyFileEntry(model.entry) {
+                    Button("Python 文件（自动）") { onMoveToGroup(ConfigLibrary.pyAutoGroupID) }
+                }
+                ForEach(groups) { group in
+                    Button(group.name) { onMoveToGroup(group.id) }
+                }
+            }
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("删除线路", systemImage: "trash")
+            }
+        }
+    }
+}
+
+/// The library grid scrolls many cards: a flat fill plus one
+/// static light gradient stands in for the ambient backdrop
+/// helper on this page (no artwork blur to composite per frame).
+private struct StaticPageBackground: View {
+    var body: some View {
+        ZStack {
+            Theme.bg
+            LinearGradient(colors: [Theme.accent.opacity(0.07), Color.clear],
+                           startPoint: .top, endPoint: .center)
+        }
+        .ignoresSafeArea()
     }
 }

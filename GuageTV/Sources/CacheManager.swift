@@ -158,7 +158,7 @@ struct CacheSettingsView: View {
                 GlassCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("说明").font(.headline).foregroundStyle(Theme.text)
-                        Text("海报图片缓存在内存里，退出应用即自动清空，不占磁盘，不用手动清。")
+                        Text("海报图片缓存在缓存区里（posters 子目录），清理「缓存区」时会一并清掉。")
                             .font(.footnote).foregroundStyle(Theme.textDim)
                         Text("配置库线路和已下载的视频不在缓存范围里，清理缓存不会动它们。")
                             .font(.footnote).foregroundStyle(Theme.textDim)

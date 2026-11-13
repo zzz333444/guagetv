@@ -159,13 +159,12 @@ struct SearchView: View {
             Spacer()
             ProgressView().tint(Theme.text)
             Spacer()
-        } else if searched && results.isEmpty {
-            hint(failureNote.isEmpty ? "没有搜到结果" : "没有搜到结果\n\(failureNote)")
-        } else if !searched {
-            recentsView
-        } else if false {
-            hint("跨已导入的 CMS / py / JS 站点一起搜")
-        } else {
+        } else if !results.isEmpty {
+            // Results branch MUST outrank the !searched branch below:
+            // `searched` stays false for the whole run, so ordering
+            // the recents branch first hid every in-flight result
+            // behind the recents list until the run ended — the
+            // "results only appear when the search finishes" bug.
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
                     ForEach(results, id: \.site.id) { group in
@@ -199,6 +198,10 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
             }
+        } else if searched {
+            hint(failureNote.isEmpty ? "没有搜到结果" : "没有搜到结果\n\(failureNote)")
+        } else {
+            recentsView
         }
     }
 
@@ -310,6 +313,13 @@ struct SearchView: View {
         if searching { progressText = "正在停止…" }
     }
 
+    /// Main-actor isolated on purpose: every @State write below
+    /// (results, progressText, probedKinds…) then lands on the main
+    /// actor the moment a site answers, so each site's section
+    /// paints immediately instead of waiting for a later redraw.
+    /// The bridge/HTTP calls it awaits are nonisolated and still
+    /// run off the main actor.
+    @MainActor
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
@@ -391,9 +401,13 @@ struct SearchView: View {
         var catResponded: [String: Int] = [:]
         var poolNotes: [String] = []
 
+        func foundCount() -> Int { out.reduce(0) { $0 + $1.items.count } }
+        func statusLine(_ prefix: String) -> String {
+            "\(prefix) · 已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
+        }
         func tick() {
             done += 1
-            progressText = "已搜 \(done)/\(total) 个站点 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
+            progressText = "已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
         }
 
         // CMS sites are independent HTTP calls: search them all at
@@ -464,7 +478,7 @@ struct SearchView: View {
                 break
             }
             catTried["py", default: 0] += 1
-            progressText = "正在搜 py 站：\(site.name) · 已完成 \(done)/\(total)"
+            progressText = statusLine("正在搜 py 站：\(site.name)")
             let items = await hardTimeout(15) { await searchPy(site, keyword: kw) }
             if let items {
                 pyMisses = 0
@@ -485,7 +499,7 @@ struct SearchView: View {
                 break
             }
             catTried["JS", default: 0] += 1
-            progressText = "正在搜 JS 站：\(site.name) · 已完成 \(done)/\(total)"
+            progressText = statusLine("正在搜 JS 站：\(site.name)")
             let items = await hardTimeout(15) { await searchJS(site, keyword: kw) }
             if let items {
                 jsMisses = 0
@@ -500,7 +514,7 @@ struct SearchView: View {
         for site in jarPool {
             if Task.isCancelled { break }
             catTried["Jar", default: 0] += 1
-            progressText = "正在搜 Jar 站：\(site.name) · 已完成 \(done)/\(total)"
+            progressText = statusLine("正在搜 Jar 站：\(site.name)")
             let items = await hardTimeout(25) { await searchJar(site, jar: jarMap[site.key] ?? activeJar, keyword: kw) }
             if let items {
                 responded += 1

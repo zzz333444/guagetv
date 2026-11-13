@@ -19,6 +19,11 @@ enum Theme {
                            light: UIColor.black.withAlphaComponent(0.05))
     static let glassStroke = dyn(dark: UIColor.white.withAlphaComponent(0.10),
                                  light: UIColor.black.withAlphaComponent(0.08))
+    /// Gradient rim light for the Rex glass recipe: bright at the
+    /// top edge, fading downwards — like light catching real glass.
+    static let glassEdge = LinearGradient(
+        colors: [Color.white.opacity(0.38), Color.white.opacity(0.08)],
+        startPoint: .top, endPoint: .bottom)
     static let text = dyn(dark: .white, light: UIColor(red: 0.07, green: 0.07, blue: 0.10, alpha: 1))
     static let textDim = dyn(dark: UIColor.white.withAlphaComponent(0.55),
                              light: UIColor.black.withAlphaComponent(0.55))
@@ -65,6 +70,51 @@ struct GlassCard<Content: View>: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.glassStroke, lineWidth: 1))
+    }
+}
+
+/// Rex-grade glass panel: the GlassCard layout contract (padding +
+/// content) on the richer glass recipe — tint wash, gradient rim
+/// light, soft deep shadow. Prefer this over GlassCard for surfaces
+/// that should read as real frosted glass.
+struct GlassPanel<Content: View>: View {
+    var padding: CGFloat = 16
+    var cornerRadius: CGFloat = 20
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .glassPanel(cornerRadius: cornerRadius)
+    }
+}
+
+extension View {
+    /// The shared Rex glass recipe on any insettable shape:
+    /// ultra-thin material at the back, a white 0.07 tint wash above
+    /// it, a 1pt gradient edge stroke (bright at the top, fading
+    /// down), and a soft black drop shadow.
+    func glassSurface<S: InsettableShape>(_ shape: S) -> some View {
+        self
+            .background(Color.white.opacity(0.07), in: shape)
+            .background(.ultraThinMaterial, in: shape)
+            .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 1))
+            .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
+    }
+
+    /// Glass panel surface (rounded rect, 20pt corners by default).
+    func glassPanel(cornerRadius: CGFloat = 20) -> some View {
+        glassSurface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    /// Glass capsule surface (floating bars, chips, pills).
+    func glassCapsule() -> some View {
+        glassSurface(Capsule())
+    }
+
+    /// Glass circle surface (round floating buttons).
+    func glassCircle() -> some View {
+        glassSurface(Circle())
     }
 }
 

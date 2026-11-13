@@ -14,11 +14,39 @@ final class SpiderBridge {
         var description: String { message }
     }
 
+    /// Memo of the last successful load. The runner holds exactly one
+    /// spider, and browsing a single site hammers home / category /
+    /// detail / search through the same (path, extend) — re-exec'ing
+    /// the module and re-running its init on every hop is the main py
+    /// latency, so an identical repeat load returns the cached name
+    /// without touching the interpreter. A failed load clears the
+    /// memo: the runner drops its spider on failure (_spider = None),
+    /// so whatever was loaded before is gone too.
+    private let memoLock = NSLock()
+    private var loadedMemo: (path: String, extend: String, name: String)?
+
     /// Load (or re-activate) a spider file from the sandbox; returns the
     /// spider's display name. `extend` is the site's ext payload verbatim.
     func loadSpider(path: String, extend: String) async throws -> String {
-        let dict = try await invokeJSON("load_spider", [path, extend])
-        return dict["name"] as? String ?? "Spider"
+        memoLock.lock()
+        let memo = loadedMemo
+        memoLock.unlock()
+        if let memo, memo.path == path, memo.extend == extend {
+            return memo.name
+        }
+        do {
+            let dict = try await invokeJSON("load_spider", [path, extend])
+            let name = dict["name"] as? String ?? "Spider"
+            memoLock.lock()
+            loadedMemo = (path, extend, name)
+            memoLock.unlock()
+            return name
+        } catch {
+            memoLock.lock()
+            loadedMemo = nil
+            memoLock.unlock()
+            throw error
+        }
     }
 
     /// Call one protocol method on the currently loaded spider.

@@ -89,8 +89,15 @@ struct PlayerView: View {
         _index = State(initialValue: min(max(startIndex, 0), max(episodes.count - 1, 0)))
     }
 
+    /// Engine heuristic (auto mode): the HLS/MP4 family stays on
+    /// the native engine (Dolby Vision / HDR + battery), every
+    /// other container goes to mpv, and extension-less URLs (proxy
+    /// play links) default native — the recovery ladder switches
+    /// engines if the first pick can't play.
+    private static let nativeExtensions: Set<String> = ["m3u8", "mp4", "mov", "m4v"]
+
     private static let mpvExtensions: Set<String> = [
-        "mkv", "flv", "avi", "wmv", "rmvb", "ts", "mpg", "mpeg",
+        "mkv", "flv", "avi", "wmv", "rmvb", "rm", "ts", "mpg", "mpeg",
         "m2ts", "webm", "3gp", "asf", "vob", "f4v",
     ]
 
@@ -103,7 +110,9 @@ struct PlayerView: View {
         case "native": return false
         default:
             guard let url = URL(string: current.url) else { return false }
-            return Self.mpvExtensions.contains(url.pathExtension.lowercased())
+            let ext = url.pathExtension.lowercased()
+            if Self.nativeExtensions.contains(ext) { return false }
+            return Self.mpvExtensions.contains(ext)
         }
     }
 
@@ -403,7 +412,7 @@ struct PlayerView: View {
                     .font(.body.weight(.bold))
                     .foregroundStyle(Theme.text)
                     .frame(width: 44, height: 44)
-                    .glassCircle()
+                    .playerGlassCircle()
             }
             HStack(spacing: 2) {
                 Button { if !rotationLocked { rotate(toLandscape: !isLandscape) } } label: {
@@ -417,7 +426,7 @@ struct PlayerView: View {
                         .frame(width: 44, height: 44)
                 }
             }
-            .glassCapsule()
+            .playerGlassCapsule()
             Spacer()
             HStack(spacing: 2) {
                 Button { showSkipSheet = true; pokeChrome() } label: {
@@ -447,7 +456,7 @@ struct PlayerView: View {
                     }
                 }
             }
-            .glassCapsule()
+            .playerGlassCapsule()
         }
         .padding(.horizontal, 14)
         .padding(.top, 10)
@@ -480,7 +489,7 @@ struct PlayerView: View {
                         .font(.body.weight(.bold))
                         .foregroundStyle(Theme.text)
                         .frame(width: 44, height: 44)
-                        .glassCircle()
+                        .playerGlassCircle()
                 }
                 Text(showRemaining
                      ? "\(timeLabel(currentTime)) / -\(timeLabel(max(duration - currentTime, 0)))"
@@ -488,7 +497,7 @@ struct PlayerView: View {
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(Theme.text)
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .glassCapsule()
+                    .playerGlassCapsule()
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
                 Spacer()
                 HStack(spacing: 2) {
@@ -523,7 +532,7 @@ struct PlayerView: View {
                             .frame(width: 44, height: 44)
                     }
                 }
-                .glassCapsule()
+                .playerGlassCapsule()
             }
         }
         .padding(.horizontal, 16)
@@ -541,7 +550,7 @@ struct PlayerView: View {
             }
             .foregroundStyle(.white.opacity(0.9))
             .padding(.horizontal, 9).padding(.vertical, 5)
-            .glassCapsule()
+            .playerGlassCapsule()
         }
     }
 
@@ -558,7 +567,7 @@ struct PlayerView: View {
             }
             .foregroundStyle(Theme.text)
             .padding(.horizontal, 11).padding(.vertical, 8)
-            .glassCapsule()
+            .playerGlassCapsule()
         }
     }
 
@@ -872,8 +881,8 @@ private struct GlassCircleStyle: ViewModifier {
 }
 
 private extension View {
-    func glassCapsule() -> some View { modifier(GlassCapsuleStyle()) }
-    func glassCircle() -> some View { modifier(GlassCircleStyle()) }
+    func playerGlassCapsule() -> some View { modifier(GlassCapsuleStyle()) }
+    func playerGlassCircle() -> some View { modifier(GlassCircleStyle()) }
 }
 
 // MARK: - Native engine controller
@@ -966,9 +975,19 @@ final class NativeController: NSObject, ObservableObject {
         duration = 0
         // Literal key: the AVURLAssetHTTPHeaderFieldsKey constant is not
         // exposed in the iOS 26 SDK's Swift interface.
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": header])
+        let asset = AVURLAsset(url: url, options: [
+            "AVURLAssetHTTPHeaderFieldsKey": header,
+            // Skip the precise-duration/timing scan (same literal-
+            // key style as above): streams start as soon as they
+            // can and the exact duration firms up while playing.
+            "AVURLAssetPreferPreciseDurationAndTimingKey": false,
+        ])
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 30
+        // Adaptive HLS opens on the lowest eligible variant and
+        // ramps up, instead of probing bandwidth at full rate
+        // before the first frame.
+        item.startsOnFirstEligibleVariant = true
         attachItemObservers(item)
         player.replaceCurrentItem(with: item)
         if timeObserver == nil {

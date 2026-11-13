@@ -64,18 +64,14 @@ struct ContentView: View {
                 tabButton(index: 3, icon: "gearshape.fill", label: "设置")
             }
             .padding(6)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+            .glassCapsule()
 
             Button { showSearch = true } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.text)
                     .frame(width: 52, height: 52)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.glassStroke, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+                    .glassCircle()
             }
         }
     }

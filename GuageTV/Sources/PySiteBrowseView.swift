@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 
 /// Browsing for Python spider sites (stage 1). Same shape as the CMS
@@ -182,17 +183,51 @@ struct PySiteBrowseView: View {
         guard let url else {
             throw SpiderBridge.BridgeFailure(message: "无法解析 py 文件地址：\(site.api)")
         }
-        let data = try await NetFetch.data(from: url)
+        return try await cachedSpiderFile(for: url)
+    }
+
+    /// Remote spider code is cached by URL: spiders/<sha1(url)>.py
+    /// plus a <sha1(url)>.meta sidecar stamping fetchedAt. Inside a
+    /// 12 h TTL the cached file is used as-is (entering a py site no
+    /// longer re-downloads its code every time); past the TTL the
+    /// file is re-downloaded, and if that download fails the stale
+    /// copy is still better than an error page. Locally imported
+    /// files never reach here — they take the local-spider:// branch
+    /// above and load in place.
+    private static func cachedSpiderFile(for url: URL) async throws -> String {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = support.appendingPathComponent("spiders")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let safeKey = site.key.unicodeScalars
-            .filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }
-            .map(String.init).joined()
-        let file = dir.appendingPathComponent((safeKey.isEmpty ? "spider" : safeKey) + ".py")
-        try data.write(to: file, options: .atomic)
-        return file.path
+        let digest = Insecure.SHA1.hash(data: Data(url.absoluteString.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        let file = dir.appendingPathComponent(hex + ".py")
+        let meta = dir.appendingPathComponent(hex + ".meta")
+        let fm = FileManager.default
+        if fm.fileExists(atPath: file.path),
+           let fetchedAt = readFetchedAt(meta),
+           Date().timeIntervalSince(fetchedAt) < 12 * 3600 {
+            return file.path
+        }
+        do {
+            let data = try await NetFetch.data(from: url)
+            try data.write(to: file, options: .atomic)
+            let stamp: [String: Any] = ["fetchedAt": Date().timeIntervalSince1970]
+            if let metaData = try? JSONSerialization.data(withJSONObject: stamp) {
+                try? metaData.write(to: meta, options: .atomic)
+            }
+            return file.path
+        } catch {
+            if fm.fileExists(atPath: file.path) { return file.path }
+            throw error
+        }
+    }
+
+    private static func readFetchedAt(_ meta: URL) -> Date? {
+        guard let data = try? Data(contentsOf: meta),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = dict["fetchedAt"] as? Double else { return nil }
+        return Date(timeIntervalSince1970: raw)
     }
 
     // MARK: result mapping (same shapes as CMSClient.mapList)

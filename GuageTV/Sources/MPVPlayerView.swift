@@ -99,6 +99,10 @@ final class MPVController: ObservableObject {
                 setOptionOn(h, "gpu-api", "vulkan")
                 setOptionOn(h, "gpu-context", "moltenvk")
                 setOptionOn(h, "hwdec", "videotoolbox")
+                // Direct rendering: decoder output goes straight
+                // to the VO without a CPU-side copy (mpv falls
+                // back internally when a codec can't do it).
+                setOptionOn(h, "vd-lavc-dr", "yes")
                 if UserDefaults.standard.string(forKey: "videoGravity") == "fill" {
                     setOptionOn(h, "panscan", "1.0")
                 }
@@ -109,9 +113,28 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "terminal", "no")
             setOptionOn(h, "msg-level", "all=warn")
             setOptionOn(h, "cache", "yes")
+            // cache-secs stays 60: it already caps total cached
+            // time above the 30s readahead target below; raising
+            // both would only grow memory, not smoothness.
             setOptionOn(h, "cache-secs", "60")
             setOptionOn(h, "demuxer-max-bytes", "128MiB")
             setOptionOn(h, "demuxer-max-back-bytes", "32MiB")
+            // Read further ahead so brief network dips don't reach
+            // the screen; hold playback while the cache refills
+            // after an underrun instead of stutter-playing.
+            setOptionOn(h, "demuxer-readahead-secs", "30")
+            setOptionOn(h, "cache-pause", "yes")
+            setOptionOn(h, "cache-pause-wait", "1")
+            // Network resilience: fail a stalled connection in
+            // 15s instead of hanging, and let libavformat's HTTP
+            // layer reconnect (streamed content included) with a
+            // capped 5s backoff.
+            setOptionOn(h, "network-timeout", "15")
+            setOptionOn(h, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
+            // Sync: audio is the master clock; on a weak link the
+            // VO drops late frames rather than letting A/V drift.
+            setOptionOn(h, "video-sync", "audio")
+            setOptionOn(h, "framedrop", "vo")
             if startAt > 1 { setOptionOn(h, "start", String(startAt)) }
             if !header.isEmpty {
                 let fields = header.map { "\($0.key): \($0.value)" }.joined(separator: ",")
