@@ -23,7 +23,7 @@ struct SettingsView: View {
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.26 · 冷启动与播放器"
+    static let buildLabel = "v1.27 · 新首页与播放守护"
 
     var body: some View {
         NavigationStack {

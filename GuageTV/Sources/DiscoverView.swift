@@ -49,8 +49,13 @@ struct DiscoverView: View {
                         }
                     }
                 }
+                // The scroll view bleeds to the top edge for the
+                // hero; when the hero is hidden or not first, keep
+                // the first module clear of the status bar instead.
+                .padding(.top, layout.visibleModules.first == .hero ? 0 : 54)
                 .padding(.bottom, 110)   // clear the floating tab bar
             }
+            .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
             .background(AmbientBackground(imageURL: displayHero.first?.pic))
             .overlay(alignment: .bottomLeading) { editButton }
             .sheet(isPresented: $showLinePicker) { linePicker }
@@ -273,7 +278,7 @@ struct DiscoverView: View {
         if !home.list.isEmpty {
             secs.append(DiscoverSection(title: "最新更新 · \(site.name)", items: home.list))
         }
-        for cls in home.classes.prefix(3) {
+        for cls in home.classes.prefix(6) {
             if let items = try? await client.category(tid: cls.0, page: 1), !items.isEmpty {
                 secs.append(DiscoverSection(title: cls.1, items: items))
             }
@@ -304,14 +309,14 @@ struct DiscoverView: View {
     // MARK: Hero carousel
 
     private var hero: some View {
-        VStack(spacing: 10) {
+        ZStack(alignment: .bottom) {
             TabView(selection: $heroIndex) {
                 ForEach(displayHero.indices, id: \.self) { idx in
                     heroPage(displayHero[idx]).tag(idx)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 430)
+            .frame(height: 520)
 
             if displayHero.count > 1 {
                 HStack(spacing: 6) {
@@ -321,43 +326,61 @@ struct DiscoverView: View {
                             .frame(width: 6, height: 6)
                     }
                 }
+                .padding(.bottom, 10)
+            }
+        }
+        .task(id: displayHero.count) {
+            // Gentle auto-advance; a manual swipe just moves the
+            // starting point, the loop keeps going from there.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if Task.isCancelled { break }
+                if displayHero.count > 1 {
+                    withAnimation { heroIndex = (heroIndex + 1) % displayHero.count }
+                }
             }
         }
     }
 
+    /// Rex's hero: full-bleed art, everything centred — big title,
+    /// a meta line, and rating badges as coloured chips.
     private func heroPage(_ item: VodItem) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        ZStack {
             if !item.pic.isEmpty {
                 PosterImage(urlString: item.pic)
-                    .frame(height: 430).clipped()
+                    .frame(height: 520).clipped()
             } else {
-                heroPlaceholder.frame(height: 430)
+                heroPlaceholder.frame(height: 520)
             }
-            LinearGradient(colors: [.clear, .black.opacity(0.55), Theme.bg],
+            LinearGradient(colors: [.black.opacity(0.30), .clear, .black.opacity(0.45), Theme.bg],
                            startPoint: .top, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 9) {
+                Spacer()
                 Text(item.name)
-                    .font(.system(size: 30, weight: .heavy))
+                    .font(.system(size: 34, weight: .heavy))
+                    .multilineTextAlignment(.center)
                     .foregroundStyle(Theme.text)
+                    .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
                     .lineLimit(2)
+                    .padding(.horizontal, 28)
                 HStack(spacing: 8) {
                     if !item.remarks.isEmpty { Text(item.remarks) }
                     if !item.year.isEmpty { Text(item.year) }
                 }
-                .font(.subheadline)
-                .foregroundStyle(Theme.text.opacity(0.8))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.text.opacity(0.85))
+                .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
                 if !item.score.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow)
-                        Text(item.score).fontWeight(.semibold)
-                        Text("评分").foregroundStyle(Theme.text.opacity(0.6))
+                    HStack(spacing: 5) {
+                        Image(systemName: "star.fill").font(.caption2)
+                        Text("豆瓣 \(item.score)").font(.caption.weight(.bold))
                     }
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.text)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(Color(red: 0.02, green: 0.55, blue: 0.27), in: Capsule())
                 }
+                Spacer().frame(height: 30)
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 14)
         }
     }
 
@@ -371,14 +394,31 @@ struct DiscoverView: View {
 
     private func posterRow(title: String, items: [VodItem]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.textDim)
+            if let site = activeSite {
+                NavigationLink {
+                    SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
+                } label: {
+                    HStack {
+                        Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    .padding(.horizontal, 18)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                HStack {
+                    Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textDim)
+                }
+                .padding(.horizontal, 18)
             }
-            .padding(.horizontal, 18)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
@@ -435,32 +475,140 @@ struct DiscoverView: View {
 
     // MARK: Category browse
 
+    /// Feed sections that are real classes (everything except the
+    /// "最新更新" recommendation row).
+    private var classSections: [DiscoverSection] {
+        displaySections.filter { !$0.title.hasPrefix("最新更新") }
+    }
+
+    /// Poster wall source: score-sorted when the feed carries
+    /// scores, else the feed order; deduped, capped.
+    private var wallItems: [VodItem] {
+        let all = displaySections.flatMap(\.items)
+        let scored = all.filter { !$0.score.isEmpty }
+            .sorted { (Double($0.score) ?? 0) > (Double($1.score) ?? 0) }
+        let base = scored.count >= 6 ? scored : all
+        var seen = Set<String>()
+        return Array(base.filter { seen.insert($0.id).inserted }.prefix(12))
+    }
+
     private var categoryBrowse: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("分类浏览").font(.title3.bold()).foregroundStyle(Theme.text)
                 .padding(.horizontal, 18)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-                      spacing: 12) {
-                ForEach(config?.sites ?? []) { site in
-                    NavigationLink {
-                        SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
-                    } label: {
-                        GlassCard(padding: 14) {
-                            HStack {
-                                Image(systemName: "rectangle.stack")
-                                    .foregroundStyle(Theme.accent)
-                                Text(site.name)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(Theme.text)
-                                    .lineLimit(1)
-                                Spacer()
+            if classSections.isEmpty {
+                siteCardGrid
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                          spacing: 12) {
+                    ForEach(classSections) { section in
+                        if let site = activeSite {
+                            NavigationLink {
+                                SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
+                            } label: {
+                                categoryTile(section)
                             }
+                            .buttonStyle(.plain)
+                        } else {
+                            categoryTile(section)
                         }
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 18)
+                posterWall
             }
-            .padding(.horizontal, 18)
         }
+    }
+
+    /// Rex-style category tile: the class name over a fan of its
+    /// own posters.
+    private func categoryTile(_ section: DiscoverSection) -> some View {
+        let pics = Array(section.items.map(\.pic).filter { !$0.isEmpty }.prefix(3))
+        return ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.glass)
+            HStack {
+                Spacer()
+                ZStack {
+                    ForEach(pics.indices, id: \.self) { i in
+                        PosterImage(urlString: pics[i])
+                            .frame(width: 46, height: 68)
+                            .posterFrame()
+                            .shadow(color: .black.opacity(0.45), radius: 5, y: 2)
+                            .rotationEffect(.degrees(Double(i - (pics.count - 1) / 2) * 11))
+                            .offset(x: CGFloat(i - (pics.count - 1) / 2) * 27)
+                    }
+                }
+                .padding(.trailing, 34)
+            }
+            Text(section.title)
+                .font(.headline)
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .padding(12)
+        }
+        .frame(height: 92)
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(Theme.glassStroke, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// The poster wall under the category tiles （高分精选 when the
+    /// feed carries scores, plain 海报墙 otherwise).
+    @ViewBuilder
+    private var posterWall: some View {
+        if wallItems.count >= 6, let site = activeSite {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(wallItems.filter { !$0.score.isEmpty }.count >= 6 ? "高分精选" : "海报墙")
+                    .font(.title3.bold()).foregroundStyle(Theme.text)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 14)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                    GridItem(.flexible(), spacing: 10),
+                                    GridItem(.flexible(), spacing: 10)],
+                          spacing: 10) {
+                    ForEach(wallItems) { item in
+                        NavigationLink {
+                            DetailLoaderView(site: site, item: item, lineID: feedLineID,
+                                             parses: (feedConfig ?? config)?.parses ?? [])
+                        } label: {
+                            PosterImage(urlString: item.pic)
+                                .frame(height: 158)
+                                .frame(maxWidth: .infinity)
+                                .posterFrame()
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 18)
+            }
+        }
+    }
+
+    /// Fallback while the feed has not landed: the config's sites
+    /// as plain cards (the pre-v1.27 behaviour).
+    private var siteCardGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                  spacing: 12) {
+            ForEach(config?.sites ?? []) { site in
+                NavigationLink {
+                    SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
+                } label: {
+                    GlassCard(padding: 14) {
+                        HStack {
+                            Image(systemName: "rectangle.stack")
+                                .foregroundStyle(Theme.accent)
+                            Text(site.name)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 18)
     }
 }

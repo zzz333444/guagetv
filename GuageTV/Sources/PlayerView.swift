@@ -64,6 +64,9 @@ struct PlayerView: View {
     @State private var boostActive = false
     @State private var rateBeforeBoost: Double = 1
     @State private var toastGeneration = 0
+    /// Stall watchdog state (see watchdogTick).
+    @State private var stallTicks = 0
+    @State private var lastWatchTime: Double = -1
 
     private enum DragMode { case scrub, brightness, volume }
     @Environment(\.dismiss) private var dismiss
@@ -185,6 +188,7 @@ struct PlayerView: View {
             didSkipIntro = false
             pendingStart = nil
             recoveryStep = 0
+            stallTicks = 0
             pokeChrome()
         }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
@@ -762,7 +766,33 @@ struct PlayerView: View {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             if Task.isCancelled { break }
             saveProgress()
+            watchdogTick()
         }
+    }
+
+    /// Stall watchdog: some failures never raise an error — the
+    /// engine just sits in "buffering" forever (AVPlayer does this
+    /// with proxied range fetchers and encodes it cannot decode:
+    /// no failure event, an eternal spinner). ~25 s of buffering
+    /// with zero playhead progress is treated as a failure and
+    /// enters the same recovery ladder (rebuild, then switch
+    /// engine), which is what gets those titles playing.
+    private func watchdogTick() {
+        let nearEnd = duration > 0 && currentTime >= duration - 1
+        if isBuffering, !nearEnd {
+            if currentTime == lastWatchTime {
+                stallTicks += 1
+            } else {
+                stallTicks = 0
+            }
+            if stallTicks >= 5 {
+                stallTicks = 0
+                handlePlaybackFailure("加载超时")
+            }
+        } else {
+            stallTicks = 0
+        }
+        lastWatchTime = currentTime
     }
 
     private func showToast(_ text: String) {
