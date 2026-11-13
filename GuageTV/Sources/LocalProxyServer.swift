@@ -144,7 +144,7 @@ final class LocalProxyServer {
                 ? min(Int(spec[1]) ?? body.count - 1, body.count - 1)
                 : body.count - 1
             if start >= 0, start <= end, start < body.count {
-                payload = body.subdata(in: start...end)
+                payload = body.subdata(in: start..<(end + 1))
                 statusLine = "HTTP/1.1 206"
                 headers["Content-Range"] = "bytes \(start)-\(end)/\(body.count)"
             }

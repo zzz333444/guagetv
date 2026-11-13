@@ -1366,7 +1366,7 @@ final class NativeController: NSObject, ObservableObject {
         var subs: [PlayerTrack] = []
         var curA = -1
         var curS = -1
-        if let group = asset.mediaSelectionGroup(for: .audible) {
+        if let group = asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
             audibleGroup = group
             let selected = item.selectedMediaOption(in: group)
             for (i, option) in group.options.enumerated() {
@@ -1375,7 +1375,7 @@ final class NativeController: NSObject, ObservableObject {
                 if isSel { curA = i }
             }
         }
-        if let group = asset.mediaSelectionGroup(for: .legible) {
+        if let group = asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
             legibleGroup = group
             let selected = item.selectedMediaOption(in: group)
             for (i, option) in group.options.enumerated() {
