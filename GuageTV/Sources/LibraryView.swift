@@ -191,7 +191,7 @@ struct LibraryView: View {
         guard isPy || isJS,
               let cfg = ConfigLibrary.load(id: entry.id),
               let site = cfg.sites.first else { return nil }
-        return FileSiteRoute(site: site, parses: cfg.parses, isJS: isJS)
+        return FileSiteRoute(site: site, parses: cfg.parses ?? [], isJS: isJS)
     }
 
     /// "今天 / 昨天 / N天前 / N周前 / N月前" for a line's import day.
@@ -574,11 +574,15 @@ struct GroupEditorView: View {
 
 /// Direct-open target for a single-file line: its config's only
 /// site plus the config's parse interfaces.
-private struct FileSiteRoute: Identifiable {
+private struct FileSiteRoute: Identifiable, Hashable {
     let site: TVBoxConfig.Site
     let parses: [TVBoxConfig.Parse]
     let isJS: Bool
     var id: String { site.id + (isJS ? "#js" : "#py") }
+    // Manual conformance: Site carries JSONValue ext, which is not
+    // Hashable, so identity (not memberwise synthesis) is the key.
+    static func == (lhs: FileSiteRoute, rhs: FileSiteRoute) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// GlassCard's flat-glass sibling for long scrolling grids: a
