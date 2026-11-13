@@ -85,6 +85,10 @@ struct DetailLoaderView: View {
 struct SiteBrowseView: View {
     let site: TVBoxConfig.Site
     var parses: [TVBoxConfig.Parse] = []
+    /// Deep-link entry: when set (the Discover class chips), the
+    /// first CMS load opens on this category instead of 推荐.
+    /// Ignored for non-CMS sites, which own their class switching.
+    var initialTid: String? = nil
 
     @State private var classes: [(String, String)] = []
     @State private var items: [VodItem] = []
@@ -354,11 +358,23 @@ struct SiteBrowseView: View {
         do {
             let home = try await client.home()
             classes = home.classes
-            items = home.list
             allFilters = home.filters
-            selectedTid = ""
             page = 1
-            canLoadMore = home.list.count >= 10
+            if let initialTid, !initialTid.isEmpty,
+               home.classes.contains(where: { $0.0 == initialTid }) {
+                // Deep link: open straight on the requested
+                // category; the class chips above the grid keep
+                // switching from here as usual.
+                selectedTid = initialTid
+                selectedFilters = [:]
+                items = try await client.list(tid: initialTid, page: 1,
+                                              filters: selectedFilters)
+                canLoadMore = items.count >= 10
+            } else {
+                selectedTid = ""
+                items = home.list
+                canLoadMore = home.list.count >= 10
+            }
             Task { await backfillPosters() }
         } catch {
             errorText = "加载失败：\(error.localizedDescription)"

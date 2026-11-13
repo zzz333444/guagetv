@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.31 · 流式搜索与性能玻璃"
+    static let buildLabel = "v1.32 · 分类直达与详情 TMDB"
 
     var body: some View {
         NavigationStack {

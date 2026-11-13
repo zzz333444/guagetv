@@ -272,12 +272,13 @@ struct DiscoverView: View {
 
     /// One feed-class chip: glass when idle, white with black text
     /// once it was tapped. Tapping pushes the feed site's browse
-    /// page — SiteBrowseView owns the in-site class switching, so
-    /// the chip is an entry point, not a filter.
+    /// page opened on this very class (SiteBrowseView's initialTid
+    /// deep link); the in-site chips take over switching from there.
     private func classChip(_ cls: (String, String), site: TVBoxConfig.Site) -> some View {
         let selected = selectedClassID == cls.0
         return NavigationLink {
-            SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [])
+            SiteBrowseView(site: site, parses: (feedConfig ?? config)?.parses ?? [],
+                           initialTid: cls.0)
         } label: {
             if selected {
                 Text(cls.1)

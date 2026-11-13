@@ -47,6 +47,10 @@ struct DetailView: View {
     @State private var playNote: String?
     @State private var downloadMode = false
     @State private var synopsisExpanded = false
+    /// TMDB enrichment for this title （设置里开启并填了密钥才有）:
+    /// backdrop for the hero, a synopsis when the feed has none,
+    /// and the TMDB score chip under the title.
+    @State private var tmdbInfo: TMDBClient.Info?
     @ObservedObject private var historyStore = HistoryStore.shared
 
     var body: some View {
@@ -57,7 +61,7 @@ struct DetailView: View {
                     titleBlock
                     actionRow
                     infoLines
-                    if !detail.content.isEmpty { synopsisBlock }
+                    if !synopsisText.isEmpty { synopsisBlock }
                     episodeSection
                 }
                 .padding(.horizontal, 18)
@@ -96,6 +100,11 @@ struct DetailView: View {
                     .frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
+        .task {
+            if TMDBClient.isOn {
+                tmdbInfo = await TMDBClient.lookup(name: detail.name, year: detail.year)
+            }
+        }
         .task(id: playNote) {
             guard let note = playNote else { return }
             // Failure reasons (a spider's msg can be a full sentence)
@@ -109,12 +118,19 @@ struct DetailView: View {
 
     // MARK: Rex-style header (hero → title → actions)
 
+    /// The hero's artwork: the TMDB backdrop (a true landscape
+    /// still) when enrichment found one, else the feed's poster.
+    private var heroPic: String {
+        if let backdrop = tmdbInfo?.backdrop, !backdrop.isEmpty { return backdrop }
+        return detail.pic
+    }
+
     /// Full-bleed poster hero; the gradient melts its bottom edge
     /// into the page background.
     private var heroHeader: some View {
         ZStack(alignment: .bottom) {
-            if !detail.pic.isEmpty {
-                PosterImage(urlString: detail.pic)
+            if !heroPic.isEmpty {
+                PosterImage(urlString: heroPic)
                     .frame(height: 420)
                     .clipped()
             } else {
@@ -149,6 +165,15 @@ struct DetailView: View {
                 Text(detail.remarks)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.accent)
+            }
+            if let score = tmdbInfo?.score, !score.isEmpty {
+                HStack(spacing: 5) {
+                    Image(systemName: "star.fill").font(.caption2)
+                    Text("TMDB \(score)").font(.caption.weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
             }
         }
         .frame(maxWidth: .infinity)
@@ -212,12 +237,19 @@ struct DetailView: View {
         }
     }
 
+    /// The synopsis on show: the feed's own text first; TMDB's
+    /// overview steps in only when the feed carries none.
+    private var synopsisText: String {
+        if !detail.content.isEmpty { return detail.content }
+        return tmdbInfo?.overview ?? ""
+    }
+
     /// Synopsis: three lines by default, 展开/收起 toggles the full
     /// text.
     private var synopsisBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("简介").font(.headline).foregroundStyle(Theme.text)
-            Text(detail.content)
+            Text(synopsisText)
                 .font(.subheadline).foregroundStyle(Theme.text.opacity(0.75))
                 .lineSpacing(4)
                 .lineLimit(synopsisExpanded ? nil : 3)
