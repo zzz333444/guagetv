@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import libmpv
+import QuartzCore
 import SwiftUI
 import UIKit
 
@@ -9,10 +10,31 @@ import UIKit
 /// Rex's license page lists. KSPlayer's own binary turned out to ship no
 /// iOS-device slice in its free build, so the mpv core is used directly.
 ///
-/// Rendering uses mpv's software render API into a CPU buffer blitted to
-/// a CALayer — simplest correct integration; VideoToolbox hardware
-/// decoding still applies via hwdec=auto-safe.
+/// Two render paths (设置 → 播放 → mpv 渲染）:
+/// - Metal (default): `wid` straight onto a CAMetalLayer with
+///   vo=gpu-next via libplacebo/MoltenVK — zero-copy GPU output,
+///   hardware tone mapping. The bundled FFmpegKit binary was
+///   verified to already contain the whole gpu-next stack; only
+///   the app-side wiring was missing.
+/// - Software (fallback): mpv's render API into a CPU buffer
+///   blitted to a CALayer. Used when the setting forces it, or
+///   automatically when the Metal context fails to initialise.
 final class MPVController: ObservableObject {
+    /// Which surface the view layer should show. Starts at the
+    /// user's preference; flips to false if Metal init fails so
+    /// the software surface swaps in.
+    @Published var metalActive: Bool
+
+    /// The CAMetalLayer handed over by the metal surface view
+    /// (created by the representable before start() runs).
+    private weak var metalLayer: MPVMetalLayer?
+
+    init() {
+        metalActive = UserDefaults.standard.string(forKey: "mpvRenderer") != "sw"
+    }
+
+    func attachMetalLayer(_ layer: MPVMetalLayer) { metalLayer = layer }
+    func detachMetalLayer() { metalLayer = nil }
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
@@ -35,10 +57,23 @@ final class MPVController: ObservableObject {
         setProperty("speed", String(value))
     }
 
-    /// Current frame as an image (for the screenshot button), rendered
-    /// through the same software path as the display.
+    /// Current frame as an image (for the screenshot button). The
+    /// software path renders a frame directly; the Metal path asks
+    /// mpv to write one out (the GPU owns the pixels there).
     func snapshot() -> CGImage? {
-        renderFrame(maxSize: CGSize(width: 1280, height: 720), scale: 1)
+        if metalActive {
+            let path = NSTemporaryDirectory() + "guage-snapshot.jpg"
+            try? FileManager.default.removeItem(atPath: path)
+            command(["screenshot-to-file", path, "video"])
+            for _ in 0..<6 {
+                if let img = UIImage(contentsOfFile: path), let cg = img.cgImage {
+                    return cg
+                }
+                Thread.sleep(forTimeInterval: 0.08)
+            }
+            return nil
+        }
+        return renderFrame(maxSize: CGSize(width: 1280, height: 720), scale: 1)
     }
 
     private var handle: OpaquePointer?
@@ -50,25 +85,71 @@ final class MPVController: ObservableObject {
     // MARK: lifecycle
 
     func start(url: URL, header: [String: String], startAt: Double = 0) {
-        guard handle == nil, let h = mpv_create() else { return }
-        handle = h
+        guard handle == nil, let first = mpv_create() else { return }
         lastFileError = ""
         wasEOF = false
-        setOption("vo", "libmpv")
-        setOption("hwdec", "auto-safe")
-        setOption("terminal", "no")
-        setOption("msg-level", "all=warn")
-        setOption("cache", "yes")
-        setOption("cache-secs", "60")
-        setOption("demuxer-max-bytes", "128MiB")
-        setOption("demuxer-max-back-bytes", "32MiB")
-        if startAt > 1 { setOption("start", String(startAt)) }
-        if !header.isEmpty {
-            let fields = header.map { "\($0.key): \($0.value)" }.joined(separator: ",")
-            mpv_set_property_string(h, "http-header-fields", fields)
+
+        // One configure pass per attempt: Metal first (when the
+        // preference and a surface allow), software as the fallback.
+        func configure(_ h: OpaquePointer, metal: Bool) {
+            if metal, let layer = metalLayer {
+                var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
+                _ = mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
+                setOptionOn(h, "vo", "gpu-next")
+                setOptionOn(h, "gpu-api", "vulkan")
+                setOptionOn(h, "gpu-context", "moltenvk")
+                setOptionOn(h, "hwdec", "videotoolbox")
+                if UserDefaults.standard.string(forKey: "videoGravity") == "fill" {
+                    setOptionOn(h, "panscan", "1.0")
+                }
+            } else {
+                setOptionOn(h, "vo", "libmpv")
+                setOptionOn(h, "hwdec", "auto-safe")
+            }
+            setOptionOn(h, "terminal", "no")
+            setOptionOn(h, "msg-level", "all=warn")
+            setOptionOn(h, "cache", "yes")
+            setOptionOn(h, "cache-secs", "60")
+            setOptionOn(h, "demuxer-max-bytes", "128MiB")
+            setOptionOn(h, "demuxer-max-back-bytes", "32MiB")
+            if startAt > 1 { setOptionOn(h, "start", String(startAt)) }
+            if !header.isEmpty {
+                let fields = header.map { "\($0.key): \($0.value)" }.joined(separator: ",")
+                _ = mpv_set_property_string(h, "http-header-fields", fields)
+            }
         }
-        guard mpv_initialize(h) >= 0 else { return }
-        createRenderContext()
+
+        let wantMetal = metalActive && metalLayer != nil
+        var h = first
+        var usingMetal = wantMetal
+        configure(h, metal: wantMetal)
+        handle = h
+        if mpv_initialize(h) < 0 {
+            guard usingMetal, let second = mpv_create() else {
+                mpv_terminate_destroy(h)
+                handle = nil
+                return
+            }
+            // Metal context refused to come up — rebuild on the
+            // software path and tell the view layer to swap
+            // surfaces.
+            mpv_terminate_destroy(h)
+            h = second
+            handle = h
+            usingMetal = false
+            configure(h, metal: false)
+            guard mpv_initialize(h) >= 0 else {
+                mpv_terminate_destroy(h)
+                handle = nil
+                return
+            }
+        }
+        if usingMetal {
+            registerBackgroundObservers()
+        } else {
+            if metalActive { metalActive = false }
+            createRenderContext()
+        }
         let scale = UserDefaults.standard.object(forKey: "subtitleScale") as? Double ?? 1.0
         setProperty("sub-scale", String(scale))
         specText = ""
@@ -76,6 +157,27 @@ final class MPVController: ObservableObject {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.poll()
         }
+    }
+
+    /// MoltenVK drawables do not survive backgrounding — park the
+    /// video track while the app is away so the return trip is not
+    /// a black screen (the MPVKit demo does the same).
+    private var backgroundObservers: [NSObjectProtocol] = []
+
+    private func registerBackgroundObservers() {
+        guard backgroundObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        backgroundObservers.append(center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.setProperty("vid", "no") })
+        backgroundObservers.append(center.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.setProperty("vid", "auto") })
+    }
+
+    private func unregisterBackgroundObservers() {
+        backgroundObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        backgroundObservers = []
     }
 
     /// Rebuild from scratch (failure recovery): the view layer
@@ -88,6 +190,7 @@ final class MPVController: ObservableObject {
     func stop() {
         pollTimer?.invalidate()
         pollTimer = nil
+        unregisterBackgroundObservers()
         if let ctx = renderContext {
             mpv_render_context_free(ctx)
             renderContext = nil
@@ -177,6 +280,10 @@ final class MPVController: ObservableObject {
 
     private func setOption(_ name: String, _ value: String) {
         guard let h = handle else { return }
+        setOptionOn(h, name, value)
+    }
+
+    private func setOptionOn(_ h: OpaquePointer, _ name: String, _ value: String) {
         _ = mpv_set_option_string(h, name, value)
     }
 
@@ -300,19 +407,82 @@ private struct MPVRenderRepresentable: UIViewRepresentable {
     }
 }
 
+/// CAMetalLayer with the MPVKit demo's two survival hacks:
+/// MoltenVK occasionally tries to shrink the drawable to 1×1
+/// (visible flicker) — refuse degenerate sizes; EDR activation
+/// stays on the main thread (all layer mutation here is).
+final class MPVMetalLayer: CAMetalLayer {
+    override var drawableSize: CGSize {
+        get { super.drawableSize }
+        set {
+            if newValue.width > 1, newValue.height > 1 {
+                super.drawableSize = newValue
+            }
+        }
+    }
+}
+
+/// GPU surface for the Metal path: mpv draws into this view's
+/// CAMetalLayer itself (wid mode), no display link, no CPU copies.
+/// The view only keeps the drawable sized to its bounds.
+final class MPVMetalUIView: UIView {
+    override class var layerClass: AnyClass { MPVMetalLayer.self }
+
+    var metalLayer: MPVMetalLayer { layer as! MPVMetalLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+        metalLayer.wantsExtendedDynamicRangeContent = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        metalLayer.contentsScale = scale
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale,
+                                         height: bounds.height * scale)
+    }
+}
+
+private struct MPVMetalRepresentable: UIViewRepresentable {
+    let controller: MPVController
+
+    func makeUIView(context: Context) -> MPVMetalUIView {
+        let v = MPVMetalUIView()
+        controller.attachMetalLayer(v.metalLayer)
+        return v
+    }
+
+    func updateUIView(_ uiView: MPVMetalUIView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: MPVMetalUIView, coordinator: ()) {
+        // The controller's weak layer pointer dies with the view;
+        // nothing to detach explicitly.
+    }
+}
+
 /// Render surface for the mpv engine. All chrome (close bar, transport
 /// controls) lives in PlayerView, which owns the controller.
 struct MPVPlayerView: View {
     let url: URL
     var header: [String: String] = [:]
     var startAt: Double = 0
-    let controller: MPVController
+    @ObservedObject var controller: MPVController
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            MPVRenderRepresentable(controller: controller)
-                .ignoresSafeArea()
+            if controller.metalActive {
+                MPVMetalRepresentable(controller: controller)
+                    .ignoresSafeArea()
+            } else {
+                MPVRenderRepresentable(controller: controller)
+                    .ignoresSafeArea()
+            }
         }
         .onAppear { controller.start(url: url, header: header, startAt: startAt) }
         .onDisappear { controller.stop() }

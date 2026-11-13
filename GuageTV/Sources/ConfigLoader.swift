@@ -359,6 +359,7 @@ enum ConfigLibrary {
         if let file = file(for: id) { try? FileManager.default.removeItem(at: file) }
         let list = entries().filter { $0.id != id }
         saveEntries(list)
+        setAlias(nil, for: id)
         if activeID() == id {
             UserDefaults.standard.removeObject(forKey: activeKey)
             if let first = list.first { return activate(id: first.id) }
@@ -371,6 +372,27 @@ enum ConfigLibrary {
     /// Parse any line's stored config without activating it (the
     /// Discover home-line and history may point at non-active lines).
     static func load(id: String) -> TVBoxConfig? { loadEntry(id: id) }
+
+    // MARK: line aliases （备注名）
+
+    private static let aliasKey = "configLineAliases.v1"
+
+    static func alias(for id: String) -> String? {
+        (UserDefaults.standard.dictionary(forKey: aliasKey) as? [String: String])?[id]
+    }
+
+    static func setAlias(_ alias: String?, for id: String) {
+        var map = (UserDefaults.standard.dictionary(forKey: aliasKey) as? [String: String]) ?? [:]
+        let trimmed = alias?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty { map.removeValue(forKey: id) } else { map[id] = trimmed }
+        UserDefaults.standard.set(map, forKey: aliasKey)
+    }
+
+    /// What the UI shows for a line: the user's remark name when
+    /// one is set, else the imported name.
+    static func shownName(_ entry: Entry) -> String {
+        alias(for: entry.id) ?? entry.name
+    }
 
     // MARK: groups （资源库分组）
 

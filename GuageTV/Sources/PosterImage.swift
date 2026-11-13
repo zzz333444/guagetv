@@ -8,6 +8,7 @@ import UIKit
 struct PosterImage: View {
     let urlString: String
     @State private var image: UIImage?
+    @State private var appeared = false
 
     var body: some View {
         Group {
@@ -15,12 +16,19 @@ struct PosterImage: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .opacity(appeared ? 1 : 0)
+                    .onAppear {
+                        // A short fade reads far smoother than a
+                        // hard pop when posters stream in.
+                        withAnimation(.easeOut(duration: 0.35)) { appeared = true }
+                    }
             } else {
                 Rectangle().fill(Color.white.opacity(0.08))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        .onChange(of: urlString) { _ in appeared = false }
         .task(id: urlString) {
             image = await PosterCache.shared.load(urlString)
         }

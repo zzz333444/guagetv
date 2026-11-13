@@ -10,6 +10,11 @@ struct LibraryView: View {
     @State private var activeID: String?
     @State private var groups: [ConfigLibrary.Group] = []
     @State private var showGroupEditor = false
+    /// Per-line "CMS 12 · py 3 · Jar 5" summaries, computed on appear
+    /// from the stored configs (local files, cheap).
+    @State private var kindSummary: [String: String] = [:]
+    @State private var renamingEntry: ConfigLibrary.Entry?
+    @State private var renameText = ""
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -32,9 +37,9 @@ struct LibraryView: View {
 
                 ForEach(lineSections(), id: \.title) { section in
                     Text(section.title).font(.headline).foregroundStyle(Theme.section)
-                    VStack(spacing: 10) {
+                    LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(section.items) { entry in
-                            lineRow(entry)
+                            lineCard(entry)
                         }
                     }
                 }
@@ -98,6 +103,18 @@ struct LibraryView: View {
         }
         .background(AmbientBackground(imageURL: nil))
         .onAppear { refreshLibrary() }
+        .alert("线路备注名", isPresented: Binding(get: { renamingEntry != nil },
+                                                set: { if !$0 { renamingEntry = nil } })) {
+            TextField("备注名（留空恢复原名）", text: $renameText)
+            Button("保存") {
+                if let entry = renamingEntry {
+                    ConfigLibrary.setAlias(renameText, for: entry.id)
+                }
+                renamingEntry = nil
+                refreshLibrary()
+            }
+            Button("取消", role: .cancel) { renamingEntry = nil }
+        }
         }
     }
 
@@ -105,6 +122,39 @@ struct LibraryView: View {
         entries = ConfigLibrary.entries()
         activeID = ConfigLibrary.activeID()
         groups = ConfigLibrary.groups()
+        var summary: [String: String] = [:]
+        for entry in entries {
+            guard let cfg = ConfigLibrary.load(id: entry.id) else { continue }
+            var counts: [String: Int] = [:]
+            for site in cfg.sites {
+                switch site.kind {
+                case .cmsXML, .cmsJSON: counts["CMS", default: 0] += 1
+                case .spiderPY: counts["py", default: 0] += 1
+                case .spiderJS, .drpyJS: counts["JS", default: 0] += 1
+                case .spiderJAR: counts["Jar", default: 0] += 1
+                case .unknown: counts["其他", default: 0] += 1
+                }
+            }
+            let parts = ["CMS", "py", "JS", "Jar", "其他"].compactMap { key -> String? in
+                guard let n = counts[key], n > 0 else { return nil }
+                return "\(key) \(n)"
+            }
+            summary[entry.id] = parts.isEmpty ? "\(entry.siteCount) 个站点" : parts.joined(separator: " · ")
+        }
+        kindSummary = summary
+    }
+
+    /// "今天 / 昨天 / N天前 / N周前 / N月前" for a line's import day.
+    private func relativeDay(_ ts: TimeInterval) -> String {
+        let days = Calendar.current.dateComponents(
+            [.day], from: Date(timeIntervalSince1970: ts), to: Date()).day ?? 0
+        switch days {
+        case ..<1: return "今天"
+        case 1: return "昨天"
+        case 2..<7: return "\(days)天前"
+        case 7..<30: return "\(days / 7)周前"
+        default: return "\(days / 30)月前"
+        }
     }
 
     /// Section order: custom groups (creation order) → the automatic
@@ -125,39 +175,47 @@ struct LibraryView: View {
         return sections
     }
 
-    /// One saved config = one group of its own. Tapping a line makes
-    /// it the active config everywhere (发现/搜索 follow); its sites
-    /// are stored separately and load instantly, no re-download.
-    private func lineRow(_ entry: ConfigLibrary.Entry) -> some View {
+    /// One line = one big card (Rex's 资源库 layout): icon, freshness
+    /// + status dot, name, route role, content mix. Tapping a card
+    /// makes it the active config everywhere (发现/搜索 follow); its
+    /// sites are stored separately and load instantly, no
+    /// re-download. Long-press: rename （备注名）, set home line,
+    /// move to a group, or delete.
+    private func lineCard(_ entry: ConfigLibrary.Entry) -> some View {
         let isActive = entry.id == activeID
+        let isHome = entry.id == ConfigLibrary.homeLineID()
+        let shown = ConfigLibrary.shownName(entry)
         return GlassCard(padding: 14) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.subheadline).foregroundStyle(Theme.text)
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top) {
+                    ZStack {
+                        Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
+                        Text(String(shown.prefix(1)))
+                            .font(.headline).foregroundStyle(Theme.text)
+                    }
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Text(relativeDay(entry.addedAt))
+                            .font(.caption2).foregroundStyle(Theme.textDim)
+                        Circle().fill(isActive ? Theme.ok : Color.gray.opacity(0.55))
+                            .frame(width: 7, height: 7)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.name).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.text).lineLimit(1)
-                    Text("\(entry.siteCount) 个站点 · \(URL(string: entry.sourceURL)?.host ?? "")")
-                        .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
-                }
-                Spacer()
-                if isActive {
-                    Text("使用中")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Theme.ok.opacity(0.15), in: Capsule())
-                } else {
-                    Text("点按启用")
-                        .font(.caption).foregroundStyle(Theme.textDim)
-                }
+                Text(shown)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text).lineLimit(2)
+                Text(isActive ? "主线路" : (isHome ? "首页线路" : "点按启用"))
+                    .font(.caption)
+                    .foregroundStyle(isActive ? Theme.ok : (isHome ? Theme.accent : Theme.textDim))
+                Text(kindSummary[entry.id] ?? "\(entry.siteCount) 个站点")
+                    .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
+        .contentShape(Rectangle())
         .onTapGesture {
             guard !isActive else { return }
             config = ConfigLibrary.activate(id: entry.id)
@@ -165,6 +223,20 @@ struct LibraryView: View {
             refreshLibrary()
         }
         .contextMenu {
+            Button {
+                renameText = ConfigLibrary.alias(for: entry.id) ?? ""
+                renamingEntry = entry
+            } label: {
+                Label("改备注名", systemImage: "pencil")
+            }
+            if !isHome {
+                Button {
+                    ConfigLibrary.setHomeLineID(entry.id)
+                    refreshLibrary()
+                } label: {
+                    Label("设为首页线路", systemImage: "house")
+                }
+            }
             Menu("移动到分组") {
                 Button("未分组") {
                     ConfigLibrary.setGroup(entryID: entry.id, groupID: ConfigLibrary.noGroupID)
@@ -182,6 +254,12 @@ struct LibraryView: View {
                         refreshLibrary()
                     }
                 }
+            }
+            Button(role: .destructive) {
+                config = ConfigLibrary.remove(id: entry.id)
+                refreshLibrary()
+            } label: {
+                Label("删除线路", systemImage: "trash")
             }
         }
     }
@@ -287,7 +365,7 @@ struct GroupEditorView: View {
                         GlassCard(padding: 14) {
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(entry.name).font(.subheadline.weight(.semibold))
+                                    Text(ConfigLibrary.shownName(entry)).font(.subheadline.weight(.semibold))
                                         .foregroundStyle(Theme.text).lineLimit(1)
                                     Text(groupName(for: entry)).font(.caption)
                                         .foregroundStyle(Theme.textDim)

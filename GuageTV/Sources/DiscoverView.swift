@@ -17,6 +17,8 @@ struct DiscoverView: View {
     var heroItems: [VodItem] = []
     var sections: [DiscoverSection] = []
     @State private var heroIndex = 0
+    /// TMDB enrichment per hero item id （设置里开启并填了密钥才有）.
+    @State private var tmdbInfo: [String: TMDBClient.Info] = [:]
     @State private var liveHero: [VodItem] = []
     @State private var liveSections: [DiscoverSection] = []
     @State private var feedLineID = ""
@@ -216,7 +218,7 @@ struct DiscoverView: View {
                         } label: {
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.name).foregroundStyle(Theme.text)
+                                    Text(ConfigLibrary.shownName(entry)).foregroundStyle(Theme.text)
                                     Text("\(entry.siteCount) 个站点")
                                         .font(.caption).foregroundStyle(Theme.textDim)
                                 }
@@ -340,14 +342,27 @@ struct DiscoverView: View {
                 }
             }
         }
+        .task(id: displayHero.map(\.id).joined(separator: ",")) {
+            // TMDB enrichment, one lookup per hero title, cached.
+            guard TMDBClient.isOn else { return }
+            for item in displayHero where tmdbInfo[item.id] == nil {
+                if let info = await TMDBClient.lookup(name: item.name, year: item.year) {
+                    tmdbInfo[item.id] = info
+                }
+            }
+        }
     }
 
     /// Rex's hero: full-bleed art, everything centred — big title,
-    /// a meta line, and rating badges as coloured chips.
+    /// a meta line, and rating badges as coloured chips. With TMDB
+    /// enabled the art becomes the TMDB backdrop and a synopsis +
+    /// TMDB score join the feed's own score.
     private func heroPage(_ item: VodItem) -> some View {
-        ZStack {
-            if !item.pic.isEmpty {
-                PosterImage(urlString: item.pic)
+        let info = tmdbInfo[item.id]
+        let art = (info?.backdrop.isEmpty == false) ? info!.backdrop : item.pic
+        return ZStack {
+            if !art.isEmpty {
+                PosterImage(urlString: art)
                     .frame(height: 520).clipped()
             } else {
                 heroPlaceholder.frame(height: 520)
@@ -370,18 +385,42 @@ struct DiscoverView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.text.opacity(0.85))
                 .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                if !item.score.isEmpty {
-                    HStack(spacing: 5) {
-                        Image(systemName: "star.fill").font(.caption2)
-                        Text("豆瓣 \(item.score)").font(.caption.weight(.bold))
+                if let overview = info?.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Theme.text.opacity(0.75))
+                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                        .lineLimit(2)
+                        .padding(.horizontal, 40)
+                }
+                if !item.score.isEmpty || !(info?.score.isEmpty ?? true) {
+                    HStack(spacing: 8) {
+                        if !item.score.isEmpty {
+                            HStack(spacing: 5) {
+                                Image(systemName: "star.fill").font(.caption2)
+                                Text("豆瓣 \(item.score)").font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 9).padding(.vertical, 4)
+                            .background(Color(red: 0.02, green: 0.55, blue: 0.27), in: Capsule())
+                        }
+                        if let tmdbScore = info?.score, !tmdbScore.isEmpty {
+                            HStack(spacing: 5) {
+                                Image(systemName: "star.fill").font(.caption2)
+                                Text("TMDB \(tmdbScore)").font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 9).padding(.vertical, 4)
+                            .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
+                        }
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background(Color(red: 0.02, green: 0.55, blue: 0.27), in: Capsule())
                 }
                 Spacer().frame(height: 30)
             }
         }
+        .id(art)
+        .transition(.opacity)
     }
 
     private var heroPlaceholder: some View {

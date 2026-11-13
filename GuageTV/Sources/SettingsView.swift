@@ -19,11 +19,15 @@ struct SettingsView: View {
     @AppStorage("drive.bili_cookie") private var driveBiliCookie = ""
     @AppStorage("drive.xunlei") private var driveXunlei = ""
     @State private var jarTestNote = ""
+    @AppStorage("tmdb.enabled") private var tmdbEnabled = false
+    @AppStorage("tmdb.base") private var tmdbBase = ""
+    @AppStorage("tmdb.key") private var tmdbKey = ""
+    @State private var tmdbTestNote = ""
     @State private var entries: [ConfigLibrary.Entry] = []
     @State private var showFileImporter = false
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.27 · 新首页与播放守护"
+    static let buildLabel = "v1.28 · 资源库与 TMDB 和 Metal 播放"
 
     var body: some View {
         NavigationStack {
@@ -126,6 +130,36 @@ struct SettingsView: View {
                         }
                     }
 
+                    group(title: "TMDB 增强") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Toggle("启用 TMDB 增强", isOn: $tmdbEnabled)
+                                .font(.subheadline).foregroundStyle(Theme.text)
+                            TextField("API 地址（留空用官方 https://api.themoviedb.org）", text: $tmdbBase)
+                                .textFieldStyle(.roundedBorder)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                            TextField("API 密钥（v3，在 themoviedb.org 免费申请）", text: $tmdbKey)
+                                .textFieldStyle(.roundedBorder)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .font(.footnote.monospaced())
+                            HStack(spacing: 10) {
+                                Button("测试连接并保存") {
+                                    Task { tmdbTestNote = await TMDBClient.testConnection() }
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 18).padding(.vertical, 8)
+                                .background(Theme.glass, in: Capsule())
+                                .foregroundStyle(Theme.text)
+                                if !tmdbTestNote.isEmpty {
+                                    Text(tmdbTestNote).font(.footnote).foregroundStyle(Theme.textDim)
+                                }
+                            }
+                            Text("开启后，首页大图会用 TMDB 的高清剧照、剧情简介和 TMDB 评分来增强（按片名+年份匹配，结果缓存在本机）。密钥只保存在本机。")
+                                .font(.footnote).foregroundStyle(Theme.textDim)
+                        }
+                    }
+
                     if !entries.isEmpty {
                         group(title: "配置库") {
                             ForEach(entries) { entry in
@@ -133,7 +167,7 @@ struct SettingsView: View {
                                     Image(systemName: "antenna.radiowaves.left.and.right")
                                         .foregroundStyle(Theme.textDim).frame(width: 22)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(entry.name).foregroundStyle(Theme.text).lineLimit(1)
+                                        Text(ConfigLibrary.shownName(entry)).foregroundStyle(Theme.text).lineLimit(1)
                                         Text("\(entry.siteCount) 个站点")
                                             .font(.caption).foregroundStyle(Theme.textDim)
                                     }
@@ -524,6 +558,7 @@ struct PlaySettingsView: View {
     @AppStorage("enginePreference") private var engine = "auto"
     @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
     @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
+    @AppStorage("mpvRenderer") private var mpvRenderer = "auto"
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -537,6 +572,18 @@ struct PlaySettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     Text("自动：m3u8/mp4 用原生引擎（省电硬解），mkv/flv 等用 mpv 增强引擎。原生播不了的片，改成「增强 mpv」强制走 mpv。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("mpv 渲染方式").font(.headline).foregroundStyle(Theme.text)
+                    Picker("渲染", selection: $mpvRenderer) {
+                        Text("Metal（GPU）").tag("auto")
+                        Text("软件").tag("sw")
+                    }
+                    .pickerStyle(.segmented)
+                    Text("Metal：画面由 GPU 直出，省电不发热，4K 和 HDR 更好；个别片源画面异常时切回「软件」。下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }

@@ -37,6 +37,7 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.22), value: tab)
 
             floatingBar
                 .padding(.horizontal, 18)
@@ -87,7 +88,7 @@ struct ContentView: View {
     }
 
     private func tabButton(index: Int, icon: String, label: String) -> some View {
-        Button { tab = index } label: {
+        Button { withAnimation(.easeInOut(duration: 0.2)) { tab = index } } label: {
             VStack(spacing: 3) {
                 Image(systemName: icon).font(.system(size: 19))
                 Text(label).font(.system(size: 10))
