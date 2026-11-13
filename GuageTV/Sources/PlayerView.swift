@@ -43,6 +43,10 @@ struct PlayerView: View {
     /// over, restored verbatim when the player closes.
     @State private var brightnessBeforePlay: CGFloat?
     @State private var rotationLocked = false
+    /// Device battery for the status strip (Rex shows it next to
+    /// the net speed). -1 = unknown. Refreshed on appear and by
+    /// the 5-second progress loop.
+    @State private var batteryLevel: Float = -1
     @State private var toast: String?
     @State private var dragMode: DragMode?
     @State private var dragStartTime: Double = 0
@@ -166,20 +170,19 @@ struct PlayerView: View {
                     hud
                 }
                 if isBuffering {
-                    VStack(spacing: 10) {
-                        ProgressView().tint(Theme.text).scaleEffect(1.5)
-                        Text("加载中").font(.caption).foregroundStyle(Theme.text.opacity(0.85))
+                    bufferingDots
+                } else if !isPlaying && duration > 0 {
+                    // Paused: one big plain play glyph in the centre
+                    // (reference-player style — no glass, no card).
+                    Button { togglePlay() } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 54, weight: .medium))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.45), radius: 10)
+                            .frame(width: 96, height: 96)
+                            .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 22).padding(.vertical, 18)
-                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
-                }
-                if !showChrome {
-                    VStack {
-                        HStack(spacing: 8) { speedPill; specPill; if showClock { clockPill }; Spacer() }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 10)
+                    .buttonStyle(.plain)
                 }
                 if showChrome {
                     chrome(isLandscape: geo.size.width > geo.size.height)
@@ -201,6 +204,8 @@ struct PlayerView: View {
                 let saved = UserDefaults.standard.object(forKey: "player.brightness") as? Double
                 UIScreen.main.brightness = CGFloat(saved ?? Double(UIScreen.main.brightness))
             }
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            batteryLevel = UIDevice.current.batteryLevel
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
             mpv.onFailure = { handlePlaybackFailure($0) }
@@ -420,176 +425,208 @@ struct PlayerView: View {
     // MARK: chrome
 
     private func chrome(isLandscape: Bool) -> some View {
-        VStack {
+        VStack(spacing: 2) {
+            statusStrip
             topBar(isLandscape: isLandscape)
-            HStack(spacing: 8) { speedPill; specPill; if showClock { clockPill }; Spacer() }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
             Spacer()
             bottomBar
         }
         .transition(.opacity)
     }
 
-    private func topBar(isLandscape: Bool) -> some View {
+    /// Reference-player (Rex) status strip: plain white text and
+    /// glyphs straight on the picture — clock at the far left,
+    /// resolution / net speed / battery at the far right. No glass.
+    private var statusStrip: some View {
         HStack(spacing: 10) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.body.weight(.bold))
-                    .foregroundStyle(Theme.text)
-                    .frame(width: 44, height: 44)
-                    .playerGlassCircle()
-            }
-            HStack(spacing: 2) {
-                Button { if !rotationLocked { rotate(toLandscape: !isLandscape) } } label: {
-                    Image(systemName: "rotate.right")
-                        .foregroundStyle(rotationLocked ? .white.opacity(0.35) : .white)
-                        .frame(width: 44, height: 44)
-                }
-                Button { rotationLocked.toggle(); pokeChrome() } label: {
-                    Image(systemName: rotationLocked ? "lock.fill" : "lock.open.fill")
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 44, height: 44)
-                }
-            }
-            .playerGlassCapsule()
+            if showClock { clockText }
             Spacer()
-            if showGravityButton || showScreenshotButton || !isMPV {
-                HStack(spacing: 2) {
-                    if showGravityButton {
-                        Button { toggleGravity(); pokeChrome() } label: {
-                            Image(systemName: "aspectratio")
-                                .foregroundStyle(Theme.text)
-                                .frame(width: 44, height: 44)
-                        }
-                    }
-                    if showScreenshotButton {
-                        Button { saveSnapshot() } label: {
-                            Image(systemName: "camera")
-                                .foregroundStyle(Theme.text)
-                                .frame(width: 44, height: 44)
-                        }
-                    }
-                    if !isMPV {
-                        if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
-                            Button { native.togglePiP() } label: {
-                                Image(systemName: native.isPiPActive ? "pip.exit" : "pip.enter")
-                                    .font(.body.weight(.semibold)).foregroundStyle(.white)
-                                    .frame(width: 44, height: 44)
-                            }
-                        }
-                        if showAirPlayButton {
-                            RoutePickerView()
-                                .frame(width: 44, height: 44)
-                        }
-                    }
-                }
-                .playerGlassCapsule()
+            if showResolutionPill, !specText.isEmpty {
+                Text(specText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.75))
             }
+            if showSpeedPill {
+                Text(Self.formatSpeed(netSpeedBytes))
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            Image(systemName: batterySymbol)
+                .font(.system(size: 16))
+                .foregroundStyle(.white.opacity(0.9))
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
+        .padding(.horizontal, 22)
+        .padding(.top, 8)
     }
 
-    private var bottomBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !title.isEmpty || !current.name.isEmpty || (showResolutionPill && !specText.isEmpty) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if !title.isEmpty {
-                        Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                    }
-                    if !current.name.isEmpty {
-                        Text(current.name).font(.system(size: 12)).foregroundStyle(Theme.text.opacity(0.7)).lineLimit(1)
-                    }
-                    if showResolutionPill, !specText.isEmpty {
-                        Text(specText).font(.system(size: 12)).foregroundStyle(Theme.text.opacity(0.7)).lineLimit(1)
-                    }
-                }
+    private var batterySymbol: String {
+        guard batteryLevel >= 0 else { return "battery.100" }
+        switch batteryLevel {
+        case 0.875...: return "battery.100"
+        case 0.625...: return "battery.75"
+        case 0.375...: return "battery.50"
+        case 0.125...: return "battery.25"
+        default: return "battery.0"
+        }
+    }
+
+    /// Title row in the reference layout: plain ✕ + "剧名 第N集" on
+    /// the left, a row of plain white function icons on the right
+    /// （画面适配 / 截图 / 选集 / 画中画 / 投屏 / 播放设置）. Rotation
+    /// and its lock moved into the settings sheet — the reference
+    /// chrome carries neither.
+    private func topBar(isLandscape: Bool) -> some View {
+        HStack(spacing: 12) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
             }
-            SeekBar(value: currentTime, duration: duration,
-                    preview: previewImage,
-                    onDrag: { requestPreview(at: $0) }) { seconds in
-                seek(to: seconds)
-                clearPreview()
-            }
-            HStack(spacing: 12) {
-                Button { togglePlay(); pokeChrome() } label: {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.body.weight(.bold))
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 44, height: 44)
-                        .playerGlassCircle()
-                }
-                Text(showRemaining
-                     ? "\(timeLabel(currentTime)) / -\(timeLabel(max(duration - currentTime, 0)))"
-                     : "\(timeLabel(currentTime)) / \(timeLabel(duration))")
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Theme.text)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .playerGlassCapsule()
-                    .onTapGesture { showRemaining.toggle(); pokeChrome() }
-                Spacer()
-                // Quick episode switch （上一集 / 下一集）: its own
-                // capsule in the spot the user circled on the
-                // reference shot, just left of the rate capsule.
-                // Shown whenever the title has episodes at all —
-                // v1.35 gated it on >1 episode, so on a movie it
-                // vanished and the user reported the button
-                // "still not there"; the arrows dim at the bounds
-                // instead (both dim on a single-episode title).
-                if showEpisodeSwitch, !episodes.isEmpty {
-                    HStack(spacing: 2) {
-                        Button { prevEpisode(); pokeChrome() } label: {
-                            Image(systemName: "backward.end.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(index > 0 ? Theme.text : Theme.text.opacity(0.35))
-                                .frame(width: 40, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        Button { nextEpisode(); pokeChrome() } label: {
-                            Image(systemName: "forward.end.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(index < episodes.count - 1 ? Theme.text : Theme.text.opacity(0.35))
-                                .frame(width: 40, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .playerGlassCapsule()
-                }
-                // Bottom-right, reference layout: ONE glass
-                // capsule — 选集 / 倍速 / ••• (the settings sheet).
-                HStack(spacing: 2) {
-                    if showEpisodeButton, episodes.count > 1 {
-                        Button { showEpisodes = true; pokeChrome() } label: {
-                            Image(systemName: "list.bullet")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(Theme.text)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if showRateButton {
-                        Button { cycleRate(); pokeChrome() } label: {
-                            Text("\(currentRate, specifier: "%.2g")x")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(Theme.text)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Button { showPlayerSettings = true; pokeChrome() } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Theme.text)
-                            .frame(width: 44, height: 44)
+            .buttonStyle(.plain)
+            Text(titleLine)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Spacer()
+            HStack(spacing: 20) {
+                if showGravityButton {
+                    Button { toggleGravity(); pokeChrome() } label: {
+                        topIcon("aspectratio")
                     }
                     .buttonStyle(.plain)
                 }
-                .playerGlassCapsule()
+                if showScreenshotButton {
+                    Button { saveSnapshot() } label: {
+                        topIcon("camera")
+                    }
+                    .buttonStyle(.plain)
+                }
+                if showEpisodeButton, episodes.count > 1 {
+                    Button { showEpisodes = true; pokeChrome() } label: {
+                        topIcon("clapperboard")
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !isMPV {
+                    if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
+                        Button { native.togglePiP() } label: {
+                            topIcon(native.isPiPActive ? "pip.exit" : "pip.enter")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if showAirPlayButton {
+                        RoutePickerView()
+                            .frame(width: 30, height: 30)
+                    }
+                }
+                Button { showPlayerSettings = true; pokeChrome() } label: {
+                    topIcon("ellipsis")
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 18)
+        .padding(.top, 2)
+    }
+
+    private func topIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 19, weight: .regular))
+            .foregroundStyle(.white)
+            .frame(width: 30, height: 30)
+    }
+
+    private var titleLine: String {
+        if title.isEmpty { return current.name }
+        if current.name.isEmpty || current.name == title { return title }
+        return "\(title) \(current.name)"
+    }
+
+    /// Bottom chrome in the reference layout: elapsed time at the
+    /// far left of the seek row, total at the far right (tap it to
+    /// flip to remaining), then a control row — transport icons
+    /// bottom-left, plain-text buttons bottom-right （引擎 / 选集 /
+    /// 倍速， where the reference shows 原画 / 选集 / 倍速）.
+    private var bottomBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Text(timeLabel(currentTime))
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white)
+                SeekBar(value: currentTime, duration: duration,
+                        preview: previewImage,
+                        onDrag: { requestPreview(at: $0) }) { seconds in
+                    seek(to: seconds)
+                    clearPreview()
+                }
+                Text(showRemaining
+                     ? "-\(timeLabel(max(duration - currentTime, 0)))"
+                     : timeLabel(duration))
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .onTapGesture { showRemaining.toggle(); pokeChrome() }
+            }
+            HStack(spacing: 24) {
+                Button { togglePlay(); pokeChrome() } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                // Episode stepping sits bottom-left in the
+                // reference layout. Shown whenever the title has
+                // episodes at all (v1.36 behaviour kept); the
+                // arrows dim at the bounds.
+                if showEpisodeSwitch, !episodes.isEmpty {
+                    Button { prevEpisode(); pokeChrome() } label: {
+                        Image(systemName: "backward.end.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(index > 0 ? .white : .white.opacity(0.35))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    Button { nextEpisode(); pokeChrome() } label: {
+                        Image(systemName: "forward.end.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(index < episodes.count - 1 ? .white : .white.opacity(0.35))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                Button { switchEngine(manual: true); pokeChrome() } label: {
+                    Text(isMPV ? "MPV" : "原生")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+                if showEpisodeButton, episodes.count > 1 {
+                    Button { showEpisodes = true; pokeChrome() } label: {
+                        Text("选集")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if showRateButton {
+                    Button { cycleRate(); pokeChrome() } label: {
+                        Text(currentRate == 1 ? "倍速" : "倍速 \(String(format: "%.2g", currentRate))")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 16)
     }
 
     private static let clockFormatter: DateFormatter = {
@@ -598,50 +635,32 @@ struct PlayerView: View {
         return f
     }()
 
-    /// Current wall-clock time, sitting in the top-left pill row
-    /// next to 网速 / 分辨率 (moved there at the user's request —
-    /// it stays visible with the standalone pills even when the
-    /// chrome hides). 设置 → 播放 can hide it. TimelineView
+    /// Current wall-clock time — far left of the status strip in
+    /// the reference layout, plain text, no capsule. TimelineView
     /// re-renders it on a slow tick.
-    private var clockPill: some View {
+    private var clockText: some View {
         TimelineView(.periodic(from: .now, by: 20)) { context in
             Text(Self.clockFormatter.string(from: context.date))
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundStyle(Theme.text)
-                .padding(.horizontal, 11).padding(.vertical, 8)
-                .playerGlassCapsule()
+                .font(.system(size: 14, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white)
         }
     }
 
-    /// Network rate readout — top-left, next to the close controls
-    /// while the chrome is up, standalone in the corner when it hides.
-    @ViewBuilder
-    private var specPill: some View {
-        if showResolutionPill, !specText.isEmpty {
-            HStack(spacing: 5) {
-                Image(systemName: "rectangle.on.rectangle").font(.system(size: 10))
-                Text(specText).font(.caption2.weight(.medium)).monospacedDigit()
+    /// Buffering indicator in the reference style: three white
+    /// dots cycling in the centre of the picture — no card, no
+    /// caption. The phase derives from the timeline clock so it
+    /// animates without any state of its own.
+    private var bufferingDots: some View {
+        TimelineView(.periodic(from: .now, by: 0.35)) { context in
+            let phase = Int(context.date.timeIntervalSinceReferenceDate / 0.35) % 3
+            HStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 10, height: 10)
+                        .opacity(i == phase ? 1 : 0.25)
+                }
             }
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .playerGlassCapsule()
-        }
-    }
-
-    @ViewBuilder
-    private var speedPill: some View {
-        if showSpeedPill {
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 10, weight: .bold))
-                Text(Self.formatSpeed(netSpeedBytes))
-                    .font(.system(size: 12, weight: .medium).monospacedDigit())
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .foregroundStyle(Theme.text)
-            .padding(.horizontal, 11).padding(.vertical, 8)
-            .playerGlassCapsule()
         }
     }
 
@@ -712,6 +731,27 @@ struct PlayerView: View {
                                 if rate == currentRate {
                                     Image(systemName: "checkmark").foregroundStyle(Theme.accent)
                                 }
+                            }
+                        }
+                    }
+                }
+                Section("画面方向") {
+                    Button {
+                        if !rotationLocked {
+                            rotate(toLandscape: !UIDevice.current.orientation.isLandscape)
+                        }
+                        showPlayerSettings = false
+                    } label: {
+                        Label("切换横竖屏", systemImage: "rotate.right")
+                            .foregroundStyle(Theme.text)
+                    }
+                    Button { rotationLocked.toggle() } label: {
+                        HStack {
+                            Label("旋转锁定", systemImage: rotationLocked ? "lock.fill" : "lock.open.fill")
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            if rotationLocked {
+                                Image(systemName: "checkmark").foregroundStyle(Theme.accent)
                             }
                         }
                     }
@@ -989,6 +1029,7 @@ struct PlayerView: View {
             if Task.isCancelled { break }
             saveProgress()
             watchdogTick()
+            batteryLevel = UIDevice.current.batteryLevel
         }
     }
 

@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.36 · 渐隐封面与切集常显"
+    static let buildLabel = "v1.37 · Rex 播放器与 py 加强"
 
     var body: some View {
         NavigationStack {

@@ -9,9 +9,14 @@ import Foundation
 final class SpiderBridge {
     static let shared = SpiderBridge()
 
-    struct BridgeFailure: Error, CustomStringConvertible {
+    struct BridgeFailure: Error, CustomStringConvertible, LocalizedError {
         let message: String
         var description: String { message }
+        // Without LocalizedError, surfaces that print
+        // `error.localizedDescription` show the opaque
+        // "The operation couldn't be completed. (…BridgeFailure error 1.)"
+        // instead of the Python traceback this type exists to carry.
+        var errorDescription: String? { message }
     }
 
     /// Memo of the last successful load. The runner holds exactly one
