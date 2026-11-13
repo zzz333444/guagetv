@@ -23,6 +23,16 @@ struct SearchView: View {
     /// Parse interfaces per site key, filled at search start: results
     /// from imported single-file lines need their own line's parses.
     @State private var parsesByKey: [String: [TVBoxConfig.Parse]] = [:]
+    /// Site filter for the results browser (nil = 全部）: the left
+    /// rail lists every site that produced results, tapping one
+    /// narrows the poster grid to just that site.
+    @State private var selectedSiteKey: String?
+    /// The left rail can be hidden from the header's filter button.
+    @State private var showSiteFilter = true
+    /// Progress counters for the rail's 全部 (done/total) label,
+    /// mirrored out of run()'s local tallies as sites answer.
+    @State private var searchDoneCount = 0
+    @State private var searchTotalCount = 0
     /// The active line's jar URL when the Jar proxy is configured;
     /// jar sites join the search only then.
     @State private var searchJarURL = ""
@@ -49,24 +59,66 @@ struct SearchView: View {
     private var hasSites: Bool {
         !cmsSites.isEmpty || !pySites.isEmpty || !jsSites.isEmpty || !probeableSites.isEmpty
     }
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    /// Two poster columns beside the site rail (the rail takes the
+    /// rest of the width budget, like the reference layout).
+    private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                searchBar
+                headerBar
                 statusRow
                 content
             }
             .background(AmbientBackground(imageURL: nil))
-            .navigationTitle("搜索")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }.foregroundStyle(Theme.text)
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    /// Reference-layout header: round back button, the search
+    /// field as a full-width pill, and a round filter button that
+    /// shows/hides the site rail.
+    private var headerBar: some View {
+        HStack(spacing: 10) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .frame(width: 42, height: 42)
+                    .glassCircle()
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.textDim)
+                TextField("搜片名", text: $keyword)
+                    .foregroundStyle(Theme.text)
+                    .submitLabel(.search)
+                    .onSubmit { beginSearch() }
+                if !keyword.isEmpty {
+                    Button { keyword = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textDim)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .glassCapsule()
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { showSiteFilter.toggle() }
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(showSiteFilter ? Theme.accent : Theme.text)
+                    .frame(width: 42, height: 42)
+                    .glassCircle()
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     /// 最近搜索 — stored locally, newest first, capped at 10.
@@ -109,27 +161,6 @@ struct SearchView: View {
         }
     }
 
-    private var searchBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.textDim)
-                TextField("搜片名", text: $keyword)
-                    .foregroundStyle(Theme.text)
-                    .submitLabel(.search)
-                    .onSubmit { beginSearch() }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 11)
-            .background(Theme.glass, in: Capsule())
-            Button("搜索") { beginSearch() }
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 18).padding(.vertical, 10)
-                .background(.white, in: Capsule())
-                .foregroundStyle(.black)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-    }
-
     @ViewBuilder
     private var statusRow: some View {
         if searching {
@@ -165,30 +196,7 @@ struct SearchView: View {
             // the recents branch first hid every in-flight result
             // behind the recents list until the run ended — the
             // "results only appear when the search finishes" bug.
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
-                    ForEach(results, id: \.site.id) { group in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(group.site.name)
-                                .font(.headline).foregroundStyle(Theme.text)
-                                .padding(.horizontal, 18)
-                            LazyVGrid(columns: columns, spacing: 14) {
-                                ForEach(group.items) { item in
-                                    NavigationLink {
-                                        destination(for: group.site, item: item)
-                                    } label: {
-                                        PosterCell(item: item)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 18)
-                        }
-                    }
-                }
-                .padding(.top, 8)
-                .padding(.bottom, 40)
-            }
+            resultsBrowser
             if searching {
                 HStack(spacing: 8) {
                     ProgressView().tint(Theme.text)
@@ -203,6 +211,96 @@ struct SearchView: View {
         } else {
             recentsView
         }
+    }
+
+    /// The groups the poster grid shows: everything, or just the
+    /// site picked on the rail.
+    private var visibleGroups: [(site: TVBoxConfig.Site, items: [VodItem])] {
+        guard let key = selectedSiteKey else { return results }
+        return results.filter { $0.site.key == key }
+    }
+
+    /// Results browser (reference layout): a site rail on the
+    /// left — 全部 with the (done/total) progress, then one row
+    /// per site that found something, with an orange count badge —
+    /// and a two-column poster grid on the right. In 全部 mode
+    /// each poster carries its site name as an orange badge; in
+    /// single-site mode the badge falls back to the item's remarks.
+    private var resultsBrowser: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if showSiteFilter { siteRail }
+            ScrollView(showsIndicators: false) {
+                LazyVGrid(columns: gridColumns, spacing: 14) {
+                    ForEach(visibleGroups, id: \.site.id) { group in
+                        ForEach(group.items) { item in
+                            NavigationLink {
+                                destination(for: group.site, item: item)
+                            } label: {
+                                SearchPosterCell(
+                                    item: item,
+                                    badge: selectedSiteKey == nil ? group.site.name : item.remarks)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 40)
+            }
+        }
+    }
+
+    private var siteRail: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 2) {
+                railRow(title: "全部",
+                        badge: nil,
+                        countText: "(\(searchDoneCount)/\(searchTotalCount))",
+                        selected: selectedSiteKey == nil) {
+                    selectedSiteKey = nil
+                }
+                ForEach(results, id: \.site.id) { group in
+                    railRow(title: group.site.name,
+                            badge: "\(group.items.count)",
+                            countText: nil,
+                            selected: selectedSiteKey == group.site.key) {
+                        selectedSiteKey = group.site.key
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+        }
+        .frame(width: 118)
+    }
+
+    private func railRow(title: String, badge: String?, countText: String?,
+                         selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(title)
+                    .font(.caption.weight(selected ? .semibold : .regular))
+                    .lineLimit(1)
+                if let countText {
+                    Text(countText).font(.caption2).monospacedDigit()
+                }
+                Spacer(minLength: 0)
+                if let badge {
+                    Text(badge)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.orange, in: Capsule())
+                }
+            }
+            .foregroundStyle(selected ? .white : Theme.text.opacity(0.85))
+            .padding(.horizontal, 8).padding(.vertical, 9)
+            .background(selected ? Color.blue : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func hint(_ text: String) -> some View {
@@ -330,6 +428,9 @@ struct SearchView: View {
         failureNote = ""
         finalNote = ""
         probedKinds = [:]
+        selectedSiteKey = nil
+        searchDoneCount = 0
+        searchTotalCount = 0
         // Searchable py/JS pools: the active line's spider sites PLUS
         // every imported single-file py/JS line in the library —
         // those live as their own lines, and the user expects the
@@ -392,6 +493,7 @@ struct SearchView: View {
             !pyPool.contains { $0.key == site.key } && !jsPool.contains { $0.key == site.key }
         }
         let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count + unknownPool.count
+        searchTotalCount = total
         var done = 0
         var responded = 0
         var out: [(site: TVBoxConfig.Site, items: [VodItem])] = []
@@ -407,6 +509,7 @@ struct SearchView: View {
         }
         func tick() {
             done += 1
+            searchDoneCount = done
             progressText = "已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
         }
 
@@ -542,6 +645,7 @@ struct SearchView: View {
         if !catNotes.isEmpty {
             finalNote += "（" + catNotes.joined(separator: "；") + "）"
         }
+        searchDoneCount = done
         searched = true
         searching = false
     }
@@ -575,6 +679,47 @@ struct SearchView: View {
             return PySiteBrowseView.mapItems(result["list"])
         } catch {
             return nil
+        }
+    }
+}
+
+
+/// Poster cell for the search grid: PosterCell's layout, but the
+/// corner badge is an orange capsule (site name in 全部 mode, the
+/// item's remarks in single-site mode), matching the reference
+/// search page.
+private struct SearchPosterCell: View {
+    let item: VodItem
+    let badge: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .overlay {
+                        if !item.pic.isEmpty {
+                            PosterImage(urlString: item.pic)
+                        }
+                    }
+                    .posterFrame()
+                if !badge.isEmpty {
+                    Text(badge)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(Color.orange, in: Capsule())
+                        .padding(6)
+                }
+            }
+            Text(item.name)
+                .font(.footnote).foregroundStyle(Theme.text.opacity(0.92))
+                .lineLimit(1)
+            if !item.year.isEmpty {
+                Text(item.year).font(.caption).foregroundStyle(Theme.textDim)
+            }
         }
     }
 }

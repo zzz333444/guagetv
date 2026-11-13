@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.32 · 分类直达与详情 TMDB"
+    static let buildLabel = "v1.33 · 搜索改版与音画增强"
 
     var body: some View {
         NavigationStack {
@@ -1022,24 +1022,126 @@ struct PlaySettingsView: View {
 
 }
 
-/// 音画： video fill mode for the mpv surface.
+/// 音画： kernel choice cards on top (the same enginePreference
+/// key the 播放 page writes), then the 画面 rows — fit mode, the
+/// player's own brightness, and the two HDR behaviours the mpv
+/// GPU path honours. Layout follows the reference settings page:
+/// one card of selectable kernel rows with descriptions and a
+/// checkmark, quiet footnote explanations under each card.
 struct AVSettingsView: View {
+    @AppStorage("enginePreference") private var engine = "auto"
     @AppStorage("videoGravity") private var gravity = "aspect"
+    @AppStorage("player.keepBrightness") private var keepBrightness = false
+    @AppStorage("player.brightness") private var playerBrightness = 0.7
+    @AppStorage("player.hdrMapping") private var hdrMapping = "auto"
+    @AppStorage("player.hdrLayer") private var hdrLayer = "auto"
 
     var body: some View {
         SettingsPage(title: "音画") {
             GlassCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("画面填充（mpv 引擎）").font(.headline).foregroundStyle(Theme.text)
-                    Picker("填充", selection: $gravity) {
-                        Text("适应（留黑边）").tag("aspect")
-                        Text("填充（裁剪）").tag("fill")
-                    }
-                    .pickerStyle(.segmented)
-                    Text("原生引擎使用系统播放界面，填充模式由系统决定。")
-                        .font(.footnote).foregroundStyle(Theme.textDim)
+                VStack(spacing: 0) {
+                    kernelRow(tag: "auto", title: "自动选择",
+                              desc: "按片源格式自动选引擎：m3u8/mp4 走直通引擎，其余走 App 内核；某个引擎播不了时会自动回退另一个。")
+                    Divider().overlay(Theme.glassStroke)
+                    kernelRow(tag: "mpv", title: "内核 1.0",
+                              desc: "使用 App 自带播放内核（mpv），支持音轨、字幕和更完整的播放控制，格式兼容最全，推荐默认使用。")
+                    Divider().overlay(Theme.glassStroke)
+                    kernelRow(tag: "native", title: "内核 2.0",
+                              desc: "新一代直通引擎：原生杜比视界与杜比全景声、更快的拖动响应；异常时自动回退 App 内核。")
                 }
             }
+            Text("不同播放内核对起播速度、格式兼容性和字幕能力的表现不同，切换后重新进入播放器生效。")
+                .font(.footnote).foregroundStyle(Theme.textDim)
+
+            Text("画面").font(.headline).foregroundStyle(Theme.text)
+                .padding(.top, 4)
+            GlassCard {
+                VStack(spacing: 0) {
+                    menuRow(title: "画面适配方式",
+                            value: gravity == "fill" ? "填充屏幕" : "适应屏幕") {
+                        Button("适应屏幕") { gravity = "aspect" }
+                        Button("填充屏幕") { gravity = "fill" }
+                    }
+                    Divider().overlay(Theme.glassStroke)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("单独调整播放亮度", isOn: $keepBrightness)
+                            .font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
+                        Text("播放时使用独立亮度；结束播放后，恢复原来的屏幕亮度。")
+                            .font(.footnote).foregroundStyle(Theme.textDim)
+                        if keepBrightness {
+                            HStack(spacing: 10) {
+                                Image(systemName: "sun.min").foregroundStyle(Theme.textDim)
+                                Slider(value: $playerBrightness, in: 0.1...1.0, step: 0.05)
+                                    .tint(Theme.accent)
+                                Image(systemName: "sun.max.fill").foregroundStyle(Theme.textDim)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 12)
+                    Divider().overlay(Theme.glassStroke)
+                    menuRow(title: "HDR 动态映射",
+                            value: hdrModeLabel(hdrMapping)) {
+                        Button("自动") { hdrMapping = "auto" }
+                        Button("开") { hdrMapping = "on" }
+                        Button("关") { hdrMapping = "off" }
+                    }
+                    Divider().overlay(Theme.glassStroke)
+                    menuRow(title: "HDR 增强层",
+                            value: hdrModeLabel(hdrLayer)) {
+                        Button("自动") { hdrLayer = "auto" }
+                        Button("开") { hdrLayer = "on" }
+                        Button("关") { hdrLayer = "off" }
+                    }
+                }
+            }
+            Text("HDR 动态映射与增强层需要逐帧处理，仅对 App 内核（mpv · GPU 渲染）生效，播放时更耗电、更易发热；选「自动」时按片源决定。")
+                .font(.footnote).foregroundStyle(Theme.textDim)
+        }
+    }
+
+    private func hdrModeLabel(_ value: String) -> String {
+        switch value { case "on": return "开"; case "off": return "关"; default: return "自动" }
+    }
+
+    /// One selectable kernel row: title, honest description, and
+    /// a blue checkmark on the current choice.
+    private func kernelRow(tag: String, title: String, desc: String) -> some View {
+        Button { engine = tag } label: {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.title3.weight(.medium)).foregroundStyle(Theme.text)
+                    Text(desc).font(.subheadline).foregroundStyle(Theme.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if engine == tag {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.bold)).foregroundStyle(.blue)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A settings row whose value is picked from a menu, value
+    /// and up/down chevron on the right (reference-page style).
+    private func menuRow<Content: View>(title: String, value: String,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        Menu {
+            content()
+        } label: {
+            HStack(spacing: 10) {
+                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
+                Spacer()
+                Text(value).font(.subheadline).foregroundStyle(Theme.textDim)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
         }
     }
 }

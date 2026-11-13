@@ -135,6 +135,27 @@ final class MPVController: ObservableObject {
             // VO drops late frames rather than letting A/V drift.
             setOptionOn(h, "video-sync", "audio")
             setOptionOn(h, "framedrop", "vo")
+            // HDR handling from 设置 → 音画 (auto = leave mpv's
+            // defaults untouched): 动态映射 drives peak detection
+            // + the tone-mapping curve; 增强层 sets libplacebo's
+            // contrast recovery. Both only bite on the GPU path.
+            switch UserDefaults.standard.string(forKey: "player.hdrMapping") ?? "auto" {
+            case "on":
+                setOptionOn(h, "hdr-compute-peak", "yes")
+                setOptionOn(h, "tone-mapping", "mobius")
+            case "off":
+                setOptionOn(h, "hdr-compute-peak", "no")
+            default:
+                break
+            }
+            switch UserDefaults.standard.string(forKey: "player.hdrLayer") ?? "auto" {
+            case "on":
+                setOptionOn(h, "hdr-contrast-recovery", "0.6")
+            case "off":
+                setOptionOn(h, "hdr-contrast-recovery", "0")
+            default:
+                break
+            }
             if startAt > 1 { setOptionOn(h, "start", String(startAt)) }
             if !header.isEmpty {
                 let fields = header.map { "\($0.key): \($0.value)" }.joined(separator: ",")

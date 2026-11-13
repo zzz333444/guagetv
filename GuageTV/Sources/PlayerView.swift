@@ -37,6 +37,11 @@ struct PlayerView: View {
     @State private var showChrome = true
     @State private var chromeGeneration = 0
     @State private var showEpisodes = false
+    @State private var showPlayerSettings = false
+    /// Screen brightness captured when the player's own
+    /// brightness setting （设置 → 音画 → 单独调整播放亮度） takes
+    /// over, restored verbatim when the player closes.
+    @State private var brightnessBeforePlay: CGFloat?
     @State private var showSkipSheet = false
     @State private var rotationLocked = false
     @State private var toast: String?
@@ -130,6 +135,9 @@ struct PlayerView: View {
     @AppStorage("player.showEpisodeButton") private var showEpisodeButton = true
     @AppStorage("player.longPressBoost") private var longPressBoostEnabled = true
     @AppStorage("player.autoNext") private var autoNextEnabled = true
+    /// Same key 设置 → 音画 writes; the in-player settings sheet
+    /// offers it too (mpv applies it on the next load).
+    @AppStorage("videoGravity") private var videoGravity = "aspect"
     @State private var didSkipIntro = false
     private var currentTime: Double { isMPV ? mpv.currentTime : native.currentTime }
     private var duration: Double { isMPV ? mpv.duration : native.duration }
@@ -182,6 +190,11 @@ struct PlayerView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            if UserDefaults.standard.bool(forKey: "player.keepBrightness") {
+                brightnessBeforePlay = UIScreen.main.brightness
+                let saved = UserDefaults.standard.object(forKey: "player.brightness") as? Double
+                UIScreen.main.brightness = CGFloat(saved ?? Double(UIScreen.main.brightness))
+            }
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
             mpv.onFailure = { handlePlaybackFailure($0) }
@@ -200,7 +213,13 @@ struct PlayerView: View {
             checkOutroSkip()
         }
         .task { await saveProgressLoop() }
-        .onDisappear { saveProgress(accumulate: false) }
+        .onDisappear {
+            saveProgress(accumulate: false)
+            if let brightnessBeforePlay {
+                UIScreen.main.brightness = brightnessBeforePlay
+            }
+            brightnessBeforePlay = nil
+        }
         .onChange(of: index) { _ in
             didSkipIntro = false
             pendingStart = nil
@@ -209,6 +228,7 @@ struct PlayerView: View {
             pokeChrome()
         }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
+        .sheet(isPresented: $showPlayerSettings) { playerSettingsSheet }
     }
 
     // MARK: engine layers
@@ -500,39 +520,29 @@ struct PlayerView: View {
                     .playerGlassCapsule()
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
                 Spacer()
-                HStack(spacing: 2) {
+                // Bottom-right pair: 选集 and 设置 as their own
+                // glass circles (the old shared capsule with its
+                // ellipsis menu folded into the settings sheet).
+                HStack(spacing: 10) {
                     if showEpisodeButton, episodes.count > 1 {
-                        Button { showEpisodes = true } label: {
+                        Button { showEpisodes = true; pokeChrome() } label: {
                             Image(systemName: "list.bullet")
+                                .font(.body.weight(.semibold))
                                 .foregroundStyle(Theme.text)
                                 .frame(width: 44, height: 44)
+                                .playerGlassCircle()
                         }
+                        .buttonStyle(.plain)
                     }
-                    Menu {
-                        Section("倍速") {
-                            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                                Button {
-                                    setRate(rate); pokeChrome()
-                                } label: {
-                                    if rate == currentRate { Label("\(rate, specifier: "%.2g")x", systemImage: "checkmark") }
-                                    else { Text("\(rate, specifier: "%.2g")x") }
-                                }
-                            }
-                        }
-                        Section {
-                            Button { seekBy(-seekStep) } label: { Label("快退 \(Int(seekStep)) 秒", systemImage: "gobackward") }
-                            Button { seekBy(seekStep) } label: { Label("快进 \(Int(seekStep)) 秒", systemImage: "goforward") }
-                            Button { switchEngine(manual: true) } label: {
-                                Label(isMPV ? "切换到原生引擎" : "切换到 FFmpeg 引擎", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
+                    Button { showPlayerSettings = true; pokeChrome() } label: {
+                        Image(systemName: "gearshape")
+                            .font(.body.weight(.semibold))
                             .foregroundStyle(Theme.text)
                             .frame(width: 44, height: 44)
+                            .playerGlassCircle()
                     }
+                    .buttonStyle(.plain)
                 }
-                .playerGlassCapsule()
             }
         }
         .padding(.horizontal, 16)
@@ -613,6 +623,76 @@ struct PlayerView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("关闭") { showEpisodes = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .preferredColorScheme(.dark)
+    }
+
+    /// In-player settings (the bottom-right gear): everything the
+    /// old ellipsis menu held — rate, seek steps, engine switch —
+    /// plus the live feature toggles and the fill mode, bound to
+    /// the same AppStorage keys 设置 → 播放 / 音画 write.
+    private var playerSettingsSheet: some View {
+        NavigationStack {
+            List {
+                Section("倍速") {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button {
+                            setRate(rate); pokeChrome()
+                        } label: {
+                            HStack {
+                                Text("\(rate, specifier: "%.2g")x").foregroundStyle(Theme.text)
+                                Spacer()
+                                if rate == currentRate {
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                }
+                            }
+                        }
+                    }
+                }
+                Section("快进快退") {
+                    Button { seekBy(-seekStep); pokeChrome() } label: {
+                        Label("快退 \(Int(seekStep)) 秒", systemImage: "gobackward")
+                            .foregroundStyle(Theme.text)
+                    }
+                    Button { seekBy(seekStep); pokeChrome() } label: {
+                        Label("快进 \(Int(seekStep)) 秒", systemImage: "goforward")
+                            .foregroundStyle(Theme.text)
+                    }
+                }
+                Section("引擎") {
+                    Button {
+                        switchEngine(manual: true)
+                        showPlayerSettings = false
+                    } label: {
+                        Label(isMPV ? "当前 FFmpeg 引擎 · 切换到原生引擎"
+                                    : "当前原生引擎 · 切换到 FFmpeg 引擎",
+                              systemImage: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(Theme.text)
+                    }
+                    Picker("画面适配", selection: $videoGravity) {
+                        Text("适应屏幕").tag("aspect")
+                        Text("填充屏幕").tag("fill")
+                    }
+                    .foregroundStyle(Theme.text)
+                }
+                Section("按钮与功能") {
+                    Toggle("网速显示", isOn: $showSpeedPill)
+                    Toggle("分辨率显示", isOn: $showResolutionPill)
+                    Toggle("画中画按钮", isOn: $showPiPButton)
+                    Toggle("投屏按钮", isOn: $showAirPlayButton)
+                    Toggle("选集按钮", isOn: $showEpisodeButton)
+                    Toggle("长按倍速", isOn: $longPressBoostEnabled)
+                    Toggle("自动播放下一集", isOn: $autoNextEnabled)
+                }
+            }
+            .navigationTitle("播放设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { showPlayerSettings = false }
                 }
             }
         }

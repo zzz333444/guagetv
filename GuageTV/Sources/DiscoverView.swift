@@ -52,7 +52,11 @@ struct DiscoverView: View {
                     discoverHeader
                     ForEach(layout.visibleModules) { module in
                         switch module {
-                        case .hero: hero
+                        case .hero:
+                            VStack(alignment: .leading, spacing: 26) {
+                                hero
+                                calendarStrip
+                            }
                         case .continueWatching: continueWatchingRow
                         case .updates: updatesRow
                         case .sections: sectionsGroup
@@ -68,12 +72,9 @@ struct DiscoverView: View {
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
             .background(AmbientBackground(imageURL: displayHero.first?.pic))
             .overlay(alignment: .bottomLeading) {
-                HStack(spacing: 10) {
-                    editButton
-                    sitePickerButton
-                }
-                .padding(.leading, 18)
-                .padding(.bottom, 108)
+                editButton
+                    .padding(.leading, 18)
+                    .padding(.bottom, 108)
             }
             .sheet(isPresented: $showLinePicker) { linePicker }
             .sheet(isPresented: $showSitePicker) { sitePicker }
@@ -226,7 +227,6 @@ struct DiscoverView: View {
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(Theme.text)
                 Spacer()
-                headerCircleButton(icon: "rectangle.stack") { showSitePicker = true }
                 headerCircleButton(icon: "magnifyingglass") { showSearch = true }
             }
             Button { showSearch = true } label: {
@@ -378,19 +378,6 @@ struct DiscoverView: View {
             }
         }
         .presentationDetents([.medium])
-    }
-
-    /// 站点 button beside 编辑： opens the home line's site picker.
-    private var sitePickerButton: some View {
-        Button { showSitePicker = true } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "rectangle.stack").font(.footnote.weight(.semibold))
-                Text("站点").font(.subheadline.weight(.semibold))
-            }
-            .foregroundStyle(Theme.text)
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .glassCapsule()
-        }
     }
 
     /// 选择站点 — every site on the HOME line, searchable; the
@@ -648,6 +635,53 @@ struct DiscoverView: View {
         LinearGradient(colors: [Color(red: 0.20, green: 0.14, blue: 0.34),
                                 Color(red: 0.05, green: 0.05, blue: 0.09)],
                        startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    // MARK: 追剧日历 (week strip under the hero, Rex-style)
+
+    /// This week, Monday first: weekday name, day-of-month, and
+    /// whether the cell is today.
+    private var weekDays: [(weekday: String, day: Int, isToday: Bool)] {
+        let cal = Calendar(identifier: .gregorian)
+        let now = Date()
+        let names = ["一", "二", "三", "四", "五", "六", "日"]
+        // Calendar.weekday runs 1=Sunday…7=Saturday; convert to
+        // days elapsed since Monday.
+        let sinceMonday = (cal.component(.weekday, from: now) + 5) % 7
+        guard let monday = cal.date(byAdding: .day, value: -sinceMonday, to: now) else { return [] }
+        return (0..<7).map { i in
+            let date = cal.date(byAdding: .day, value: i, to: monday) ?? monday
+            return (names[i], cal.component(.day, from: date), cal.isDateInToday(date))
+        }
+    }
+
+    private var calendarStrip: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("追剧日历").font(.headline).foregroundStyle(Theme.text)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
+            }
+            HStack(spacing: 0) {
+                ForEach(Array(weekDays.enumerated()), id: \.offset) { entry in
+                    VStack(spacing: 6) {
+                        Text(entry.element.weekday)
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                        Text("\(entry.element.day)")
+                            .font(.subheadline.weight(entry.element.isToday ? .bold : .medium))
+                            .foregroundStyle(entry.element.isToday ? .white : Theme.text)
+                            .frame(width: 34, height: 34)
+                            .background(entry.element.isToday ? Color.blue.opacity(0.55) : Color.clear,
+                                        in: Circle())
+                        Text(entry.element.isToday ? "今天" : "·")
+                            .font(.caption2).foregroundStyle(Theme.textDim)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
     }
 
     // MARK: Poster rows
