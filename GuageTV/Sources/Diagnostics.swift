@@ -17,7 +17,16 @@ enum Diagnostics {
     }
 
     static func log(_ category: String, _ message: String) {
-        let trimmed = String(message.prefix(600))
+        // Keep the TAIL of long messages: a Python traceback puts
+        // the actual exception (the one line that matters) at the
+        // very end, and the first version of this log cut exactly
+        // that off at 600 chars.
+        let trimmed: String
+        if message.count > 900 {
+            trimmed = String(message.prefix(250)) + "\n…（中略）…\n" + String(message.suffix(650))
+        } else {
+            trimmed = message
+        }
         DispatchQueue.global(qos: .utility).async {
             var list = entries()
             list.append(Entry(t: Date().timeIntervalSince1970, c: category, m: trimmed))

@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.38 · 换线选轨与 py 全能"
+    static let buildLabel = "v1.39 · 按钮修复与 py 补漏"
 
     var body: some View {
         NavigationStack {

@@ -557,7 +557,8 @@ struct PlayerView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 19, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             Text(titleLine)
@@ -565,7 +566,7 @@ struct PlayerView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer()
-            HStack(spacing: 20) {
+            HStack(spacing: 14) {
                 if showGravityButton {
                     Button { toggleGravity(); pokeChrome() } label: {
                         topIcon("aspectratio")
@@ -580,7 +581,7 @@ struct PlayerView: View {
                 }
                 if showEpisodeButton, episodes.count > 1 {
                     Button { showEpisodes = true; pokeChrome() } label: {
-                        topIcon("clapperboard")
+                        topIcon("film")
                     }
                     .buttonStyle(.plain)
                 }
@@ -593,7 +594,8 @@ struct PlayerView: View {
                     }
                     if showAirPlayButton {
                         RoutePickerView()
-                            .frame(width: 30, height: 30)
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
                 }
                 Button { showPlayerSettings = true; pokeChrome() } label: {
@@ -606,11 +608,18 @@ struct PlayerView: View {
         .padding(.top, 2)
     }
 
+    /// Generous hit frame (the v1.36-proven 44pt height — the Rex
+    /// restyle shrank these to 30pt and the end buttons stopped
+    /// feeling taps on device) with an explicit content shape so
+    /// the whole frame is hot, glyph unchanged at 19pt. Width is
+    /// 38 so six icons plus the close button still fit a portrait
+    /// screen without clipping the edges.
     private func topIcon(_ name: String) -> some View {
         Image(systemName: name)
             .font(.system(size: 19, weight: .regular))
             .foregroundStyle(.white)
-            .frame(width: 30, height: 30)
+            .frame(width: 38, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var titleLine: String {
@@ -648,7 +657,8 @@ struct PlayerView: View {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 // Episode stepping sits bottom-left in the
@@ -660,14 +670,16 @@ struct PlayerView: View {
                         Image(systemName: "backward.end.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(index > 0 ? .white : .white.opacity(0.35))
-                            .frame(width: 30, height: 30)
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     Button { nextEpisode(); pokeChrome() } label: {
                         Image(systemName: "forward.end.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(index < episodes.count - 1 ? .white : .white.opacity(0.35))
-                            .frame(width: 30, height: 30)
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
