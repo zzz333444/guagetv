@@ -113,6 +113,14 @@ struct PlayerView: View {
     private var specText: String { isMPV ? mpv.specText : native.specText }
     @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
     @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
+    /// Player feature switches (设置 → 播放 writes these; default on).
+    @AppStorage("player.showSpeed") private var showSpeedPill = true
+    @AppStorage("player.showResolution") private var showResolutionPill = true
+    @AppStorage("player.showPiPButton") private var showPiPButton = true
+    @AppStorage("player.showAirPlayButton") private var showAirPlayButton = true
+    @AppStorage("player.showEpisodeButton") private var showEpisodeButton = true
+    @AppStorage("player.longPressBoost") private var longPressBoostEnabled = true
+    @AppStorage("player.autoNext") private var autoNextEnabled = true
     @State private var didSkipIntro = false
     private var currentTime: Double { isMPV ? mpv.currentTime : native.currentTime }
     private var duration: Double { isMPV ? mpv.duration : native.duration }
@@ -234,20 +242,23 @@ struct PlayerView: View {
                 .onChanged { value in handleDrag(value, size: size) }
                 .onEnded { _ in endDrag() }
         )
-        // Hold to fast-forward (mainstream player behaviour): press
-        // and hold anywhere boosts to 2x until release. The drag
-        // gesture needs real movement, a hold stays put — the two
-        // don't fight; handleDrag also stands down while boosting.
-        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 12, pressing: { isPressing in
-            if isPressing { engageBoost() } else { releaseBoost() }
+        // Hold to fast-forward (mainstream player behaviour): a
+        // deliberate 2-second hold anywhere boosts to 2x until
+        // release. The threshold is long on purpose — the drag
+        // gesture needs real movement, a hold stays put — so a
+        // scrub never trips the boost by accident; handleDrag also
+        // stands down while boosting. Engagement happens in
+        // `perform` (fires only once the full 2 s has elapsed);
+        // `pressing` only watches for the release edge.
+        .onLongPressGesture(minimumDuration: 2.0, maximumDistance: 12, pressing: { isPressing in
+            if !isPressing { releaseBoost() }
         }) {
-            // perform: fires when the long press is recognised; the
-            // pressing callback above already handles both edges.
+            engageBoost()
         }
     }
 
     private func engageBoost() {
-        guard !boostActive, isPlaying else { return }
+        guard longPressBoostEnabled, !boostActive, isPlaying else { return }
         boostActive = true
         rateBeforeBoost = currentRate
         setRate(2.0)
@@ -391,28 +402,28 @@ struct PlayerView: View {
                 Image(systemName: "xmark")
                     .font(.body.weight(.bold))
                     .foregroundStyle(Theme.text)
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .glassCircle()
             }
             HStack(spacing: 2) {
                 Button { if !rotationLocked { rotate(toLandscape: !isLandscape) } } label: {
                     Image(systemName: "rotate.right")
                         .foregroundStyle(rotationLocked ? .white.opacity(0.35) : .white)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                 }
                 Button { rotationLocked.toggle(); pokeChrome() } label: {
                     Image(systemName: rotationLocked ? "lock.fill" : "lock.open.fill")
                         .foregroundStyle(Theme.text)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                 }
             }
-            .background(.ultraThinMaterial, in: Capsule())
+            .glassCapsule()
             Spacer()
             HStack(spacing: 2) {
                 Button { showSkipSheet = true; pokeChrome() } label: {
                     Image(systemName: "goforward.plus")
                         .foregroundStyle(Theme.text)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                 }
                 .sheet(isPresented: $showSkipSheet) {
                     SkipSettingsSheet()
@@ -420,22 +431,23 @@ struct PlayerView: View {
                 Button { saveSnapshot() } label: {
                     Image(systemName: "camera")
                         .foregroundStyle(Theme.text)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                 }
                 if !isMPV {
-                    if !isMPV, AVPictureInPictureController.isPictureInPictureSupported() {
+                    if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
                         Button { native.togglePiP() } label: {
                             Image(systemName: native.isPiPActive ? "pip.exit" : "pip.enter")
                                 .font(.body.weight(.semibold)).foregroundStyle(.white)
-                                .frame(width: 40, height: 40)
-                                .background(.ultraThinMaterial, in: Circle())
+                                .frame(width: 44, height: 44)
                         }
                     }
-                    RoutePickerView()
-                        .frame(width: 40, height: 40)
+                    if showAirPlayButton {
+                        RoutePickerView()
+                            .frame(width: 44, height: 44)
+                    }
                 }
             }
-            .background(.ultraThinMaterial, in: Capsule())
+            .glassCapsule()
         }
         .padding(.horizontal, 14)
         .padding(.top, 10)
@@ -443,13 +455,16 @@ struct PlayerView: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !title.isEmpty || !current.name.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
+            if !title.isEmpty || !current.name.isEmpty || (showResolutionPill && !specText.isEmpty) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     if !title.isEmpty {
                         Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
                     }
                     if !current.name.isEmpty {
-                        Text(current.name).font(.system(size: 13)).foregroundStyle(Theme.text.opacity(0.8)).lineLimit(1)
+                        Text(current.name).font(.system(size: 12)).foregroundStyle(Theme.text.opacity(0.7)).lineLimit(1)
+                    }
+                    if showResolutionPill, !specText.isEmpty {
+                        Text(specText).font(.system(size: 12)).foregroundStyle(Theme.text.opacity(0.7)).lineLimit(1)
                     }
                 }
             }
@@ -464,8 +479,8 @@ struct PlayerView: View {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.body.weight(.bold))
                         .foregroundStyle(Theme.text)
-                        .frame(width: 42, height: 42)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .frame(width: 44, height: 44)
+                        .glassCircle()
                 }
                 Text(showRemaining
                      ? "\(timeLabel(currentTime)) / -\(timeLabel(max(duration - currentTime, 0)))"
@@ -473,15 +488,15 @@ struct PlayerView: View {
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(Theme.text)
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .glassCapsule()
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
                 Spacer()
                 HStack(spacing: 2) {
-                    if episodes.count > 1 {
+                    if showEpisodeButton, episodes.count > 1 {
                         Button { showEpisodes = true } label: {
                             Image(systemName: "list.bullet")
                                 .foregroundStyle(Theme.text)
-                                .frame(width: 40, height: 40)
+                                .frame(width: 44, height: 44)
                         }
                     }
                     Menu {
@@ -505,10 +520,10 @@ struct PlayerView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .foregroundStyle(Theme.text)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 44, height: 44)
                     }
                 }
-                .background(.ultraThinMaterial, in: Capsule())
+                .glassCapsule()
             }
         }
         .padding(.horizontal, 16)
@@ -519,30 +534,32 @@ struct PlayerView: View {
     /// while the chrome is up, standalone in the corner when it hides.
     @ViewBuilder
     private var specPill: some View {
-        if !specText.isEmpty {
+        if showResolutionPill, !specText.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: "rectangle.on.rectangle").font(.system(size: 10))
                 Text(specText).font(.caption2.weight(.medium)).monospacedDigit()
             }
             .foregroundStyle(.white.opacity(0.9))
             .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+            .glassCapsule()
         }
     }
 
+    @ViewBuilder
     private var speedPill: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "arrow.down")
-                .font(.system(size: 10, weight: .bold))
-            Text(Self.formatSpeed(netSpeedBytes))
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+        if showSpeedPill {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 10, weight: .bold))
+                Text(Self.formatSpeed(netSpeedBytes))
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 11).padding(.vertical, 8)
+            .glassCapsule()
         }
-        .foregroundStyle(Theme.text)
-        .padding(.horizontal, 11).padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
     }
 
     static func codecName(_ subType: FourCharCode) -> String {
@@ -622,8 +639,11 @@ struct PlayerView: View {
         pokeChrome()
     }
 
+    /// Single choke point for auto-advance: both engines' onEnded
+    /// callbacks and the outro skip land here, so the 播放设置
+    /// auto-next switch gates all of them. Off = stay at the end.
     private func advanceToNext() {
-        guard index < episodes.count - 1 else { return }
+        guard autoNextEnabled, index < episodes.count - 1 else { return }
         index += 1
     }
 
@@ -826,6 +846,34 @@ struct PlayerView: View {
         showChrome = true
         scheduleChromeHide()
     }
+}
+
+// MARK: - Glass chrome styling
+
+/// One glass language for every player control: thin material, a
+/// hairline white stroke and a soft shadow. Buttons keep 44pt tap
+/// targets; the modifier only dresses the container.
+private struct GlassCapsuleStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+    }
+}
+
+private struct GlassCircleStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+    }
+}
+
+private extension View {
+    func glassCapsule() -> some View { modifier(GlassCapsuleStyle()) }
+    func glassCircle() -> some View { modifier(GlassCircleStyle()) }
 }
 
 // MARK: - Native engine controller

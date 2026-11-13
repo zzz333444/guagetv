@@ -17,6 +17,9 @@ struct LibraryView: View {
     @State private var renameText = ""
     /// Which line card currently has its swipe-delete revealed.
     @State private var swipeOpenID: String?
+    /// Direct-open route for single-file (py / JS) lines: tapping
+    /// the card pushes its one site's browse page immediately.
+    @State private var directRoute: FileSiteRoute?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -123,13 +126,41 @@ struct LibraryView: View {
             }
             Button("取消", role: .cancel) { renamingEntry = nil }
         }
+        .navigationDestination(item: $directRoute) { route in
+            if route.isJS {
+                JSSiteBrowseView(site: route.site, parses: route.parses)
+            } else {
+                PySiteBrowseView(site: route.site, parses: route.parses)
+            }
+        }
         }
     }
+
+    /// Cached per-line kind summaries. Parsing every stored config
+    /// on the main thread made the library scroll stutter, so:
+    /// appear paints the UserDefaults cache instantly, then a
+    /// detached task recomputes off-main and rewrites the cache
+    /// (rebuilt from the live entry list, so imports/deletes
+    /// invalidate stale rows automatically).
+    private static let kindSummaryCacheKey = "libraryKindSummary.v2"
 
     private func refreshLibrary() {
         entries = ConfigLibrary.entries()
         activeID = ConfigLibrary.activeID()
         groups = ConfigLibrary.groups()
+        let liveIDs = Set(entries.map(\.id))
+        if let cached = UserDefaults.standard.dictionary(forKey: Self.kindSummaryCacheKey) as? [String: String] {
+            kindSummary = cached.filter { liveIDs.contains($0.key) }
+        }
+        let snapshot = entries
+        Task.detached(priority: .utility) {
+            let summary = Self.computeKindSummary(for: snapshot)
+            UserDefaults.standard.set(summary, forKey: Self.kindSummaryCacheKey)
+            await MainActor.run { kindSummary = summary }
+        }
+    }
+
+    private static func computeKindSummary(for entries: [ConfigLibrary.Entry]) -> [String: String] {
         var summary: [String: String] = [:]
         for entry in entries {
             guard let cfg = ConfigLibrary.load(id: entry.id) else { continue }
@@ -149,7 +180,18 @@ struct LibraryView: View {
             }
             summary[entry.id] = parts.isEmpty ? "\(entry.siteCount) 个站点" : parts.joined(separator: " · ")
         }
-        kindSummary = summary
+        return summary
+    }
+
+    /// A single-file line's direct-open route, when this entry is a
+    /// py / JS file import whose stored config loads.
+    private func fileRoute(for entry: ConfigLibrary.Entry) -> FileSiteRoute? {
+        let isPy = ConfigLibrary.isPyFileEntry(entry)
+        let isJS = entry.sourceURL.hasPrefix("js-import://")
+        guard isPy || isJS,
+              let cfg = ConfigLibrary.load(id: entry.id),
+              let site = cfg.sites.first else { return nil }
+        return FileSiteRoute(site: site, parses: cfg.parses, isJS: isJS)
     }
 
     /// "今天 / 昨天 / N天前 / N周前 / N月前" for a line's import day.
@@ -192,8 +234,9 @@ struct LibraryView: View {
     private func lineCard(_ entry: ConfigLibrary.Entry) -> some View {
         let isActive = entry.id == activeID
         let isHome = entry.id == ConfigLibrary.homeLineID()
+        let isFile = ConfigLibrary.isPyFileEntry(entry) || entry.sourceURL.hasPrefix("js-import://")
         let shown = ConfigLibrary.shownName(entry)
-        return GlassCard(padding: 14) {
+        return LightGlassCard(padding: 14) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(alignment: .top) {
                     ZStack {
@@ -212,7 +255,7 @@ struct LibraryView: View {
                 Text(shown)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.text).lineLimit(2)
-                Text(isActive ? "主线路" : (isHome ? "首页线路" : "点按启用"))
+                Text(isActive ? "主线路" : (isHome ? "首页线路" : (isFile ? "点按打开" : "点按启用")))
                     .font(.caption)
                     .foregroundStyle(isActive ? Theme.ok : (isHome ? Theme.accent : Theme.textDim))
                 Text(kindSummary[entry.id] ?? "\(entry.siteCount) 个站点")
@@ -229,6 +272,13 @@ struct LibraryView: View {
             // it (the usual swipe-list behaviour).
             if swipeOpenID != nil {
                 withAnimation(.easeOut(duration: 0.18)) { swipeOpenID = nil }
+                return
+            }
+            Haptics.tap()
+            // Single-file lines (py / JS imports) open their one
+            // site directly — no activate-and-hunt in the grid below.
+            if let route = fileRoute(for: entry) {
+                directRoute = route
                 return
             }
             guard !isActive else { return }
@@ -279,7 +329,7 @@ struct LibraryView: View {
     }
 
     private func sourceCard(_ site: TVBoxConfig.Site) -> some View {
-        GlassCard(padding: 14) {
+        LightGlassCard(padding: 14) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(alignment: .top) {
                     ZStack {
@@ -519,5 +569,30 @@ struct GroupEditorView: View {
         case let gid?: return groups.first { $0.id == gid }?.name ?? "未分组"
         default: return "未分组"
         }
+    }
+}
+
+/// Direct-open target for a single-file line: its config's only
+/// site plus the config's parse interfaces.
+private struct FileSiteRoute: Identifiable {
+    let site: TVBoxConfig.Site
+    let parses: [TVBoxConfig.Parse]
+    let isJS: Bool
+    var id: String { site.id + (isJS ? "#js" : "#py") }
+}
+
+/// GlassCard's flat-glass sibling for long scrolling grids: a
+/// translucent fill + stroke instead of a live blur material per
+/// card (stacked .ultraThinMaterial was the scroll-stutter source).
+private struct LightGlassCard<Content: View>: View {
+    var padding: CGFloat = 16
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Theme.glassStroke, lineWidth: 1))
     }
 }

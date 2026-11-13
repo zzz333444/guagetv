@@ -131,7 +131,7 @@ struct SiteBrowseView: View {
     /// site for the session.
     @State private var probedKind: TVBoxConfig.Site.Kind?
     @State private var probeDone = false
-    private static var probeCache: [String: TVBoxConfig.Site.Kind] = [:]
+    static var probeCache: [String: TVBoxConfig.Site.Kind] = [:]
 
     private var effectiveKind: TVBoxConfig.Site.Kind { probedKind ?? site.kind }
 
@@ -154,14 +154,20 @@ struct SiteBrowseView: View {
 
     private func probeKind() async {
         defer { probeDone = true }
+        if let found = await Self.sniffKind(for: site) { probedKind = found }
+    }
+
+    /// Script sniffing shared with SearchView: an .unknown type-3
+    /// site's api gives no classifiable extension, so fetch the
+    /// script itself and judge its content. Verdicts land in the
+    /// same session cache browsing uses (key: site.key|api), so a
+    /// site probed in either place is never fetched twice.
+    static func sniffKind(for site: TVBoxConfig.Site) async -> TVBoxConfig.Site.Kind? {
         let cacheKey = site.key + "|" + site.api
-        if let hit = Self.probeCache[cacheKey] {
-            probedKind = hit
-            return
-        }
-        guard let url = probeURL(),
+        if let hit = probeCache[cacheKey] { return hit }
+        guard let url = probeURL(for: site),
               let data = try? await NetFetch.data(from: url),
-              let text = String(data: data.prefix(8192), encoding: .utf8) else { return }
+              let text = String(data: data.prefix(8192), encoding: .utf8) else { return nil }
         let lower = text.lowercased()
         var found: TVBoxConfig.Site.Kind?
         if lower.contains("base.spider") || lower.contains("from spider")
@@ -172,13 +178,11 @@ struct SiteBrowseView: View {
             || lower.contains("let ") || lower.contains("=>") {
             found = .spiderJS
         }
-        if let found {
-            Self.probeCache[cacheKey] = found
-            probedKind = found
-        }
+        if let found { probeCache[cacheKey] = found }
+        return found
     }
 
-    private func probeURL() -> URL? {
+    static func probeURL(for site: TVBoxConfig.Site) -> URL? {
         if let direct = URL(string: site.api), direct.scheme?.hasPrefix("http") == true {
             return direct
         }

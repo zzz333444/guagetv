@@ -88,7 +88,7 @@ struct ContentView: View {
     }
 
     private func tabButton(index: Int, icon: String, label: String) -> some View {
-        Button { withAnimation(.easeInOut(duration: 0.2)) { tab = index } } label: {
+        Button { Haptics.tap(); withAnimation(.easeInOut(duration: 0.2)) { tab = index } } label: {
             VStack(spacing: 3) {
                 Image(systemName: icon).font(.system(size: 19))
                 Text(label).font(.system(size: 10))

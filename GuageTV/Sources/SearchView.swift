@@ -13,6 +13,13 @@ struct SearchView: View {
     @State private var progressText = ""
     @State private var failureNote = ""
     @State private var finalNote = ""
+    /// The running search, kept so the 停止 button can cancel it
+    /// (entry points used to fire untracked Tasks nobody could stop).
+    @State private var searchTask: Task<Void, Never>?
+    /// Kinds sniffed for .unknown subscription sites during this
+    /// search (key: site.key) — results from such a site must open
+    /// in the probed runtime's detail loader, not the CMS default.
+    @State private var probedKinds: [String: TVBoxConfig.Site.Kind] = [:]
     /// Parse interfaces per site key, filled at search start: results
     /// from imported single-file lines need their own line's parses.
     @State private var parsesByKey: [String: [TVBoxConfig.Parse]] = [:]
@@ -32,7 +39,16 @@ struct SearchView: View {
     private var jsSites: [TVBoxConfig.Site] {
         (config?.sites ?? []).filter { ($0.kind == .spiderJS || $0.kind == .drpyJS) && $0.searchable != 0 }
     }
-    private var hasSites: Bool { !cmsSites.isEmpty || !pySites.isEmpty || !jsSites.isEmpty }
+    /// Type-3 sites whose api carries no classifiable extension
+    /// (tokenised subscription URLs): they land in NO kind pool, so
+    /// search used to skip them entirely. run() sniffs them (the
+    /// SiteBrowseView probe) and deals them into the py/JS pools.
+    private var probeableSites: [TVBoxConfig.Site] {
+        (config?.sites ?? []).filter { $0.kind == .unknown && $0.type == 3 && $0.searchable != 0 }
+    }
+    private var hasSites: Bool {
+        !cmsSites.isEmpty || !pySites.isEmpty || !jsSites.isEmpty || !probeableSites.isEmpty
+    }
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {
@@ -84,7 +100,7 @@ struct SearchView: View {
                     }
                     FlowChips(words: recents) { word in
                         keyword = word
-                        Task { await run() }
+                        beginSearch()
                     }
                 }
                 .padding(.horizontal, 18)
@@ -100,11 +116,11 @@ struct SearchView: View {
                 TextField("搜片名", text: $keyword)
                     .foregroundStyle(Theme.text)
                     .submitLabel(.search)
-                    .onSubmit { Task { await run() } }
+                    .onSubmit { beginSearch() }
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(Theme.glass, in: Capsule())
-            Button("搜索") { Task { await run() } }
+            Button("搜索") { beginSearch() }
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 18).padding(.vertical, 10)
                 .background(.white, in: Capsule())
@@ -122,6 +138,10 @@ struct SearchView: View {
                 Text(progressText.isEmpty ? "搜索中…" : progressText)
                     .font(.footnote).foregroundStyle(Theme.textDim)
                 Spacer()
+                Button("停止") { stopSearch() }
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.text)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Theme.glass, in: Capsule())
             }
             .padding(.horizontal, 18).padding(.vertical, 6)
         } else if searched && !finalNote.isEmpty {
@@ -195,7 +215,7 @@ struct SearchView: View {
     @ViewBuilder
     private func destination(for site: TVBoxConfig.Site, item: VodItem) -> some View {
         let parses = parsesByKey[site.key] ?? config?.parses ?? []
-        switch site.kind {
+        switch probedKinds[site.key] ?? site.kind {
         case .spiderPY:
             PyDetailLoaderView(site: site, item: item, parses: parses)
         case .spiderJAR:
@@ -278,6 +298,18 @@ struct SearchView: View {
         }
     }
 
+    /// All search entry points funnel here so the run is tracked
+    /// and the 停止 button can actually cancel it.
+    private func beginSearch() {
+        searchTask?.cancel()
+        searchTask = Task { await run() }
+    }
+
+    private func stopSearch() {
+        searchTask?.cancel()
+        if searching { progressText = "正在停止…" }
+    }
+
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
@@ -287,6 +319,7 @@ struct SearchView: View {
         results = []
         failureNote = ""
         finalNote = ""
+        probedKinds = [:]
         // Searchable py/JS pools: the active line's spider sites PLUS
         // every imported single-file py/JS line in the library —
         // those live as their own lines, and the user expects the
@@ -342,10 +375,21 @@ struct SearchView: View {
         searchJarURL = activeJar
         jarURLByKey = jarMap
         parsesByKey = parseMap
-        let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count
+        // .unknown type-3 sites (tokenised subscription apis) sit in
+        // no kind pool; they are sniffed after the CMS phase and join
+        // the py/JS pools with their probed kind.
+        let unknownPool = probeableSites.filter { site in
+            !pyPool.contains { $0.key == site.key } && !jsPool.contains { $0.key == site.key }
+        }
+        let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count + unknownPool.count
         var done = 0
         var responded = 0
         var out: [(site: TVBoxConfig.Site, items: [VodItem])] = []
+        // Per-category tallies: a whole category failing must be
+        // sayable in the final note, not hidden in the global count.
+        var catTried: [String: Int] = [:]
+        var catResponded: [String: Int] = [:]
+        var poolNotes: [String] = []
 
         func tick() {
             done += 1
@@ -355,6 +399,7 @@ struct SearchView: View {
         // CMS sites are independent HTTP calls: search them all at
         // once instead of one by one.
         let cms = cmsSites
+        catTried["CMS"] = cms.count
         var errorSamples: [String] = []
         await withTaskGroup(of: (TVBoxConfig.Site, Result<[VodItem], Error>?).self) { group in
             for site in cms {
@@ -370,6 +415,7 @@ struct SearchView: View {
                 switch raced {
                 case .success(let items):
                     responded += 1
+                    catResponded["CMS", default: 0] += 1
                     if !items.isEmpty {
                         out.append((site, items))
                         results = out
@@ -386,42 +432,102 @@ struct SearchView: View {
                 tick()
             }
         }
-        // The py and JS bridges each hold ONE loaded site, so their
-        // searches run serially under a HARD deadline (see hardTimeout).
-        for site in pyPool {
-            progressText = "正在搜 py 站：\(site.name)…"
+        // Sniff the .unknown subscription sites (same probe the
+        // browse page uses, same cache): CMS results are already on
+        // screen by now, so this never delays the fast category.
+        if !Task.isCancelled {
+            for (index, site) in unknownPool.enumerated() {
+                if Task.isCancelled { break }
+                progressText = "正在识别站点类型 \(index + 1)/\(unknownPool.count)：\(site.name)…"
+                let kind = await withTimeout(6) { await SiteBrowseView.sniffKind(for: site) } ?? nil
+                if let kind {
+                    probedKinds[site.key] = kind
+                    if kind == .spiderPY { pyPool.append(site) }
+                    else if kind == .spiderJS { jsPool.append(site) }
+                }
+                tick()
+            }
+        }
+        // The py and JS bridges each hold ONE loaded site on ONE
+        // serial queue, so their searches run serially under a HARD
+        // deadline (see hardTimeout). Circuit breaker: if one spider
+        // wedges the bridge's serial queue synchronously, EVERY
+        // later site on that bridge can only ever time out — after
+        // 3 misses in a row, skip the rest of that pool instead of
+        // burning 15 s per site on a dead queue.
+        var pyMisses = 0
+        for (index, site) in pyPool.enumerated() {
+            if Task.isCancelled { break }
+            if pyMisses >= 3 {
+                poolNotes.append("py 站连续 3 个超时或失败，疑似 Python 运行时被某个站点卡住，已跳过剩余 \(pyPool.count - index) 个 py 站（逐站打开不受影响）")
+                done += pyPool.count - index
+                break
+            }
+            catTried["py", default: 0] += 1
+            progressText = "正在搜 py 站：\(site.name) · 已完成 \(done)/\(total)"
             let items = await hardTimeout(15) { await searchPy(site, keyword: kw) }
             if let items {
+                pyMisses = 0
                 responded += 1
+                catResponded["py", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
+            } else {
+                pyMisses += 1
             }
             tick()
         }
-        for site in jsPool {
-            progressText = "正在搜 JS 站：\(site.name)…"
+        var jsMisses = 0
+        for (index, site) in jsPool.enumerated() {
+            if Task.isCancelled { break }
+            if jsMisses >= 3 {
+                poolNotes.append("JS 站连续 3 个超时或失败，疑似 JS 运行时被某个站点卡住，已跳过剩余 \(jsPool.count - index) 个 JS 站（逐站打开不受影响）")
+                done += jsPool.count - index
+                break
+            }
+            catTried["JS", default: 0] += 1
+            progressText = "正在搜 JS 站：\(site.name) · 已完成 \(done)/\(total)"
             let items = await hardTimeout(15) { await searchJS(site, keyword: kw) }
             if let items {
+                jsMisses = 0
                 responded += 1
+                catResponded["JS", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
+            } else {
+                jsMisses += 1
             }
             tick()
         }
         for site in jarPool {
-            progressText = "正在搜 Jar 站：\(site.name)…"
+            if Task.isCancelled { break }
+            catTried["Jar", default: 0] += 1
+            progressText = "正在搜 Jar 站：\(site.name) · 已完成 \(done)/\(total)"
             let items = await hardTimeout(25) { await searchJar(site, jar: jarMap[site.key] ?? activeJar, keyword: kw) }
             if let items {
                 responded += 1
+                catResponded["Jar", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
             }
             tick()
         }
+        var catNotes: [String] = []
+        for (label, key) in [("CMS", "CMS"), ("py", "py"), ("JS", "JS"), ("Jar", "Jar")] {
+            let tried = catTried[key] ?? 0
+            if tried > 0 && (catResponded[key] ?? 0) == 0 {
+                catNotes.append("\(label) 类 \(tried) 个站全部无响应")
+            }
+        }
+        catNotes += poolNotes
         if out.isEmpty {
             failureNote = "共搜了 \(total) 个站，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
             if !errorSamples.isEmpty {
                 failureNote += "\n" + errorSamples.joined(separator: "\n")
             }
         }
-        finalNote = "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
+        finalNote = (Task.isCancelled ? "已停止 · " : "")
+            + "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
+        if !catNotes.isEmpty {
+            finalNote += "（" + catNotes.joined(separator: "；") + "）"
+        }
         searched = true
         searching = false
     }

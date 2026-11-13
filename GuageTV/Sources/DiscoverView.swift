@@ -24,6 +24,8 @@ struct DiscoverView: View {
     @State private var feedLineID = ""
     @State private var feedConfig: TVBoxConfig?
     @State private var showLinePicker = false
+    @State private var showSitePicker = false
+    @State private var siteQuery = ""
     @ObservedObject private var history = HistoryStore.shared
     @ObservedObject private var layout = HomeLayout.shared
     @State private var cwPlayEntry: HistoryStore.Entry?
@@ -59,8 +61,16 @@ struct DiscoverView: View {
             }
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
             .background(AmbientBackground(imageURL: displayHero.first?.pic))
-            .overlay(alignment: .bottomLeading) { editButton }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 10) {
+                    editButton
+                    sitePickerButton
+                }
+                .padding(.leading, 18)
+                .padding(.bottom, 108)
+            }
             .sheet(isPresented: $showLinePicker) { linePicker }
+            .sheet(isPresented: $showSitePicker) { sitePicker }
             .fullScreenCover(item: $cwPlayEntry) { entry in
                 PlayerView(
                     episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
@@ -199,8 +209,6 @@ struct DiscoverView: View {
             .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
         }
-        .padding(.leading, 18)
-        .padding(.bottom, 108)
     }
 
     private var linePicker: some View {
@@ -269,6 +277,115 @@ struct DiscoverView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+
+    /// 站点 button beside 编辑： opens the home line's site picker.
+    private var sitePickerButton: some View {
+        Button { showSitePicker = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.stack").font(.footnote.weight(.semibold))
+                Text("站点").font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        }
+    }
+
+    /// 选择站点 — every site on the HOME line, searchable; the
+    /// feed's current site carries the checkmark. Tapping a row
+    /// pushes that site's browse page (kind dispatch happens
+    /// inside SiteBrowseView). Search sits at the bottom, at the
+    /// thumb, like Rex's picker.
+    private var sitePicker: some View {
+        let cfg = feedConfig ?? config
+        let allSites = cfg?.sites ?? []
+        let query = siteQuery.trimmingCharacters(in: .whitespaces)
+        let shown = query.isEmpty ? allSites
+            : allSites.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        return NavigationStack {
+            VStack(spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(shown) { site in
+                            NavigationLink {
+                                SiteBrowseView(site: site, parses: cfg?.parses ?? [])
+                            } label: {
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(site.name)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(Theme.text).lineLimit(1)
+                                        Text(kindLabel(site.kind))
+                                            .font(.caption).foregroundStyle(Theme.textDim)
+                                    }
+                                    Spacer()
+                                    if site.id == activeSite?.id {
+                                        Image(systemName: "checkmark")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(Theme.ok)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Theme.textDim)
+                                }
+                                .padding(.horizontal, 14).padding(.vertical, 11)
+                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(Theme.glassStroke, lineWidth: 1))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if shown.isEmpty {
+                            Text(allSites.isEmpty ? "首页线路还没有站点" : "没有匹配的站点")
+                                .font(.footnote).foregroundStyle(Theme.textDim)
+                                .padding(.top, 30)
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 6)
+                    .padding(.bottom, 16)
+                }
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.textDim)
+                    TextField("搜索站点", text: $siteQuery)
+                        .foregroundStyle(Theme.text)
+                    if !siteQuery.isEmpty {
+                        Button { siteQuery = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textDim)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 11)
+                .background(Theme.glass, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+                .padding(.horizontal, 18)
+                .padding(.bottom, 14)
+            }
+            .background(Theme.bg)
+            .navigationTitle("选择站点")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { showSitePicker = false }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func kindLabel(_ kind: TVBoxConfig.Site.Kind) -> String {
+        switch kind {
+        case .cmsXML, .cmsJSON: return "CMS 站点"
+        case .spiderPY: return "Python 站点"
+        case .spiderJS, .drpyJS: return "JS 站点"
+        case .spiderJAR: return "Jar 站点"
+        case .unknown: return "待识别站点"
+        }
     }
 
     private func loadFeed() async {

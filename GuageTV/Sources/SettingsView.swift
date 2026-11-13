@@ -7,39 +7,30 @@ import UniformTypeIdentifiers
 /// all persisted with AppStorage and honoured by the player.
 struct SettingsView: View {
     @Binding var config: TVBoxConfig?
-    @State private var configURL = ""
-    @State private var status = "还没有导入配置"
     @AppStorage("jarProxyURL") private var jarProxyURL = ""
-    @AppStorage("jarProxyToken") private var jarProxyToken = ""
-    @AppStorage("drive.quark_cookie") private var driveQuarkCookie = ""
-    @AppStorage("drive.uc_cookie") private var driveUcCookie = ""
-    @AppStorage("drive.uc_token") private var driveUcToken = ""
-    @AppStorage("drive.aliyun") private var driveAliyun = ""
-    @AppStorage("drive.baidu") private var driveBaidu = ""
-    @AppStorage("drive.bili_cookie") private var driveBiliCookie = ""
-    @AppStorage("drive.xunlei") private var driveXunlei = ""
-    @State private var jarTestNote = ""
     @AppStorage("tmdb.enabled") private var tmdbEnabled = false
-    @AppStorage("tmdb.base") private var tmdbBase = ""
-    @AppStorage("tmdb.key") private var tmdbKey = ""
-    @State private var tmdbTestNote = ""
     @State private var entries: [ConfigLibrary.Entry] = []
-    @State private var showFileImporter = false
+    @State private var cacheSummary = "计算中…"
+
+    /// 网盘入口行的摘要：任一网盘凭证非空即「已配置」（只读
+    /// UserDefaults 判断，不在主页持有七个字段的绑定）。
+    private var driveConfigured: Bool {
+        let keys = ["drive.quark_cookie", "drive.uc_cookie", "drive.uc_token",
+                    "drive.aliyun", "drive.baidu", "drive.bili_cookie", "drive.xunlei"]
+        return keys.contains {
+            !(UserDefaults.standard.string(forKey: $0) ?? "")
+                .trimmingCharacters(in: .whitespaces).isEmpty
+        }
+    }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.29 · 蝴蝶线路识别与左滑删除"
+    static let buildLabel = "v1.30 · 精致化与搜索修复"
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("设置").font(.largeTitle.bold()).foregroundStyle(Theme.text)
-                    .onAppear {
-                        if configURL.isEmpty, let saved = ConfigStore.savedSourceURL() {
-                            configURL = saved
-                        }
-                        entries = ConfigLibrary.entries()
-                    }
 
                     HStack(spacing: 12) {
                         NavigationLink { PlaySettingsView() } label: {
@@ -57,171 +48,41 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    group(title: "万能导入") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            TextField("地址：配置 / .py / .js 规则 / 猫源 https://…", text: $configURL)
-                                .textFieldStyle(.roundedBorder)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                            HStack(spacing: 10) {
-                                Button("导入地址") { Task { await load() } }
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 18).padding(.vertical, 8)
-                                    .background(.white, in: Capsule())
-                                    .foregroundStyle(.black)
-                                Button("从文件导入") { showFileImporter = true }
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 18).padding(.vertical, 8)
-                                    .background(Theme.glass, in: Capsule())
-                                    .foregroundStyle(Theme.text)
-                            }
-                            Text(status).font(.footnote).foregroundStyle(Theme.textDim)
-                            if let config {
-                                Text("已加载 \(config.sites.count) 个站点 · \(config.lives?.count ?? 0) 个直播源")
-                                    .font(.footnote).foregroundStyle(Theme.textDim)
-                            }
+                    group(title: "配置") {
+                        NavigationLink { TVBoxConfigSettingsView(config: $config) } label: {
+                            row(icon: "link", title: "TVBox 配置",
+                                value: config.map { "\($0.sites.count) 个站点" } ?? "未导入")
                         }
-                    }
-
-                    group(title: "Jar 代理") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            TextField("JarProxy 地址：http://192.168.1.8:9977", text: $jarProxyURL)
-                                .textFieldStyle(.roundedBorder)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                            TextField("口令（服务器开启校验时填，平时留空）", text: $jarProxyToken)
-                                .textFieldStyle(.roundedBorder)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .font(.footnote.monospaced())
-                            HStack(spacing: 10) {
-                                Button("测试连接") {
-                                    Task { jarTestNote = await JarProxyClient.healthCheck() }
-                                }
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 18).padding(.vertical, 8)
-                                .background(Theme.glass, in: Capsule())
-                                .foregroundStyle(Theme.text)
-                                if !jarTestNote.isEmpty {
-                                    Text(jarTestNote).font(.footnote).foregroundStyle(Theme.textDim)
-                                }
-                            }
-                            Text("Jar（csp_）站点不在手机上跑，而是转发到你自己部署的 JarProxy 服务器（JDK）上执行。填好地址后，资源库里的 Jar 站点直接解锁。")
-                                .font(.footnote).foregroundStyle(Theme.textDim)
+                        .buttonStyle(.plain)
+                        NavigationLink { ConfigLibrarySettingsView(config: $config) } label: {
+                            row(icon: "square.stack.3d.up", title: "配置库",
+                                value: "\(entries.count) 条线路")
                         }
-                    }
-
-                    group(title: "网盘配置") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("网盘线路解析分享链接时要用你自己网盘的登录凭证，和 FongMi「配置中心」里填的是同一套。只保存在本机，打开 Jar 站点时经加密连接发给你的 JarProxy 使用；不用的盘留空即可。")
-                                .font(.footnote).foregroundStyle(Theme.textDim)
-                            driveField("夸克 Cookie", $driveQuarkCookie)
-                            driveField("UC Cookie", $driveUcCookie)
-                            driveField("UC Token", $driveUcToken)
-                            driveField("阿里云盘 Refresh Token", $driveAliyun)
-                            driveField("百度网盘 Cookie", $driveBaidu)
-                            driveField("Bilibili Cookie", $driveBiliCookie)
-                            driveField("迅雷 Token", $driveXunlei)
-                            Button("清空全部网盘配置", role: .destructive) {
-                                driveQuarkCookie = ""; driveUcCookie = ""; driveUcToken = ""
-                                driveAliyun = ""; driveBaidu = ""; driveBiliCookie = ""; driveXunlei = ""
-                            }
-                            .font(.footnote.weight(.semibold))
+                        .buttonStyle(.plain)
+                        NavigationLink { JarProxySettingsView() } label: {
+                            row(icon: "server.rack", title: "Jar 代理",
+                                value: jarProxyURL.isEmpty ? "未设置" : "已设置")
                         }
-                    }
-
-                    group(title: "TMDB 增强") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Toggle("启用 TMDB 增强", isOn: $tmdbEnabled)
-                                .font(.subheadline).foregroundStyle(Theme.text)
-                            TextField("API 地址（留空用官方 https://api.themoviedb.org）", text: $tmdbBase)
-                                .textFieldStyle(.roundedBorder)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                            TextField("API 密钥（v3，在 themoviedb.org 免费申请）", text: $tmdbKey)
-                                .textFieldStyle(.roundedBorder)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .font(.footnote.monospaced())
-                            HStack(spacing: 10) {
-                                Button("测试连接并保存") {
-                                    Task { tmdbTestNote = await TMDBClient.testConnection() }
-                                }
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 18).padding(.vertical, 8)
-                                .background(Theme.glass, in: Capsule())
-                                .foregroundStyle(Theme.text)
-                                if !tmdbTestNote.isEmpty {
-                                    Text(tmdbTestNote).font(.footnote).foregroundStyle(Theme.textDim)
-                                }
-                            }
-                            Text("开启后，首页大图会用 TMDB 的高清剧照、剧情简介和 TMDB 评分来增强（按片名+年份匹配，结果缓存在本机）。密钥只保存在本机。")
-                                .font(.footnote).foregroundStyle(Theme.textDim)
+                        .buttonStyle(.plain)
+                        NavigationLink { DriveSettingsView() } label: {
+                            row(icon: "externaldrive", title: "网盘配置",
+                                value: driveConfigured ? "已配置" : "未配置")
                         }
-                    }
-
-                    if !entries.isEmpty {
-                        group(title: "配置库") {
-                            ForEach(entries) { entry in
-                                HStack(spacing: 10) {
-                                    Image(systemName: "antenna.radiowaves.left.and.right")
-                                        .foregroundStyle(Theme.textDim).frame(width: 22)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(ConfigLibrary.shownName(entry)).foregroundStyle(Theme.text).lineLimit(1)
-                                        Text("\(entry.siteCount) 个站点")
-                                            .font(.caption).foregroundStyle(Theme.textDim)
-                                    }
-                                    Spacer()
-                                    if entry.id == ConfigLibrary.activeID() {
-                                        Text("使用中")
-                                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
-                                    } else {
-                                        Button("启用") {
-                                            config = ConfigLibrary.activate(id: entry.id)
-                                            entries = ConfigLibrary.entries()
-                                            status = "已切换到 \(entry.name)"
-                                        }
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 12).padding(.vertical, 6)
-                                        .background(Theme.glass, in: Capsule())
-                                        .foregroundStyle(Theme.text)
-                                    }
-                                    Button {
-                                        refreshEntry(entry)
-                                    } label: {
-                                        Image(systemName: "arrow.clockwise").foregroundStyle(Theme.textDim)
-                                    }
-                                    Button(role: .destructive) {
-                                        config = ConfigLibrary.remove(id: entry.id)
-                                        entries = ConfigLibrary.entries()
-                                        status = "已删除 \(entry.name)"
-                                    } label: {
-                                        Image(systemName: "trash").foregroundStyle(.red.opacity(0.85))
-                                    }
-                                }
-                                .contextMenu {
-                                    Button {
-                                        if let source = ConfigLibrary.sourceURL(id: entry.id) {
-                                            UIPasteboard.general.string = source
-                                            status = "已复制 \(entry.name) 的地址"
-                                        }
-                                    } label: { Label("复制地址", systemImage: "doc.on.doc") }
-                                    Button { refreshEntry(entry) } label: {
-                                        Label("刷新", systemImage: "arrow.clockwise")
-                                    }
-                                    Button(role: .destructive) {
-                                        config = ConfigLibrary.remove(id: entry.id)
-                                        entries = ConfigLibrary.entries()
-                                        status = "已删除 \(entry.name)"
-                                    } label: { Label("删除", systemImage: "trash") }
-                                }
-                            }
+                        .buttonStyle(.plain)
+                        NavigationLink { TMDBSettingsView() } label: {
+                            row(icon: "film", title: "TMDB 增强",
+                                value: tmdbEnabled ? "开" : "关")
                         }
+                        .buttonStyle(.plain)
                     }
 
                     group(title: "使用偏好") {
                         NavigationLink { AppearanceSettingsView() } label: {
                             row(icon: "paintbrush", title: "外观与交互", value: "")
+                        }
+                        .buttonStyle(.plain)
+                        NavigationLink { CacheSettingsView() } label: {
+                            row(icon: "archivebox", title: "缓存管理", value: cacheSummary)
                         }
                         .buttonStyle(.plain)
                         row(icon: "square.grid.2x2", title: "模块", value: "")
@@ -239,12 +100,8 @@ struct SettingsView: View {
                 .padding(.bottom, 110)
             }
             .background(AmbientBackground(imageURL: nil))
-            .sheet(isPresented: $showFileImporter) {
-                DocumentPicker(
-                    onPick: { url in Task { await importPickedFile(url) } },
-                    onCancel: { status = "已取消文件导入" })
-                    .ignoresSafeArea()
-            }
+            .onAppear { entries = ConfigLibrary.entries() }
+            .task { cacheSummary = CacheManager.format(await CacheManager.totalSize()) }
         }
     }
 
@@ -255,17 +112,6 @@ struct SettingsView: View {
                 Text(title).font(.footnote).foregroundStyle(Theme.text.opacity(0.85))
             }
             .frame(maxWidth: .infinity)
-        }
-    }
-
-    private func driveField(_ title: String, _ value: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline).foregroundStyle(Theme.text)
-            TextField(title, text: value)
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .font(.footnote.monospaced())
         }
     }
 
@@ -286,6 +132,200 @@ struct SettingsView: View {
         }
     }
 
+}
+
+/// Titled glass-card group shared by the settings sub-pages (the
+/// main page keeps its own identical helper).
+private struct SettingsGroup<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline).foregroundStyle(Theme.textDim)
+            GlassCard { VStack(alignment: .leading, spacing: 12) { content } }
+        }
+    }
+}
+
+// MARK: - TVBox 配置（万能导入 + 导入确认弹窗）
+
+/// One staged import: bytes are fetched/parsed first, then the user
+/// confirms (and may edit) the line name before anything is stored.
+private struct PendingImport: Identifiable {
+    let id = UUID()
+
+    enum Payload {
+        /// A full config (TVBox JSON or 猫源）, from URL or file.
+        case config(data: Data, sourceText: String, parsed: TVBoxConfig,
+                    isMaoYuan: Bool, fromFile: Bool)
+        /// A single .py spider / .js rule file, from URL or file.
+        case singleFile(data: Data, fileName: String, kind: String)
+    }
+
+    var payload: Payload
+}
+
+/// 「导入确认」sheet: editable name pre-filled with the auto-detected
+/// name; 导入 commits, 取消 (button or swipe) discards.
+private struct ImportConfirmSheet: View {
+    @Binding var name: String
+    var onConfirm: () -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("导入确认").font(.title3.bold()).foregroundStyle(Theme.text)
+            Text("导入后线路就叫这个名字，可以在这里改；之后也能在线路卡上长按改备注名。")
+                .font(.footnote).foregroundStyle(Theme.textDim)
+            TextField("线路名称", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+            HStack(spacing: 10) {
+                Button("取消") { onCancel() }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 18).padding(.vertical, 8)
+                    .background(Theme.glass, in: Capsule())
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Button("导入") { onConfirm() }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 22).padding(.vertical, 8)
+                    .background(.white, in: Capsule())
+                    .foregroundStyle(.black)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(AmbientBackground(imageURL: nil))
+        .presentationDetents([.height(280)])
+    }
+}
+
+/// TVBox 配置 sub-page: the 万能导入 (address + file) and the loaded
+/// config status. Imports are two-stage — fetch/parse first, then an
+/// 「导入确认」sheet names the line, then it lands in the library.
+struct TVBoxConfigSettingsView: View {
+    @Binding var config: TVBoxConfig?
+    @State private var configURL = ""
+    @State private var status = "还没有导入配置"
+    @State private var showFileImporter = false
+    @State private var pendingImport: PendingImport?
+    @State private var importName = ""
+    @State private var importHandled = false
+
+    var body: some View {
+        SettingsPage(title: "TVBox 配置") {
+            SettingsGroup(title: "万能导入") {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("地址：配置 / .py / .js 规则 / 猫源 https://…", text: $configURL)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    HStack(spacing: 10) {
+                        Button("导入地址") { Task { await load() } }
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 18).padding(.vertical, 8)
+                            .background(.white, in: Capsule())
+                            .foregroundStyle(.black)
+                        Button("从文件导入") { showFileImporter = true }
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 18).padding(.vertical, 8)
+                            .background(Theme.glass, in: Capsule())
+                            .foregroundStyle(Theme.text)
+                    }
+                    Text(status).font(.footnote).foregroundStyle(Theme.textDim)
+                    if let config {
+                        Text("已加载 \(config.sites.count) 个站点 · \(config.lives?.count ?? 0) 个直播源")
+                            .font(.footnote).foregroundStyle(Theme.textDim)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if configURL.isEmpty, let saved = ConfigStore.savedSourceURL() {
+                configURL = saved
+            }
+        }
+        .sheet(isPresented: $showFileImporter) {
+            DocumentPicker(
+                onPick: { url in Task { await importPickedFile(url) } },
+                onCancel: { status = "已取消文件导入" })
+                .ignoresSafeArea()
+        }
+        .sheet(item: $pendingImport, onDismiss: {
+            if !importHandled { status = "已取消导入" }
+        }) { pending in
+            ImportConfirmSheet(name: $importName,
+                               onConfirm: { commitImport(pending) },
+                               onCancel: { pendingImport = nil })
+        }
+    }
+
+    // MARK: staging
+
+    private func stage(_ pending: PendingImport, prefill: String) {
+        importName = prefill
+        importHandled = false
+        pendingImport = pending
+        status = "待确认导入名称"
+    }
+
+    /// Address-import prefill: the URL's file name without extension,
+    /// falling back to the host.
+    private func prefillName(forURL url: URL) -> String {
+        let base = (url.lastPathComponent as NSString).deletingPathExtension
+        if !base.isEmpty { return base }
+        return url.host ?? "配置"
+    }
+
+    /// File-import prefill: the picked file's real name without its
+    /// extension (a .py import shows e.g.「51X」for 51X.py).
+    private func prefillName(forFileName fileName: String) -> String {
+        let base = (fileName as NSString).deletingPathExtension
+        return base.isEmpty ? fileName : base
+    }
+
+    /// The confirmed name becomes the line's name. ConfigLibrary.add
+    /// derives entry.name from the source URL, so a differing user
+    /// name is written through the existing alias layer — shownName
+    /// (what every screen displays) picks it up, storage untouched.
+    private func applyImportedName(_ name: String, to entry: ConfigLibrary.Entry) {
+        guard !name.isEmpty, name != entry.name else { return }
+        ConfigLibrary.setAlias(name, for: entry.id)
+    }
+
+    private func commitImport(_ pending: PendingImport) {
+        importHandled = true
+        let name = importName.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingImport = nil
+        Task {
+            switch pending.payload {
+            case let .config(data, sourceText, parsed, isMaoYuan, fromFile):
+                config = parsed
+                let entry = ConfigLibrary.add(data: data, sourceURL: sourceText,
+                                              siteCount: parsed.sites.count)
+                applyImportedName(name, to: entry)
+                let shown = ConfigLibrary.shownName(entry)
+                switch (isMaoYuan, fromFile) {
+                case (true, true): status = "猫源文件已转换并加入配置库：\(shown)"
+                case (true, false): status = "猫源已转换并加入配置库：\(shown)"
+                case (false, true): status = "配置文件已加入配置库：\(shown)"
+                case (false, false): status = "已加入配置库并启用：\(shown)"
+                }
+            case let .singleFile(data, fileName, kind):
+                do {
+                    try await registerSingleFile(data: data, fileName: fileName,
+                                                 kind: kind, displayName: name)
+                } catch {
+                    status = "导入失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    // MARK: fetching
+
     private func load() async {
         var text = configURL.trimmingCharacters(in: .whitespaces)
         if !text.hasPrefix("http://") && !text.hasPrefix("https://") {
@@ -297,7 +337,16 @@ struct SettingsView: View {
         }
         let pathExt = url.pathExtension.lowercased()
         if pathExt == "py" || pathExt == "js" {
-            await importSingleFile(url: url, kind: pathExt)
+            status = "下载中…"
+            do {
+                let data = try await NetFetch.data(from: url)
+                let fileName = url.lastPathComponent.isEmpty
+                    ? (pathExt == "py" ? "spider.py" : "rule.js") : url.lastPathComponent
+                stage(PendingImport(payload: .singleFile(data: data, fileName: fileName, kind: pathExt)),
+                      prefill: prefillName(forFileName: fileName))
+            } catch {
+                status = "导入失败：\(error.localizedDescription)"
+            }
             return
         }
         status = "加载中…（多通道轮试中，稍等）"
@@ -311,16 +360,15 @@ struct SettingsView: View {
         do {
             if MaoYuanAdapter.looksLikeMaoYuan(data) {
                 let parsed = try MaoYuanAdapter.convert(from: data)
-                config = parsed
-                let entry = ConfigLibrary.add(data: data, sourceURL: text, siteCount: parsed.sites.count)
-                status = "猫源已转换并加入配置库：\(entry.name)"
+                stage(PendingImport(payload: .config(data: data, sourceText: text, parsed: parsed,
+                                                     isMaoYuan: true, fromFile: false)),
+                      prefill: prefillName(forURL: url))
             } else {
                 let parsed = try ConfigLoader.load(from: data)
-                config = parsed
-                let entry = ConfigLibrary.add(data: data, sourceURL: text, siteCount: parsed.sites.count)
-                status = "已加入配置库并启用：\(entry.name)"
+                stage(PendingImport(payload: .config(data: data, sourceText: text, parsed: parsed,
+                                                     isMaoYuan: false, fromFile: false)),
+                      prefill: prefillName(forURL: url))
             }
-            entries = ConfigLibrary.entries()
         } catch {
             let head = String(decoding: data.prefix(60), as: UTF8.self)
                 .replacingOccurrences(of: "\n", with: " ")
@@ -328,10 +376,293 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 万能导入 helpers
+    /// The UIKit picker hands over an asCopy copy in our own tmp
+    /// directory, so reading needs no security-scope dance; every
+    /// outcome lands in the status line (nothing fails silently).
+    /// Parsed first, then staged — the confirm sheet appears once the
+    /// picker sheet has finished dismissing.
+    private func importPickedFile(_ fileURL: URL) async {
+        let ext = fileURL.pathExtension.lowercased()
+        do {
+            let scoped = fileURL.startAccessingSecurityScopedResource()
+            defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: fileURL)
+            var pending: PendingImport?
+            var prefill = ""
+            switch ext {
+            case "py", "js":
+                pending = PendingImport(payload: .singleFile(data: data,
+                                                             fileName: fileURL.lastPathComponent,
+                                                             kind: ext))
+                prefill = prefillName(forFileName: fileURL.lastPathComponent)
+            case "json", "txt", "":
+                let sourceText = "file-import://" + fileURL.lastPathComponent
+                if MaoYuanAdapter.looksLikeMaoYuan(data) {
+                    let parsed = try MaoYuanAdapter.convert(from: data)
+                    pending = PendingImport(payload: .config(data: data, sourceText: sourceText,
+                                                             parsed: parsed, isMaoYuan: true,
+                                                             fromFile: true))
+                } else {
+                    let parsed = try ConfigLoader.load(from: data)
+                    pending = PendingImport(payload: .config(data: data, sourceText: sourceText,
+                                                             parsed: parsed, isMaoYuan: false,
+                                                             fromFile: true))
+                }
+                prefill = prefillName(forFileName: fileURL.lastPathComponent)
+            default:
+                status = "不支持的文件类型：.\(ext)（可导入 .json / .py / .js）"
+            }
+            if let pending {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                stage(pending, prefill: prefill)
+            }
+        } catch {
+            status = "导入失败：\(error.localizedDescription)"
+        }
+    }
 
-    /// A .py / .js URL becomes a single-site line: the file is stored
-    /// locally and a synthetic one-site config joins the library.
+    /// Store the file and add its synthetic one-site config line.
+    /// The on-disk file name (and the site key) stay file-derived so
+    /// re-imports refresh in place; displayName is what the site and
+    /// the line are called.
+    private func registerSingleFile(data: Data, fileName: String, kind: String,
+                                    displayName: String) async throws {
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dirName = kind == "py" ? "spiders" : "jsrules"
+        let dir = support.appendingPathComponent(dirName)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+        let base = (fileName as NSString).deletingPathExtension
+        let siteName = displayName.isEmpty ? base : displayName
+        let site: [String: Any]
+        if kind == "py" {
+            site = ["key": "pyfile_" + base, "name": siteName, "type": 3,
+                    "api": "local-spider://" + fileName, "searchable": 1, "quickSearch": 1]
+        } else {
+            site = ["key": "jsfile_" + base, "name": siteName, "type": 3,
+                    "api": "bundled-engine.js", "ext": "local-rule://" + fileName,
+                    "searchable": 1, "quickSearch": 1]
+        }
+        let configData = try JSONSerialization.data(withJSONObject: ["sites": [site]])
+        let parsed = try ConfigLoader.load(from: configData)
+        config = parsed
+        let entry = ConfigLibrary.add(data: configData,
+                                      sourceURL: (kind == "py" ? "py-import://" : "js-import://") + fileName,
+                                      siteCount: 1)
+        applyImportedName(displayName, to: entry)
+        status = (kind == "py" ? "py 文件已导入为单站线路：" : "JS 规则已导入为单站线路：")
+            + ConfigLibrary.shownName(entry)
+    }
+}
+
+// MARK: - Jar 代理
+
+struct JarProxySettingsView: View {
+    @AppStorage("jarProxyURL") private var jarProxyURL = ""
+    @AppStorage("jarProxyToken") private var jarProxyToken = ""
+    @State private var jarTestNote = ""
+
+    var body: some View {
+        SettingsPage(title: "Jar 代理") {
+            SettingsGroup(title: "Jar 代理") {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("JarProxy 地址：http://192.168.1.8:9977", text: $jarProxyURL)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("口令（服务器开启校验时填，平时留空）", text: $jarProxyToken)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.footnote.monospaced())
+                    HStack(spacing: 10) {
+                        Button("测试连接") {
+                            Task { jarTestNote = await JarProxyClient.healthCheck() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                        .foregroundStyle(Theme.text)
+                        if !jarTestNote.isEmpty {
+                            Text(jarTestNote).font(.footnote).foregroundStyle(Theme.textDim)
+                        }
+                    }
+                    Text("Jar（csp_）站点不在手机上跑，而是转发到你自己部署的 JarProxy 服务器（JDK）上执行。填好地址后，资源库里的 Jar 站点直接解锁。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 网盘配置
+
+struct DriveSettingsView: View {
+    @AppStorage("drive.quark_cookie") private var driveQuarkCookie = ""
+    @AppStorage("drive.uc_cookie") private var driveUcCookie = ""
+    @AppStorage("drive.uc_token") private var driveUcToken = ""
+    @AppStorage("drive.aliyun") private var driveAliyun = ""
+    @AppStorage("drive.baidu") private var driveBaidu = ""
+    @AppStorage("drive.bili_cookie") private var driveBiliCookie = ""
+    @AppStorage("drive.xunlei") private var driveXunlei = ""
+
+    var body: some View {
+        SettingsPage(title: "网盘配置") {
+            SettingsGroup(title: "网盘配置") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("网盘线路解析分享链接时要用你自己网盘的登录凭证，和 FongMi「配置中心」里填的是同一套。只保存在本机，打开 Jar 站点时经加密连接发给你的 JarProxy 使用；不用的盘留空即可。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                    driveField("夸克 Cookie", $driveQuarkCookie)
+                    driveField("UC Cookie", $driveUcCookie)
+                    driveField("UC Token", $driveUcToken)
+                    driveField("阿里云盘 Refresh Token", $driveAliyun)
+                    driveField("百度网盘 Cookie", $driveBaidu)
+                    driveField("Bilibili Cookie", $driveBiliCookie)
+                    driveField("迅雷 Token", $driveXunlei)
+                    Button("清空全部网盘配置", role: .destructive) {
+                        driveQuarkCookie = ""; driveUcCookie = ""; driveUcToken = ""
+                        driveAliyun = ""; driveBaidu = ""; driveBiliCookie = ""; driveXunlei = ""
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+            }
+        }
+    }
+
+    private func driveField(_ title: String, _ value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline).foregroundStyle(Theme.text)
+            TextField(title, text: value)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .font(.footnote.monospaced())
+        }
+    }
+}
+
+// MARK: - TMDB 增强
+
+struct TMDBSettingsView: View {
+    @AppStorage("tmdb.enabled") private var tmdbEnabled = false
+    @AppStorage("tmdb.base") private var tmdbBase = ""
+    @AppStorage("tmdb.key") private var tmdbKey = ""
+    @State private var tmdbTestNote = ""
+
+    var body: some View {
+        SettingsPage(title: "TMDB 增强") {
+            SettingsGroup(title: "TMDB 增强") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("启用 TMDB 增强", isOn: $tmdbEnabled)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    TextField("API 地址（留空用官方 https://api.themoviedb.org）", text: $tmdbBase)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("API 密钥（v3，在 themoviedb.org 免费申请）", text: $tmdbKey)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.footnote.monospaced())
+                    HStack(spacing: 10) {
+                        Button("测试连接并保存") {
+                            Task { tmdbTestNote = await TMDBClient.testConnection() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                        .foregroundStyle(Theme.text)
+                        if !tmdbTestNote.isEmpty {
+                            Text(tmdbTestNote).font(.footnote).foregroundStyle(Theme.textDim)
+                        }
+                    }
+                    Text("开启后，首页大图会用 TMDB 的高清剧照、剧情简介和 TMDB 评分来增强（按片名+年份匹配，结果缓存在本机）。密钥只保存在本机。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 配置库
+
+struct ConfigLibrarySettingsView: View {
+    @Binding var config: TVBoxConfig?
+    @State private var entries: [ConfigLibrary.Entry] = []
+    @State private var status = ""
+
+    var body: some View {
+        SettingsPage(title: "配置库") {
+            SettingsGroup(title: "配置库") {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !status.isEmpty {
+                        Text(status).font(.footnote).foregroundStyle(Theme.textDim)
+                    }
+                    if entries.isEmpty {
+                        Text("还没有导入任何线路。先到「TVBox 配置」里导入地址或文件，导入过的线路都会存放在这里。")
+                            .font(.footnote).foregroundStyle(Theme.textDim)
+                    }
+                    ForEach(entries) { entry in
+                        HStack(spacing: 10) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .foregroundStyle(Theme.textDim).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ConfigLibrary.shownName(entry)).foregroundStyle(Theme.text).lineLimit(1)
+                                Text("\(entry.siteCount) 个站点")
+                                    .font(.caption).foregroundStyle(Theme.textDim)
+                            }
+                            Spacer()
+                            if entry.id == ConfigLibrary.activeID() {
+                                Text("使用中")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+                            } else {
+                                Button("启用") {
+                                    config = ConfigLibrary.activate(id: entry.id)
+                                    entries = ConfigLibrary.entries()
+                                    status = "已切换到 \(entry.name)"
+                                }
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Theme.glass, in: Capsule())
+                                .foregroundStyle(Theme.text)
+                            }
+                            Button {
+                                refreshEntry(entry)
+                            } label: {
+                                Image(systemName: "arrow.clockwise").foregroundStyle(Theme.textDim)
+                            }
+                            Button(role: .destructive) {
+                                config = ConfigLibrary.remove(id: entry.id)
+                                entries = ConfigLibrary.entries()
+                                status = "已删除 \(entry.name)"
+                            } label: {
+                                Image(systemName: "trash").foregroundStyle(.red.opacity(0.85))
+                            }
+                        }
+                        .contextMenu {
+                            Button {
+                                if let source = ConfigLibrary.sourceURL(id: entry.id) {
+                                    UIPasteboard.general.string = source
+                                    status = "已复制 \(entry.name) 的地址"
+                                }
+                            } label: { Label("复制地址", systemImage: "doc.on.doc") }
+                            Button { refreshEntry(entry) } label: {
+                                Label("刷新", systemImage: "arrow.clockwise")
+                            }
+                            Button(role: .destructive) {
+                                config = ConfigLibrary.remove(id: entry.id)
+                                entries = ConfigLibrary.entries()
+                                status = "已删除 \(entry.name)"
+                            } label: { Label("删除", systemImage: "trash") }
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear { entries = ConfigLibrary.entries() }
+    }
+
     /// 刷新一条线路：按原地址重新拉取、校验、覆盖本地副本；
     /// 正在用的线路刷新后立即换上新内容。
     private func refreshEntry(_ entry: ConfigLibrary.Entry) {
@@ -353,79 +684,6 @@ struct SettingsView: View {
                 status = "刷新失败：\(error.localizedDescription)"
             }
         }
-    }
-
-    private func importSingleFile(url: URL, kind: String) async {
-        status = "下载中…"
-        do {
-            let data = try await NetFetch.data(from: url)
-            let fileName = url.lastPathComponent.isEmpty
-                ? (kind == "py" ? "spider.py" : "rule.js") : url.lastPathComponent
-            try await registerSingleFile(data: data, fileName: fileName, kind: kind)
-        } catch {
-            status = "导入失败：\(error.localizedDescription)"
-        }
-    }
-
-    /// The UIKit picker hands over an asCopy copy in our own tmp
-    /// directory, so reading needs no security-scope dance; every
-    /// outcome lands in the status line (nothing fails silently).
-    private func importPickedFile(_ fileURL: URL) async {
-        let ext = fileURL.pathExtension.lowercased()
-        do {
-            let scoped = fileURL.startAccessingSecurityScopedResource()
-            defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: fileURL)
-            switch ext {
-            case "py", "js":
-                try await registerSingleFile(data: data, fileName: fileURL.lastPathComponent, kind: ext)
-            case "json", "txt", "":
-                if MaoYuanAdapter.looksLikeMaoYuan(data) {
-                    let parsed = try MaoYuanAdapter.convert(from: data)
-                    config = parsed
-                    let entry = ConfigLibrary.add(data: data, sourceURL: "file-import://" + fileURL.lastPathComponent, siteCount: parsed.sites.count)
-                    status = "猫源文件已转换并加入配置库：\(entry.name)"
-                } else {
-                    let parsed = try ConfigLoader.load(from: data)
-                    config = parsed
-                    let entry = ConfigLibrary.add(data: data, sourceURL: "file-import://" + fileURL.lastPathComponent, siteCount: parsed.sites.count)
-                    status = "配置文件已加入配置库：\(entry.name)"
-                }
-                entries = ConfigLibrary.entries()
-            default:
-                status = "不支持的文件类型：.\(ext)（可导入 .json / .py / .js）"
-            }
-        } catch {
-            status = "导入失败：\(error.localizedDescription)"
-        }
-    }
-
-    /// Store the file and add its synthetic one-site config line.
-    private func registerSingleFile(data: Data, fileName: String, kind: String) async throws {
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dirName = kind == "py" ? "spiders" : "jsrules"
-        let dir = support.appendingPathComponent(dirName)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
-        let base = (fileName as NSString).deletingPathExtension
-        let site: [String: Any]
-        if kind == "py" {
-            site = ["key": "pyfile_" + base, "name": base, "type": 3,
-                    "api": "local-spider://" + fileName, "searchable": 1, "quickSearch": 1]
-        } else {
-            site = ["key": "jsfile_" + base, "name": base, "type": 3,
-                    "api": "bundled-engine.js", "ext": "local-rule://" + fileName,
-                    "searchable": 1, "quickSearch": 1]
-        }
-        let configData = try JSONSerialization.data(withJSONObject: ["sites": [site]])
-        let parsed = try ConfigLoader.load(from: configData)
-        config = parsed
-        let entry = ConfigLibrary.add(data: configData,
-                                      sourceURL: (kind == "py" ? "py-import://" : "js-import://") + fileName,
-                                      siteCount: 1)
-        entries = ConfigLibrary.entries()
-        status = (kind == "py" ? "py 文件已导入为单站线路：" : "JS 规则已导入为单站线路：") + entry.name
     }
 }
 
@@ -469,6 +727,7 @@ struct AppearanceSettingsView: View {
     @AppStorage("themeMode.v1") private var themeMode = "dark"
     @AppStorage("tabShowRecords") private var showRecordsTab = true
     @AppStorage("tabShowLibrary") private var showLibraryTab = true
+    @AppStorage("haptics.enabled") private var hapticsEnabled = true
 
     var body: some View {
         SettingsPage(title: "外观与交互") {
@@ -493,6 +752,15 @@ struct AppearanceSettingsView: View {
                     Toggle("显示「资源库」", isOn: $showLibraryTab)
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Text("「发现」和「设置」固定显示。关掉正在看的页会自动回到发现。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("交互").font(.headline).foregroundStyle(Theme.text)
+                    Toggle("触控反馈", isOn: $hapticsEnabled)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("切换底部导航等操作时轻震一下；关掉后全局不再震动。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
@@ -559,6 +827,13 @@ struct PlaySettingsView: View {
     @AppStorage("skipIntroSeconds") private var skipIntroSeconds = 0
     @AppStorage("skipOutroSeconds") private var skipOutroSeconds = 0
     @AppStorage("mpvRenderer") private var mpvRenderer = "auto"
+    @AppStorage("player.showSpeed") private var showSpeed = true
+    @AppStorage("player.showResolution") private var showResolution = true
+    @AppStorage("player.showPiPButton") private var showPiPButton = true
+    @AppStorage("player.showAirPlayButton") private var showAirPlayButton = true
+    @AppStorage("player.showEpisodeButton") private var showEpisodeButton = true
+    @AppStorage("player.longPressBoost") private var longPressBoost = true
+    @AppStorage("player.autoNext") private var autoNext = true
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -593,6 +868,27 @@ struct PlaySettingsView: View {
                     SkipSecondsEditor(title: "片头跳过", seconds: $skipIntroSeconds)
                     SkipSecondsEditor(title: "片尾跳过", seconds: $skipOutroSeconds)
                     Text("每集开始自动快进片头设定的秒数；片尾剩余不足设定秒数时自动切下一集。0 = 关闭。续播时以续播位置为准，不再叠加跳片头。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("按钮与功能").font(.headline).foregroundStyle(Theme.text)
+                    Toggle("网速显示", isOn: $showSpeed)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("分辨率显示", isOn: $showResolution)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("画中画按钮", isOn: $showPiPButton)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("投屏按钮", isOn: $showAirPlayButton)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("选集按钮", isOn: $showEpisodeButton)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("长按倍速", isOn: $longPressBoost)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("自动播放下一集", isOn: $autoNext)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("关掉的项不再出现在播放页，对应功能同时停用；下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
