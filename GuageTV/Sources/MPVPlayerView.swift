@@ -103,6 +103,14 @@ final class MPVController: ObservableObject {
                 // to the VO without a CPU-side copy (mpv falls
                 // back internally when a codec can't do it).
                 setOptionOn(h, "vd-lavc-dr", "yes")
+                // GPU picture quality maxed (v1.35): EWA Lanczos
+                // up/down scaling with sigmoid upscaling and
+                // debanding — libplacebo's best built-in filters.
+                setOptionOn(h, "scale", "ewa_lanczos")
+                setOptionOn(h, "cscale", "ewa_lanczos")
+                setOptionOn(h, "dscale", "mitchell")
+                setOptionOn(h, "sigmoid-upscaling", "yes")
+                setOptionOn(h, "deband", "yes")
                 if UserDefaults.standard.string(forKey: "videoGravity") == "fill" {
                     setOptionOn(h, "panscan", "1.0")
                 }
@@ -113,16 +121,18 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "terminal", "no")
             setOptionOn(h, "msg-level", "all=warn")
             setOptionOn(h, "cache", "yes")
-            // cache-secs stays 60: it already caps total cached
-            // time above the 30s readahead target below; raising
-            // both would only grow memory, not smoothness.
-            setOptionOn(h, "cache-secs", "60")
-            setOptionOn(h, "demuxer-max-bytes", "128MiB")
-            setOptionOn(h, "demuxer-max-back-bytes", "32MiB")
+            // Buffers maxed (v1.35, at the user's explicit ask —
+            // the earlier "60s is enough" call is superseded):
+            // two minutes of cache, a 256MiB forward cap, and a
+            // 60s readahead target. Costs memory on long streams;
+            // buys real stall resistance on weak networks.
+            setOptionOn(h, "cache-secs", "120")
+            setOptionOn(h, "demuxer-max-bytes", "256MiB")
+            setOptionOn(h, "demuxer-max-back-bytes", "64MiB")
             // Read further ahead so brief network dips don't reach
             // the screen; hold playback while the cache refills
             // after an underrun instead of stutter-playing.
-            setOptionOn(h, "demuxer-readahead-secs", "30")
+            setOptionOn(h, "demuxer-readahead-secs", "60")
             setOptionOn(h, "cache-pause", "yes")
             setOptionOn(h, "cache-pause-wait", "1")
             // Network resilience: fail a stalled connection in

@@ -134,6 +134,13 @@ struct PlayerView: View {
     @AppStorage("player.showEpisodeButton") private var showEpisodeButton = true
     @AppStorage("player.longPressBoost") private var longPressBoostEnabled = true
     @AppStorage("player.autoNext") private var autoNextEnabled = true
+    /// Second wave of button switches (v1.35): every small chrome
+    /// button gets its own toggle in 设置 → 播放.
+    @AppStorage("player.showClock") private var showClock = true
+    @AppStorage("player.showScreenshot") private var showScreenshotButton = true
+    @AppStorage("player.showGravity") private var showGravityButton = true
+    @AppStorage("player.showRate") private var showRateButton = true
+    @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
     /// Same key 设置 → 音画 writes; the in-player settings sheet
     /// offers it too (mpv applies it on the next load).
     @AppStorage("videoGravity") private var videoGravity = "aspect"
@@ -447,32 +454,39 @@ struct PlayerView: View {
             }
             .playerGlassCapsule()
             Spacer()
-            HStack(spacing: 2) {
-                Button { toggleGravity(); pokeChrome() } label: {
-                    Image(systemName: "aspectratio")
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 44, height: 44)
-                }
-                Button { saveSnapshot() } label: {
-                    Image(systemName: "camera")
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 44, height: 44)
-                }
-                if !isMPV {
-                    if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
-                        Button { native.togglePiP() } label: {
-                            Image(systemName: native.isPiPActive ? "pip.exit" : "pip.enter")
-                                .font(.body.weight(.semibold)).foregroundStyle(.white)
+            if showClock { clockPill }
+            if showGravityButton || showScreenshotButton || !isMPV {
+                HStack(spacing: 2) {
+                    if showGravityButton {
+                        Button { toggleGravity(); pokeChrome() } label: {
+                            Image(systemName: "aspectratio")
+                                .foregroundStyle(Theme.text)
                                 .frame(width: 44, height: 44)
                         }
                     }
-                    if showAirPlayButton {
-                        RoutePickerView()
-                            .frame(width: 44, height: 44)
+                    if showScreenshotButton {
+                        Button { saveSnapshot() } label: {
+                            Image(systemName: "camera")
+                                .foregroundStyle(Theme.text)
+                                .frame(width: 44, height: 44)
+                        }
+                    }
+                    if !isMPV {
+                        if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
+                            Button { native.togglePiP() } label: {
+                                Image(systemName: native.isPiPActive ? "pip.exit" : "pip.enter")
+                                    .font(.body.weight(.semibold)).foregroundStyle(.white)
+                                    .frame(width: 44, height: 44)
+                            }
+                        }
+                        if showAirPlayButton {
+                            RoutePickerView()
+                                .frame(width: 44, height: 44)
+                        }
                     }
                 }
+                .playerGlassCapsule()
             }
-            .playerGlassCapsule()
         }
         .padding(.horizontal, 14)
         .padding(.top, 10)
@@ -516,6 +530,28 @@ struct PlayerView: View {
                     .playerGlassCapsule()
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
                 Spacer()
+                // Quick episode switch （上一集 / 下一集）: its own
+                // capsule in the spot the user circled on the
+                // reference shot, just left of the rate capsule.
+                if showEpisodeSwitch, episodes.count > 1 {
+                    HStack(spacing: 2) {
+                        Button { prevEpisode(); pokeChrome() } label: {
+                            Image(systemName: "backward.end.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(index > 0 ? Theme.text : Theme.text.opacity(0.35))
+                                .frame(width: 40, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        Button { nextEpisode(); pokeChrome() } label: {
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(index < episodes.count - 1 ? Theme.text : Theme.text.opacity(0.35))
+                                .frame(width: 40, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .playerGlassCapsule()
+                }
                 // Bottom-right, reference layout: ONE glass
                 // capsule — 选集 / 倍速 / ••• (the settings sheet).
                 HStack(spacing: 2) {
@@ -528,13 +564,15 @@ struct PlayerView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Button { cycleRate(); pokeChrome() } label: {
-                        Text("\(currentRate, specifier: "%.2g")x")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Theme.text)
-                            .frame(width: 44, height: 44)
+                    if showRateButton {
+                        Button { cycleRate(); pokeChrome() } label: {
+                            Text("\(currentRate, specifier: "%.2g")x")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Theme.text)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     Button { showPlayerSettings = true; pokeChrome() } label: {
                         Image(systemName: "ellipsis")
                             .font(.body.weight(.semibold))
@@ -548,6 +586,25 @@ struct PlayerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
+    }
+
+    private static let clockFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    /// Current wall-clock time for the top-right corner (the
+    /// reference players show it; 设置 → 播放 can hide it).
+    /// TimelineView re-renders it on a slow tick.
+    private var clockPill: some View {
+        TimelineView(.periodic(from: .now, by: 20)) { context in
+            Text(Self.clockFormatter.string(from: context.date))
+                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .playerGlassCapsule()
+        }
     }
 
     /// Network rate readout — top-left, next to the close controls
@@ -695,6 +752,11 @@ struct PlayerView: View {
                     Toggle("选集按钮", isOn: $showEpisodeButton)
                     Toggle("长按倍速", isOn: $longPressBoostEnabled)
                     Toggle("自动播放下一集", isOn: $autoNextEnabled)
+                    Toggle("当前时间显示", isOn: $showClock)
+                    Toggle("截图按钮", isOn: $showScreenshotButton)
+                    Toggle("画面适配按钮", isOn: $showGravityButton)
+                    Toggle("倍速按钮", isOn: $showRateButton)
+                    Toggle("切集按钮", isOn: $showEpisodeSwitch)
                 }
             }
             .navigationTitle("播放设置")
@@ -768,6 +830,17 @@ struct PlayerView: View {
     private func advanceToNext() {
         guard autoNextEnabled, index < episodes.count - 1 else { return }
         index += 1
+    }
+
+    /// Manual episode stepping from the quick-switch capsule —
+    /// deliberately NOT gated by the autoNext setting (that one
+    /// only governs hands-free advance when an episode ends).
+    private func prevEpisode() {
+        if index > 0 { index -= 1 } else { showToast("已经是第一集") }
+    }
+
+    private func nextEpisode() {
+        if index < episodes.count - 1 { index += 1 } else { showToast("已经是最后一集") }
     }
 
     /// Failure ladder, driven by both engines' failure callbacks:
@@ -1097,7 +1170,9 @@ final class NativeController: NSObject, ObservableObject {
             "AVURLAssetPreferPreciseDurationAndTimingKey": false,
         ])
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 30
+        // Forward buffer maxed (v1.35): a full minute of runway
+        // so brief network dips never reach the screen.
+        item.preferredForwardBufferDuration = 60
         // Adaptive HLS opens on the lowest eligible variant and
         // ramps up, instead of probing bandwidth at full rate
         // before the first frame.

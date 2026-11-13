@@ -65,7 +65,10 @@ struct DetailView: View {
                     episodeSection
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 16)
+                // Pulled UP over the hero's melt zone: the title
+                // sits on the fading edge of the cover instead of
+                // below a hard seam (the Rex detail look).
+                .padding(.top, -46)
             }
             // Lock the content to the scroll view's own width: a
             // single over-wide child (a long unbroken cast string
@@ -77,7 +80,8 @@ struct DetailView: View {
             // must be able to scroll fully out from under it.
             .padding(.bottom, 130)
         }
-        .background(AmbientBackground(imageURL: detail.pic))
+        .background(AmbientBackground(imageURL: detail.pic, intensity: 0.65))
+        .ignoresSafeArea(edges: .top)
         .onAppear {
             if let seed = historySeed {
                 isFav = HistoryStore.shared.isFavourite(siteKey: seed.siteKey, vodId: seed.vodId)
@@ -133,21 +137,27 @@ struct DetailView: View {
         return detail.pic
     }
 
-    /// Full-bleed poster hero; the gradient melts its bottom edge
-    /// into the page background.
+    /// Full-bleed poster hero, Rex-style: the cover runs to the
+    /// very top of the screen (under the status bar and the
+    /// floating back button) and its lower third melts gradually
+    /// into the page background — no hard seam anywhere.
     private var heroHeader: some View {
         ZStack(alignment: .bottom) {
             if !heroPic.isEmpty {
                 PosterImage(urlString: heroPic)
-                    .frame(height: 420)
+                    .frame(height: 500)
                     .clipped()
             } else {
-                Rectangle().fill(Theme.glass).frame(height: 420)
+                Rectangle().fill(Theme.glass).frame(height: 500)
             }
-            LinearGradient(colors: [.black.opacity(0.25), .clear,
-                                    Theme.bg.opacity(0.55), Theme.bg],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 420)
+            LinearGradient(gradient: Gradient(stops: [
+                .init(color: .black.opacity(0.22), location: 0),
+                .init(color: .clear, location: 0.30),
+                .init(color: Theme.bg.opacity(0.18), location: 0.55),
+                .init(color: Theme.bg.opacity(0.72), location: 0.80),
+                .init(color: Theme.bg, location: 1),
+            ]), startPoint: .top, endPoint: .bottom)
+                .frame(height: 500)
         }
         .frame(maxWidth: .infinity)
     }

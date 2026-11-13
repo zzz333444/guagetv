@@ -247,9 +247,11 @@ struct LibraryView: View {
             let isActive = entry.id == activeID
             let isHome = entry.id == homeID
             let isFile = ConfigLibrary.isPyFileEntry(entry) || entry.sourceURL.hasPrefix("js-import://")
-            // File lines (py / JS imports) get no role hint —
-            // the user asked the "点按打开" line off their cards.
-            let role = isActive ? "主线路" : (isHome ? "首页线路" : (isFile ? "" : "点按启用"))
+            // No tap-hint role lines at all (the user asked off
+            // first "点按打开" on file cards, then "点按启用" on
+            // plain lines): only the real states 主线路 / 首页线路
+            // still show.
+            let role = isActive ? "主线路" : (isHome ? "首页线路" : "")
             return LineCardModel(entry: entry,
                                  shownName: shown,
                                  iconText: String(shown.prefix(1)),

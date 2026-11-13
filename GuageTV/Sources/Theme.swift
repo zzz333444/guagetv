@@ -42,6 +42,9 @@ enum Theme {
 /// signature ambient background). Falls back to a deep neutral gradient.
 struct AmbientBackground: View {
     var imageURL: String?
+    /// How strongly the artwork tints the page; the detail page
+    /// pushes it higher so the cover melts into the whole screen.
+    var intensity: Double = 0.45
 
     var body: some View {
         ZStack {
@@ -49,7 +52,7 @@ struct AmbientBackground: View {
             if let imageURL, let url = URL(string: imageURL) {
                 AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
                     .blur(radius: 60)
-                    .opacity(0.45)
+                    .opacity(intensity)
                     .saturation(1.2)
             }
             LinearGradient(colors: [Theme.scrim, Theme.bg.opacity(0.88)],

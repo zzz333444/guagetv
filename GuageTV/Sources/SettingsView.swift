@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.34 · TMDB发现页与播放器改版"
+    static let buildLabel = "v1.35 · 详情融图与内核拉满"
 
     var body: some View {
         NavigationStack {
@@ -959,6 +959,11 @@ struct PlaySettingsView: View {
     @AppStorage("player.showEpisodeButton") private var showEpisodeButton = true
     @AppStorage("player.longPressBoost") private var longPressBoost = true
     @AppStorage("player.autoNext") private var autoNext = true
+    @AppStorage("player.showClock") private var showClock = true
+    @AppStorage("player.showScreenshot") private var showScreenshot = true
+    @AppStorage("player.showGravity") private var showGravity = true
+    @AppStorage("player.showRate") private var showRate = true
+    @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -1012,6 +1017,16 @@ struct PlaySettingsView: View {
                     Toggle("长按倍速", isOn: $longPressBoost)
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Toggle("自动播放下一集", isOn: $autoNext)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("当前时间显示", isOn: $showClock)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("截图按钮", isOn: $showScreenshot)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("画面适配按钮", isOn: $showGravity)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("倍速按钮", isOn: $showRate)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("切集按钮（上一集/下一集）", isOn: $showEpisodeSwitch)
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Text("关掉的项不再出现在播放页，对应功能同时停用；下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
