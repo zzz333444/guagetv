@@ -247,7 +247,9 @@ struct LibraryView: View {
             let isActive = entry.id == activeID
             let isHome = entry.id == homeID
             let isFile = ConfigLibrary.isPyFileEntry(entry) || entry.sourceURL.hasPrefix("js-import://")
-            let role = isActive ? "主线路" : (isHome ? "首页线路" : (isFile ? "点按打开" : "点按启用"))
+            // File lines (py / JS imports) get no role hint —
+            // the user asked the "点按打开" line off their cards.
+            let role = isActive ? "主线路" : (isHome ? "首页线路" : (isFile ? "" : "点按启用"))
             return LineCardModel(entry: entry,
                                  shownName: shown,
                                  iconText: String(shown.prefix(1)),
@@ -573,9 +575,11 @@ private struct LineCardView: View, Equatable {
                 Text(model.shownName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.text).lineLimit(2)
-                Text(model.roleText)
-                    .font(.caption)
-                    .foregroundStyle(model.isActive ? Theme.ok : (model.isHome ? Theme.accent : Theme.textDim))
+                if !model.roleText.isEmpty {
+                    Text(model.roleText)
+                        .font(.caption)
+                        .foregroundStyle(model.isActive ? Theme.ok : (model.isHome ? Theme.accent : Theme.textDim))
+                }
                 Text(model.kindText)
                     .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
             }

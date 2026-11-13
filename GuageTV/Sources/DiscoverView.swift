@@ -35,6 +35,21 @@ struct DiscoverView: View {
     @ObservedObject private var history = HistoryStore.shared
     @ObservedObject private var layout = HomeLayout.shared
     @State private var cwPlayEntry: HistoryStore.Entry?
+    // MARK: TMDB catalogue (v1.34 — the Discover page is TMDB-fed
+    // whenever TMDB is switched on with a key; tapping any title
+    // hands it to the cross-line search via searchSeed)
+    @State private var tmdbTrending: [TMDBClient.TMDBTitle] = []
+    @State private var tmdbMovies: [TMDBClient.TMDBTitle] = []
+    @State private var tmdbShows: [TMDBClient.TMDBTitle] = []
+    @State private var tmdbTop: [TMDBClient.TMDBTitle] = []
+    @State private var tmdbLoading = false
+    @State private var searchSeed = ""
+
+    private var tmdbMode: Bool { TMDBClient.isOn }
+    /// TMDB layout only once the catalogue actually landed; an
+    /// empty trending list (bad key, no network) falls back to the
+    /// line feed below instead of a blank page.
+    private var tmdbReady: Bool { tmdbMode && !tmdbTrending.isEmpty }
 
     /// First CMS site of the HOME line feeds the Discover page (the
     /// home line is chosen with the 编辑 button and may differ from
@@ -50,17 +65,34 @@ struct DiscoverView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
                     discoverHeader
-                    ForEach(layout.visibleModules) { module in
-                        switch module {
-                        case .hero:
-                            VStack(alignment: .leading, spacing: 26) {
-                                hero
-                                calendarStrip
+                    if tmdbReady {
+                        // TMDB catalogue layout: trending hero,
+                        // personal rows, then the TMDB poster rows.
+                        VStack(alignment: .leading, spacing: 26) {
+                            tmdbHero
+                            calendarStrip
+                        }
+                        continueWatchingRow
+                        updatesRow
+                        tmdbRow("热门电影", tmdbMovies)
+                        tmdbRow("热门剧集", tmdbShows)
+                        tmdbRow("高分佳作", tmdbTop)
+                    } else {
+                        if tmdbMode && !tmdbLoading {
+                            tmdbFailNote
+                        }
+                        ForEach(layout.visibleModules) { module in
+                            switch module {
+                            case .hero:
+                                VStack(alignment: .leading, spacing: 26) {
+                                    hero
+                                    calendarStrip
+                                }
+                            case .continueWatching: continueWatchingRow
+                            case .updates: updatesRow
+                            case .sections: sectionsGroup
+                            case .categories: categoryBrowse
                             }
-                        case .continueWatching: continueWatchingRow
-                        case .updates: updatesRow
-                        case .sections: sectionsGroup
-                        case .categories: categoryBrowse
                         }
                     }
                 }
@@ -70,7 +102,7 @@ struct DiscoverView: View {
                 .padding(.bottom, 110)   // clear the floating tab bar
             }
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
-            .background(AmbientBackground(imageURL: displayHero.first?.pic))
+            .background(AmbientBackground(imageURL: ambientPic))
             .overlay(alignment: .bottomLeading) {
                 editButton
                     .padding(.leading, 18)
@@ -78,7 +110,9 @@ struct DiscoverView: View {
             }
             .sheet(isPresented: $showLinePicker) { linePicker }
             .sheet(isPresented: $showSitePicker) { sitePicker }
-            .sheet(isPresented: $showSearch) { SearchView(config: config) }
+            .sheet(isPresented: $showSearch) {
+                SearchView(config: config, initialKeyword: searchSeed)
+            }
             .fullScreenCover(item: $cwPlayEntry) { entry in
                 PlayerView(
                     episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
@@ -92,7 +126,59 @@ struct DiscoverView: View {
                 }
             }
         }
-        .task(id: activeSite?.id ?? "") { await loadFeed() }
+        .task(id: activeSite?.id ?? "") { await loadHome() }
+    }
+
+    /// The page's ambient glow source: the top TMDB title's art in
+    /// TMDB mode, else the feed hero's poster.
+    private var ambientPic: String? {
+        if tmdbReady, let first = tmdbTrending.first {
+            return first.backdrop.isEmpty ? first.poster : first.backdrop
+        }
+        return displayHero.first?.pic
+    }
+
+    /// Feed dispatcher: TMDB catalogue first when it's on; the
+    /// line feed loads when TMDB is off, and also as the fallback
+    /// when TMDB answered with nothing.
+    private func loadHome() async {
+        if tmdbMode {
+            await loadTMDB()
+            if !tmdbTrending.isEmpty { return }
+        }
+        await loadFeed()
+    }
+
+    private func loadTMDB() async {
+        guard tmdbTrending.isEmpty, !tmdbLoading else { return }
+        tmdbLoading = true
+        async let trending = TMDBClient.trending()
+        async let movies = TMDBClient.popularMovies()
+        async let shows = TMDBClient.popularTV()
+        async let top = TMDBClient.topRated()
+        tmdbTrending = Array(await trending.prefix(8))
+        tmdbMovies = await movies
+        tmdbShows = await shows
+        tmdbTop = await top
+        tmdbLoading = false
+    }
+
+    /// A TMDB title tap: seed the search sheet with the title and
+    /// let SearchView auto-run the cross-line search.
+    private func openSearch(for title: String) {
+        Haptics.tap()
+        searchSeed = title
+        showSearch = true
+    }
+
+    private var tmdbFailNote: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+            Text("TMDB 没拉到数据，下面先显示线路内容；检查 设置 → TMDB 的密钥后重开 App 再试")
+                .font(.footnote)
+        }
+        .foregroundStyle(Theme.textDim)
+        .padding(.horizontal, 18)
     }
 
     /// 继续观看 — straight from HistoryStore: unfinished episodes,
@@ -227,9 +313,9 @@ struct DiscoverView: View {
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(Theme.text)
                 Spacer()
-                headerCircleButton(icon: "magnifyingglass") { showSearch = true }
+                headerCircleButton(icon: "magnifyingglass") { searchSeed = ""; showSearch = true }
             }
-            Button { showSearch = true } label: {
+            Button { searchSeed = ""; showSearch = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                     Text("搜索电影、剧集…")
@@ -554,6 +640,164 @@ struct DiscoverView: View {
                 }
             }
         }
+    }
+
+    // MARK: TMDB hero + rows
+
+    /// Trending carousel: same Rex hero shape as the feed hero,
+    /// but every page is a TMDB title and tapping it goes straight
+    /// to the cross-line search for that title.
+    private var tmdbHero: some View {
+        ZStack(alignment: .bottom) {
+            TabView(selection: $heroIndex) {
+                ForEach(tmdbTrending.indices, id: \.self) { idx in
+                    tmdbHeroPage(tmdbTrending[idx]).tag(idx)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 520)
+
+            if tmdbTrending.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(tmdbTrending.indices, id: \.self) { i in
+                        Circle()
+                            .fill(i == heroIndex ? Color.white : Color.white.opacity(0.35))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .padding(.bottom, 10)
+            }
+        }
+        .task(id: tmdbTrending.count) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if Task.isCancelled { break }
+                if tmdbTrending.count > 1 {
+                    withAnimation { heroIndex = (heroIndex + 1) % tmdbTrending.count }
+                }
+            }
+        }
+    }
+
+    private func tmdbHeroPage(_ item: TMDBClient.TMDBTitle) -> some View {
+        let art = item.backdrop.isEmpty ? item.poster : item.backdrop
+        return ZStack {
+            if !art.isEmpty {
+                PosterImage(urlString: art)
+                    .frame(height: 520).clipped()
+            } else {
+                heroPlaceholder.frame(height: 520)
+            }
+            LinearGradient(colors: [.black.opacity(0.30), .clear, .black.opacity(0.45), Theme.bg],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 9) {
+                Spacer()
+                Text(item.title)
+                    .font(.system(size: 34, weight: .heavy))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Theme.text)
+                    .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
+                    .lineLimit(2)
+                    .padding(.horizontal, 28)
+                if !item.overview.isEmpty {
+                    Text(item.overview)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Theme.text.opacity(0.75))
+                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                        .lineLimit(2)
+                        .padding(.horizontal, 40)
+                }
+                HStack(spacing: 8) {
+                    Text(item.mediaType == "tv" ? "剧集" : "电影")
+                        .font(.subheadline.weight(.medium))
+                    if !item.year.isEmpty {
+                        Text(item.year).font(.subheadline.weight(.medium))
+                    }
+                    if !item.score.isEmpty {
+                        HStack(spacing: 5) {
+                            Image(systemName: "star.fill").font(.caption2)
+                            Text("TMDB \(item.score)").font(.caption.weight(.bold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
+                    }
+                    HStack(spacing: 5) {
+                        Image(systemName: "magnifyingglass").font(.caption2)
+                        Text("点开即搜").font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(Theme.text.opacity(0.92))
+                }
+                .foregroundStyle(Theme.text.opacity(0.92))
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .glassCapsule()
+                Spacer().frame(height: 30)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { openSearch(for: item.title) }
+    }
+
+    /// One TMDB poster row （热门电影 / 热门剧集 / 高分佳作）.
+    @ViewBuilder
+    private func tmdbRow(_ title: String, _ items: [TMDBClient.TMDBTitle]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
+                    Spacer()
+                    Text("TMDB")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textDim)
+                }
+                .padding(.horizontal, 18)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(items) { item in
+                            tmdbPosterCard(item)
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+    private func tmdbPosterCard(_ item: TMDBClient.TMDBTitle) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                if !item.poster.isEmpty {
+                    PosterImage(urlString: item.poster)
+                        .frame(width: 112, height: 168)
+                        .posterFrame()
+                } else {
+                    posterPlaceholder.frame(width: 112, height: 168).posterFrame()
+                }
+                if !item.score.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill").font(.system(size: 8))
+                        Text(item.score).font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color(red: 0.05, green: 0.45, blue: 0.65).opacity(0.92), in: Capsule())
+                    .padding(6)
+                }
+            }
+            Text(item.title)
+                .font(.footnote).foregroundStyle(Theme.text.opacity(0.92))
+                .lineLimit(1).frame(width: 112, alignment: .leading)
+            Text([item.year, item.mediaType == "tv" ? "剧集" : "电影"]
+                .filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.caption).foregroundStyle(Theme.textDim)
+        }
+        .padding(8)
+        .glassPanel(cornerRadius: 18)
+        .contentShape(Rectangle())
+        .onTapGesture { openSearch(for: item.title) }
     }
 
     /// Rex's hero: full-bleed art, everything centred — big title,

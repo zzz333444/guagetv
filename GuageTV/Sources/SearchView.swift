@@ -4,6 +4,10 @@ import SwiftUI
 /// the embedded Python runtime, drpy sites via the JS engine.
 struct SearchView: View {
     var config: TVBoxConfig?
+    /// Seeded keyword (the Discover page's TMDB rows hand their
+    /// title over through this): filled into the field and searched
+    /// automatically on first appearance.
+    var initialKeyword: String = ""
     @Environment(\.dismiss) private var dismiss
 
     @State private var keyword = ""
@@ -72,6 +76,12 @@ struct SearchView: View {
             }
             .background(AmbientBackground(imageURL: nil))
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .onAppear {
+            if keyword.isEmpty, !initialKeyword.isEmpty {
+                keyword = initialKeyword
+                beginSearch()
+            }
         }
     }
 

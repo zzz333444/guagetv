@@ -6,10 +6,10 @@ import UIKit
 
 /// Playback page — dual engine under ONE custom chrome (v8, modelled on
 /// the reference layout the user picked):
-///  - top-left: close + [rotate, lock] pill; top-right: [screenshot,
-///    AirPlay] pill; left edge: brightness slider
+///  - top-left: close + [rotate, lock] pill; top-right: [aspect,
+///    screenshot, PiP/AirPlay] pill
 ///  - bottom: title/episode block, thin seek bar with a round knob,
-///    [play/pause + time pill] … [episode list, more] pill
+///    [play/pause + time pill] … [episode list, rate, more] pill
 ///  - single tap toggles chrome, double tap left/right seeks ∓step
 /// Engines: AVPlayer via AVPlayerLayer (HLS/MP4 — hardware decode) or
 /// libmpv (MKV/FLV/TS/… — FFmpeg). Engine by extension, forceable in
@@ -42,7 +42,6 @@ struct PlayerView: View {
     /// brightness setting （设置 → 音画 → 单独调整播放亮度） takes
     /// over, restored verbatim when the player closes.
     @State private var brightnessBeforePlay: CGFloat?
-    @State private var showSkipSheet = false
     @State private var rotationLocked = false
     @State private var toast: String?
     @State private var dragMode: DragMode?
@@ -449,13 +448,10 @@ struct PlayerView: View {
             .playerGlassCapsule()
             Spacer()
             HStack(spacing: 2) {
-                Button { showSkipSheet = true; pokeChrome() } label: {
-                    Image(systemName: "goforward.plus")
+                Button { toggleGravity(); pokeChrome() } label: {
+                    Image(systemName: "aspectratio")
                         .foregroundStyle(Theme.text)
                         .frame(width: 44, height: 44)
-                }
-                .sheet(isPresented: $showSkipSheet) {
-                    SkipSettingsSheet()
                 }
                 Button { saveSnapshot() } label: {
                     Image(systemName: "camera")
@@ -520,29 +516,34 @@ struct PlayerView: View {
                     .playerGlassCapsule()
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
                 Spacer()
-                // Bottom-right pair: 选集 and 设置 as their own
-                // glass circles (the old shared capsule with its
-                // ellipsis menu folded into the settings sheet).
-                HStack(spacing: 10) {
+                // Bottom-right, reference layout: ONE glass
+                // capsule — 选集 / 倍速 / ••• (the settings sheet).
+                HStack(spacing: 2) {
                     if showEpisodeButton, episodes.count > 1 {
                         Button { showEpisodes = true; pokeChrome() } label: {
                             Image(systemName: "list.bullet")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(Theme.text)
                                 .frame(width: 44, height: 44)
-                                .playerGlassCircle()
                         }
                         .buttonStyle(.plain)
                     }
+                    Button { cycleRate(); pokeChrome() } label: {
+                        Text("\(currentRate, specifier: "%.2g")x")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Theme.text)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
                     Button { showPlayerSettings = true; pokeChrome() } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "ellipsis")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(Theme.text)
                             .frame(width: 44, height: 44)
-                            .playerGlassCircle()
                     }
                     .buttonStyle(.plain)
                 }
+                .playerGlassCapsule()
             }
         }
         .padding(.horizontal, 16)
@@ -662,6 +663,14 @@ struct PlayerView: View {
                             .foregroundStyle(Theme.text)
                     }
                 }
+                Section("跳过片头片尾") {
+                    Stepper(value: $skipIntroSeconds, in: 0...600, step: 5) {
+                        Text("片头跳过 \(skipIntroSeconds) 秒").foregroundStyle(Theme.text)
+                    }
+                    Stepper(value: $skipOutroSeconds, in: 0...600, step: 5) {
+                        Text("片尾跳过 \(skipOutroSeconds) 秒").foregroundStyle(Theme.text)
+                    }
+                }
                 Section("引擎") {
                     Button {
                         switchEngine(manual: true)
@@ -711,6 +720,26 @@ struct PlayerView: View {
     private func seekBy(_ delta: Double) { isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
     private func setRate(_ rate: Double) {
         if isMPV { mpv.setSpeed(rate) } else { native.setRate(Float(rate)) }
+    }
+
+    /// Bottom-right capsule's rate slot: cycle the standard
+    /// ladder, toast the landing rate.
+    private func cycleRate() {
+        let order = [1.0, 1.25, 1.5, 2.0, 0.5]
+        let idx = order.firstIndex { abs($0 - currentRate) < 0.01 } ?? 0
+        let next = order[(idx + 1) % order.count]
+        setRate(next)
+        showToast("倍速 \(next, specifier: "%.2g")x")
+    }
+
+    /// Top-right capsule's first slot: 画面适配 ↔ 画面填充，
+    /// applied live on both engines (mpv panscan property,
+    /// AVPlayerLayer videoGravity via updateUIView).
+    private func toggleGravity() {
+        let fill = videoGravity != "fill"
+        videoGravity = fill ? "fill" : "aspect"
+        if isMPV { mpv.setFill(fill) }
+        showToast(fill ? "画面填充" : "画面适应")
     }
 
     /// Engine switch that keeps the playhead: the fresh engine
@@ -1189,17 +1218,26 @@ private struct AVPlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
     var onLayer: ((AVPlayerLayer) -> Void)?
 
+    /// 画面适配 from the shared setting: fill crops to the
+    /// screen, aspect letterboxes. Read at make AND update time
+    /// so the player's top-bar toggle lands live.
+    private static var gravity: AVLayerVideoGravity {
+        UserDefaults.standard.string(forKey: "videoGravity") == "fill"
+            ? .resizeAspectFill : .resizeAspect
+    }
+
     func makeUIView(context: Context) -> PlayerLayerUIView {
         let view = PlayerLayerUIView()
         view.backgroundColor = .black
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.videoGravity = Self.gravity
         onLayer?(view.playerLayer)
         return view
     }
 
     func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {
         uiView.playerLayer.player = player
+        uiView.playerLayer.videoGravity = Self.gravity
     }
 }
 

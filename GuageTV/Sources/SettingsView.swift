@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.33 · 搜索改版与音画增强"
+    static let buildLabel = "v1.34 · TMDB发现页与播放器改版"
 
     var body: some View {
         NavigationStack {

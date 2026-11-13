@@ -264,6 +264,12 @@ final class MPVController: ObservableObject {
         command(["seek", String(delta), "relative"])
     }
 
+    /// Live 画面适配 switch from the player's top bar: panscan is
+    /// a plain runtime property, no reload needed.
+    func setFill(_ fill: Bool) {
+        setProperty("panscan", fill ? "1.0" : "0.0")
+    }
+
     // MARK: rendering (called from the view's display link, main thread)
 
     func renderFrame(maxSize: CGSize, scale: CGFloat) -> CGImage? {

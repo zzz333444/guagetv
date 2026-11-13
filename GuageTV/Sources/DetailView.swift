@@ -67,7 +67,15 @@ struct DetailView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 16)
             }
-            .padding(.bottom, 40)
+            // Lock the content to the scroll view's own width: a
+            // single over-wide child (a long unbroken cast string
+            // is enough) used to stretch the whole page past the
+            // screen edges, pushing text and the episode grid off
+            // both sides.
+            .containerRelativeFrame(.horizontal, alignment: .leading)
+            // Clear the floating tab bar: the last episode rows
+            // must be able to scroll fully out from under it.
+            .padding(.bottom, 130)
         }
         .background(AmbientBackground(imageURL: detail.pic))
         .onAppear {
@@ -160,11 +168,13 @@ struct DetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.textDim)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if !detail.remarks.isEmpty {
                 Text(detail.remarks)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.accent)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let score = tmdbInfo?.score, !score.isEmpty {
                 HStack(spacing: 5) {
@@ -253,6 +263,8 @@ struct DetailView: View {
                 .font(.subheadline).foregroundStyle(Theme.text.opacity(0.75))
                 .lineSpacing(4)
                 .lineLimit(synopsisExpanded ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
                 Spacer()
                 Button(synopsisExpanded ? "收起" : "展开") {
@@ -304,9 +316,16 @@ struct DetailView: View {
             if !value.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
                     Text(label).foregroundStyle(Theme.textDim)
+                        .fixedSize(horizontal: true, vertical: false)
+                    // fixedSize(horizontal: false) is the point:
+                    // inside an HStack a Text otherwise claims its
+                    // full single-line intrinsic width and shoves
+                    // the whole page sideways instead of wrapping.
                     Text(value).foregroundStyle(Theme.text.opacity(0.88)).lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

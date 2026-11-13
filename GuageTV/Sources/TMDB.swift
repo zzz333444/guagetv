@@ -76,6 +76,76 @@ enum TMDBClient {
         return info
     }
 
+    // MARK: Discover catalogue lists
+
+    /// One TMDB catalogue title, for the Discover page's hero and
+    /// poster rows. Tapping one never plays from TMDB (it has no
+    /// streams) — it hands the title to the cross-line search.
+    struct TMDBTitle: Identifiable {
+        var id: Int
+        var mediaType: String   // "movie" | "tv"
+        var title: String
+        var poster: String      // w500 URL, "" when TMDB has none
+        var backdrop: String    // w780 URL, "" when TMDB has none
+        var score: String
+        var year: String
+        var overview: String
+    }
+
+    private static func fetchTitles(_ path: String, forcedType: String?) async -> [TMDBTitle] {
+        guard isOn else { return [] }
+        var comps = URLComponents(string: base + path)
+        comps?.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "language", value: "zh-CN"),
+        ]
+        guard let url = comps?.url,
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = root["results"] as? [[String: Any]] else { return [] }
+        return results.compactMap { r in
+            let type = forcedType ?? (r["media_type"] as? String ?? "")
+            guard type == "movie" || type == "tv" else { return nil }
+            let title = (r["title"] as? String) ?? (r["name"] as? String) ?? ""
+            guard !title.isEmpty, let tmdbID = (r["id"] as? NSNumber)?.intValue else { return nil }
+            let date = (r["release_date"] as? String) ?? (r["first_air_date"] as? String) ?? ""
+            let posterPath = r["poster_path"] as? String ?? ""
+            let backdropPath = r["backdrop_path"] as? String ?? ""
+            let vote = (r["vote_average"] as? NSNumber)?.doubleValue ?? 0
+            return TMDBTitle(
+                id: tmdbID, mediaType: type, title: title,
+                poster: posterPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w500" + posterPath,
+                backdrop: backdropPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w780" + backdropPath,
+                score: vote > 0 ? String(format: "%.1f", vote) : "",
+                year: String(date.prefix(4)),
+                overview: r["overview"] as? String ?? "")
+        }
+    }
+
+    static func trending() async -> [TMDBTitle] {
+        await fetchTitles("/3/trending/all/day", forcedType: nil)
+    }
+
+    static func popularMovies() async -> [TMDBTitle] {
+        await fetchTitles("/3/movie/popular", forcedType: "movie")
+    }
+
+    static func popularTV() async -> [TMDBTitle] {
+        await fetchTitles("/3/tv/popular", forcedType: "tv")
+    }
+
+    static func topRated() async -> [TMDBTitle] {
+        let movies = await fetchTitles("/3/movie/top_rated", forcedType: "movie")
+        let shows = await fetchTitles("/3/tv/top_rated", forcedType: "tv")
+        // Interleave so the row mixes both kinds evenly.
+        var merged: [TMDBTitle] = []
+        for i in 0..<max(movies.count, shows.count) {
+            if i < movies.count { merged.append(movies[i]) }
+            if i < shows.count { merged.append(shows[i]) }
+        }
+        return merged
+    }
+
     /// Settings-page probe: the configuration endpoint answers 200
     /// only with a valid key.
     static func testConnection() async -> String {
