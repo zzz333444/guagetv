@@ -2,7 +2,7 @@ name: GuageTV
 options:
   bundleIdPrefix: com.guage
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 packages:
   # FFmpegKit (kingslay fork): its libmpv product ships a real iOS-device
   # slice (checked: ios-arm64 present) — FFmpeg demux/decode + libass +
