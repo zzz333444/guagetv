@@ -47,19 +47,28 @@ struct TVBoxConfig: Decodable {
 
         enum Kind { case cmsXML, cmsJSON, spiderPY, spiderJS, spiderJAR, drpyJS, unknown }
 
-        /// Which runtime this site needs. iOS has no JVM, so .jar spiders are
-        /// the one mainstream kind this shell can never execute (Apple forbids
-        /// it platform-wide); they are listed but marked unsupported in the UI.
+        /// Which runtime this site needs. Jar spiders run through
+        /// the user's JarProxy (see JarSiteBrowseView).
         var kind: Kind {
-            let a = api.lowercased()
+            // Real-world configs decorate script URLs — subscription
+            // endpoints append "?token=…" and TVBox appends
+            // ";md5;…" trailers — so a bare hasSuffix(".js") misses
+            // them and whole configs land in "unknown". Strip both
+            // decorations first, then judge the extension anywhere
+            // in the path, not only at the very end.
+            var a = api.lowercased()
+            if let cut = a.firstIndex(of: ";") { a = String(a[..<cut]) }
+            if let cut = a.firstIndex(of: "?") { a = String(a[..<cut]) }
             switch type {
             case 0: return .cmsXML
             case 1: return .cmsJSON
             case 4: return .drpyJS
             case 3:
-                if a.hasSuffix(".py") || a.contains("py/") { return .spiderPY }
-                if a.hasSuffix(".js") || a.contains("js/") || a.hasPrefix("csp_js") { return .spiderJS }
+                if a.hasSuffix(".py") { return .spiderPY }
+                if a.hasSuffix(".js") || a.hasPrefix("csp_js") { return .spiderJS }
                 if a.hasSuffix(".jar") || a.hasPrefix("csp_") { return .spiderJAR }
+                if a.contains(".py") { return .spiderPY }
+                if a.contains(".js") { return .spiderJS }
                 return .unknown
             default: return .unknown
             }

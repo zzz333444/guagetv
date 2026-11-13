@@ -15,6 +15,8 @@ struct LibraryView: View {
     @State private var kindSummary: [String: String] = [:]
     @State private var renamingEntry: ConfigLibrary.Entry?
     @State private var renameText = ""
+    /// Which line card currently has its swipe-delete revealed.
+    @State private var swipeOpenID: String?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -39,7 +41,13 @@ struct LibraryView: View {
                     Text(section.title).font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(section.items) { entry in
-                            lineCard(entry)
+                            SwipeRevealDelete(id: entry.id, openID: $swipeOpenID, onDelete: {
+                                config = ConfigLibrary.remove(id: entry.id)
+                                swipeOpenID = nil
+                                refreshLibrary()
+                            }) {
+                                lineCard(entry)
+                            }
                         }
                     }
                 }
@@ -217,6 +225,12 @@ struct LibraryView: View {
                 .strokeBorder(isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture {
+            // A tap while any card's delete is revealed just closes
+            // it (the usual swipe-list behaviour).
+            if swipeOpenID != nil {
+                withAnimation(.easeOut(duration: 0.18)) { swipeOpenID = nil }
+                return
+            }
             guard !isActive else { return }
             config = ConfigLibrary.activate(id: entry.id)
             JarProxyClient.warmLine(id: entry.id)
@@ -301,6 +315,62 @@ struct LibraryView: View {
         case .drpyJS: return "drpy 源"
         case .spiderJAR: return JarProxyClient.configured ? "Jar 源 · 代理执行" : "Jar 源 · 需设置代理"
         case .unknown: return "未知类型"
+        }
+    }
+}
+
+/// Left-swipe delete reveal for grid cards (the library is a
+/// grid, not a List, so the reveal is hand-rolled): the card
+/// slides over a red delete panel; the drag runs simultaneously
+/// with the page scroll and only bites on horizontal drags.
+private struct SwipeRevealDelete<Content: View>: View {
+    let id: String
+    @Binding var openID: String?
+    let onDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+    @State private var dragX: CGFloat = 0
+
+    private let reveal: CGFloat = 78
+    private var base: CGFloat { openID == id ? -reveal : 0 }
+    private var offset: CGFloat { min(0, max(-reveal - 14, base + dragX)) }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button {
+                onDelete()
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "trash")
+                    Text("删除").font(.caption2)
+                }
+                .foregroundStyle(.white)
+                .frame(width: reveal)
+                .frame(maxHeight: .infinity)
+                .background(Color.red.opacity(0.85),
+                            in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .opacity(offset < -8 ? 1 : 0)
+
+            content()
+                .offset(x: offset)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 14, coordinateSpace: .local)
+                        .onChanged { v in
+                            guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                            dragX = v.translation.width
+                        }
+                        .onEnded { v in
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                if base + v.translation.width < -reveal / 2 {
+                                    openID = id
+                                } else if openID == id, v.translation.width > 12 {
+                                    openID = nil
+                                }
+                                dragX = 0
+                            }
+                        }
+                )
         }
     }
 }

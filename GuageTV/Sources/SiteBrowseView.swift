@@ -108,15 +108,83 @@ struct SiteBrowseView: View {
     var body: some View {
         Group {
             if isCMS { cmsBody }
-            else if site.kind == .spiderPY { PySiteBrowseView(site: site, parses: parses) }
-            else if site.kind == .spiderJS || site.kind == .drpyJS { JSSiteBrowseView(site: site, parses: parses) }
-            else if site.kind == .spiderJAR && JarProxyClient.configured { JarSiteBrowseView(site: site, parses: parses) }
+            else if effectiveKind == .spiderPY { PySiteBrowseView(site: site, parses: parses) }
+            else if effectiveKind == .spiderJS || effectiveKind == .drpyJS { JSSiteBrowseView(site: site, parses: parses) }
+            else if effectiveKind == .spiderJAR && JarProxyClient.configured { JarSiteBrowseView(site: site, parses: parses) }
+            else if canProbe { probeBody }
             else { pendingBody }
         }
         .navigationTitle(site.name)
         .navigationBarTitleDisplayMode(.inline)
         .background(AmbientBackground(imageURL: items.first?.pic))
         .task { if isCMS { await loadHome() } }
+        .task { if canProbe { await probeKind() } }
+    }
+
+    // MARK: Unknown-kind probe
+
+    /// Sites whose api gives no usable extension (subscription
+    /// endpoints, tokenised URLs) stay .unknown after static
+    /// classification. For type-3 http(s) sites, sniff the script
+    /// itself: Python spiders all carry the base.spider import,
+    /// JS sources are unmistakably JS. The verdict is cached per
+    /// site for the session.
+    @State private var probedKind: TVBoxConfig.Site.Kind?
+    @State private var probeDone = false
+    private static var probeCache: [String: TVBoxConfig.Site.Kind] = [:]
+
+    private var effectiveKind: TVBoxConfig.Site.Kind { probedKind ?? site.kind }
+
+    private var canProbe: Bool {
+        site.kind == .unknown && site.type == 3 && probedKind == nil && !probeDone
+            && (site.api.hasPrefix("http") || site.api.contains("/"))
+    }
+
+    private var probeBody: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            ProgressView().tint(Theme.text)
+            Text(site.name).font(.headline).foregroundStyle(Theme.text)
+            Text("正在识别站点类型…")
+                .font(.subheadline).foregroundStyle(Theme.textDim)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func probeKind() async {
+        defer { probeDone = true }
+        let cacheKey = site.key + "|" + site.api
+        if let hit = Self.probeCache[cacheKey] {
+            probedKind = hit
+            return
+        }
+        guard let url = probeURL(),
+              let data = try? await NetFetch.data(from: url),
+              let text = String(data: data.prefix(8192), encoding: .utf8) else { return }
+        let lower = text.lowercased()
+        var found: TVBoxConfig.Site.Kind?
+        if lower.contains("base.spider") || lower.contains("from spider")
+            || (lower.contains("def init") && lower.contains("import ")) {
+            found = .spiderPY
+        } else if lower.contains("__jsevalreturn") || lower.contains("function")
+            || lower.contains("const ") || lower.contains("var ")
+            || lower.contains("let ") || lower.contains("=>") {
+            found = .spiderJS
+        }
+        if let found {
+            Self.probeCache[cacheKey] = found
+            probedKind = found
+        }
+    }
+
+    private func probeURL() -> URL? {
+        if let direct = URL(string: site.api), direct.scheme?.hasPrefix("http") == true {
+            return direct
+        }
+        guard let baseText = UserDefaults.standard.string(forKey: "configSourceURL"),
+              let base = URL(string: baseText) else { return nil }
+        return URL(string: site.api, relativeTo: base)?.absoluteURL
     }
 
     // MARK: CMS browsing
