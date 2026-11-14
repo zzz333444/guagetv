@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import UserNotifications
 
 /// Offline downloads. Two engines, one list:
 ///  - direct media files (mp4/mkv/ts…) via a plain URLSession
@@ -33,8 +34,12 @@ final class DownloadManager: NSObject, ObservableObject {
 
     @Published private(set) var items: [Item] = []
 
+    /// Background session (v1.42): file downloads keep running
+    /// with the app in the background or even terminated; tasks
+    /// are re-mapped to manifest items on relaunch.
     private lazy var fileSession: URLSession =
-        URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+        URLSession(configuration: .background(withIdentifier: "tv.guage.file-downloads"),
+                   delegate: self, delegateQueue: .main)
     private lazy var hlsSession: AVAssetDownloadURLSession =
         AVAssetDownloadURLSession(configuration: .background(withIdentifier: "tv.guage.hls-downloads"),
                                   assetDownloadDelegate: self, delegateQueue: .main)
@@ -56,6 +61,86 @@ final class DownloadManager: NSObject, ObservableObject {
     override init() {
         super.init()
         load()
+        reconnectTasks()
+    }
+
+    // MARK: resume data + relaunch reconnection
+
+    /// Resume blobs live in a side store so the downloads.json
+    /// manifest schema never has to change.
+    private static let resumeKey = "downloadResumeData.v1"
+
+    private func resumeData(for id: String) -> Data? {
+        let map = UserDefaults.standard.dictionary(forKey: Self.resumeKey) as? [String: String] ?? [:]
+        return map[id].flatMap { Data(base64Encoded: $0) }
+    }
+
+    private func storeResumeData(for id: String, data: Data?) {
+        var map = UserDefaults.standard.dictionary(forKey: Self.resumeKey) as? [String: String] ?? [:]
+        if let data {
+            map[id] = data.base64EncodedString()
+        } else {
+            map.removeValue(forKey: id)
+        }
+        UserDefaults.standard.set(map, forKey: Self.resumeKey)
+    }
+
+    /// On relaunch, background-session tasks may still be alive:
+    /// re-attach them to their items. An item with no live task
+    /// left becomes "paused" when a resume blob exists,
+    /// otherwise "failed" (the pre-v1.42 behaviour).
+    private func reconnectTasks() {
+        fileSession.getAllTasks { [weak self] tasks in
+            guard let self else { return }
+            var liveIDs = Set<String>()
+            for task in tasks {
+                guard let url = task.originalRequest?.url?.absoluteString,
+                      let item = self.items.first(where: {
+                          $0.remoteURL == url && $0.state == "downloading"
+                      }) else { continue }
+                self.fileTaskIDs[task.taskIdentifier] = item.id
+                liveIDs.insert(item.id)
+            }
+            var changed = false
+            for item in self.items where item.state == "downloading" && !liveIDs.contains(item.id) {
+                self.update(item.id, save: false) {
+                    $0.state = self.resumeData(for: item.id) != nil ? "paused" : "failed"
+                }
+                changed = true
+            }
+            if changed { self.save() }
+        }
+    }
+
+    /// Retry / resume (v1.42): file downloads resume from the
+    /// stored blob when one exists (断点续传）, everything else
+    /// restarts cleanly.
+    func retry(_ item: Item) {
+        guard item.state == "failed" || item.state == "paused" else { return }
+        update(item.id) { $0.state = "downloading" }
+        if item.isHLS {
+            startHLS(item)
+        } else if let data = resumeData(for: item.id) {
+            let task = fileSession.downloadTask(withResumeData: data)
+            fileTaskIDs[task.taskIdentifier] = item.id
+            task.resume()
+        } else {
+            startFile(item)
+        }
+    }
+
+    private func notifyFinished(_ item: Item) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "下载完成"
+            content.body = "《\(item.vodName)》\(item.episodeName) 已下载好"
+            content.sound = .default
+            center.add(UNNotificationRequest(
+                identifier: "download-\(item.id)", content: content, trigger: nil))
+        }
     }
 
     // MARK: public API
@@ -84,6 +169,7 @@ final class DownloadManager: NSObject, ObservableObject {
                                  : mediaDir.appendingPathComponent(item.localPath)
             try? FileManager.default.removeItem(at: url)
         }
+        storeResumeData(for: item.id, data: nil)
         items.removeAll { $0.id == item.id }
         save()
     }
@@ -181,10 +267,10 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func load() {
         guard let data = try? Data(contentsOf: manifestURL),
-              var list = try? JSONDecoder().decode([Item].self, from: data) else { return }
-        for i in list.indices where list[i].state == "downloading" {
-            list[i].state = "failed"
-        }
+              let list = try? JSONDecoder().decode([Item].self, from: data) else { return }
+        // "downloading" survives into reconnectTasks(), which
+        // decides per item: live task, paused ( resumable ), or
+        // failed.
         items = list
     }
 
@@ -217,6 +303,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 $0.localPath = name
                 $0.totalBytes = size
             }
+            storeResumeData(for: id, data: nil)
+            if let finished = items.first(where: { $0.id == id }) {
+                notifyFinished(finished)
+            }
         } catch {
             markFailed(id)
         }
@@ -239,7 +329,15 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     didCompleteWithError error: Error?) {
         guard let error else { return }
         if let id = fileTaskIDs[task.taskIdentifier] {
-            markFailed(id)
+            // A resume blob turns a failure into a pause: the
+            // download continues where it stopped on retry.
+            let resume = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+            if let resume {
+                storeResumeData(for: id, data: resume)
+                update(id) { $0.state = "paused" }
+            } else {
+                markFailed(id)
+            }
             fileTaskIDs[task.taskIdentifier] = nil
         }
         let hlsIDs = hlsTasks.filter { $0.value === task }.map { $0.key }
@@ -261,6 +359,9 @@ extension DownloadManager: AVAssetDownloadDelegate {
                 $0.state = "done"
                 $0.progress = 1
                 $0.localPath = location.path
+            }
+            if let finished = items.first(where: { $0.id == id }) {
+                notifyFinished(finished)
             }
             hlsTasks[id] = nil
         }

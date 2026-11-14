@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UserNotifications
 
 /// Local watch history + favourites, persisted as JSON in the app sandbox.
 /// Feeds three Rex-style surfaces: 继续观看 on Discover, the Profile stats
@@ -176,6 +177,8 @@ final class HistoryStore: ObservableObject {
     /// favourites are skipped (their bridges load one spider at a
     /// time; a mass check would thrash them).
     func checkFavouritesForUpdates() async {
+        WatchNotify.requestAuthorizationIfNeeded()
+        var newlyUpdated: [String] = []
         for entry in favourites {
             guard !entry.lineID.isEmpty,
                   let config = ConfigLibrary.load(id: entry.lineID),
@@ -187,11 +190,13 @@ final class HistoryStore: ObservableObject {
             if remarks != entry.lastRemarks, !entry.lastRemarks.isEmpty || entry.hasUpdate == false {
                 if remarks != entry.lastRemarks,
                    let i = entries.firstIndex(where: { $0.id == entry.id }) {
+                    if !entries[i].hasUpdate { newlyUpdated.append(entries[i].name) }
                     entries[i].hasUpdate = true
                     save()
                 }
             }
         }
+        WatchNotify.postIfEnabled(titles: newlyUpdated)
     }
 
     var favourites: [Entry] { entries.filter(\.isFavourite) }
@@ -225,4 +230,43 @@ struct HistorySeed {
     let siteKey: String
     let siteName: String
     let vodId: String
+}
+
+/// Local notifications for watchlist updates (v1.42). Posted
+/// from the same throttled update check that fills the 追剧
+/// page — no background fetching is promised: the check runs
+/// when the app is opened / the 追剧 page refreshes, and a hit
+/// raises a notification so the update is not missed.
+enum WatchNotify {
+    static var enabled: Bool {
+        UserDefaults.standard.object(forKey: "watchNotify.enabled") as? Bool ?? true
+    }
+
+    static func requestAuthorizationIfNeeded() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            if settings.authorizationStatus == .notDetermined {
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+            }
+        }
+    }
+
+    static func postIfEnabled(titles: [String]) {
+        guard enabled, !titles.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "追剧更新"
+            content.body = titles.count == 1
+                ? "《\(titles[0])》更新了，点开追剧页就能看"
+                : "《\(titles[0])》等 \(titles.count) 部追剧更新了"
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "watch-update-\(Int(Date().timeIntervalSince1970))",
+                content: content, trigger: nil)
+            center.add(request)
+        }
+    }
 }

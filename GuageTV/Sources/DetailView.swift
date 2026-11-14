@@ -483,6 +483,18 @@ struct DetailView: View {
                     episodeCard(ep, in: episodes)
                 }
             }
+            if episodes.count > 1 {
+                Button {
+                    downloadWholeLine(episodes: episodes)
+                } label: {
+                    Label("下载全集（当前线路 \(episodes.count) 集）", systemImage: "arrow.down.to.line")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(Theme.glass, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
             if episodes.isEmpty {
                 Text("该线路暂无选集").font(.footnote).foregroundStyle(Theme.textDim)
             }
@@ -586,6 +598,38 @@ struct DetailView: View {
             return
         }
         enqueueChecked(url: ep.url, header: header, ep: ep)
+    }
+
+    /// Whole-line download (v1.42): resolve every episode of the
+    /// active line through the same resolver playback uses, then
+    /// enqueue each downloadable one. Runs sequentially — spider
+    /// resolvers are serial anyway — with progress in the note.
+    private func downloadWholeLine(episodes: [VodDetail.Episode]) {
+        guard !resolving else { return }
+        resolving = true
+        let resolver = makeEpisodeResolver()
+        let line = lineIndex
+        Task {
+            var added = 0
+            var skipped = 0
+            for (index, ep) in episodes.enumerated() {
+                playNote = "正在加入下载 \(index + 1)/\(episodes.count)…"
+                switch await resolver(line, index) {
+                case .ok(let url, let resolvedHeader):
+                    if await DownloadManager.probeDownloadable(url: url, header: resolvedHeader) {
+                        DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
+                                                       pic: detail.pic, url: url, header: resolvedHeader)
+                        added += 1
+                    } else {
+                        skipped += 1
+                    }
+                case .failed:
+                    skipped += 1
+                }
+            }
+            resolving = false
+            playNote = "全集下载已加入 \(added) 集" + (skipped > 0 ? "，\(skipped) 集解析不了跳过" : "")
+        }
     }
 
     /// Every download path funnels through here: probe first (a web

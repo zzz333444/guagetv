@@ -35,11 +35,23 @@ final class DanmakuStore: ObservableObject {
 
     func load(data: Data) {
         let text = guageDecodeText(data)
-        let parsed: [DanmakuItem]
+        var parsed: [DanmakuItem]
         if text.contains("<d p=") || text.contains("<d p =") {
             parsed = Self.parseXML(text)
         } else {
             parsed = Self.parseJSON(text)
+        }
+        // 屏蔽词 (v1.42): keywords from Settings → 播放 → 弹幕；
+        // a danmaku containing any of them never reaches the
+        // screen.
+        let raw = UserDefaults.standard.string(forKey: "danmaku.blockWords") ?? ""
+        let words = raw.split(whereSeparator: { ",，、 ".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if !words.isEmpty {
+            parsed = parsed.filter { item in
+                !words.contains { item.text.contains($0) }
+            }
         }
         items = parsed.sorted { $0.time < $1.time }
     }

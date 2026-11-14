@@ -16,9 +16,64 @@ struct LiveView: View {
     @State private var templateCache: [String: [EPGProgramme]] = [:]
     @State private var sheetProgrammes: ProgrammeSheetItem?
 
+    // Favourites + custom groups (v1.42), stored per live source.
+    @AppStorage("live.favourites") private var favouritesJSON = "[]"
+    @AppStorage("live.customGroups") private var customGroupsJSON = "{}"
+    @State private var groupAssignTarget: LiveListParser.Channel?
+    @State private var newGroupName = ""
+
+    private static let favouritesGroup = "⭐ 收藏"
+
+    private func channelKey(_ channel: LiveListParser.Channel) -> String {
+        live.name + "|" + channel.name + "|" + channel.url
+    }
+    private var favouriteKeys: Set<String> {
+        Set((try? JSONDecoder().decode([String].self, from: Data(favouritesJSON.utf8))) ?? [])
+    }
+    private var customGroupMap: [String: String] {
+        (try? JSONDecoder().decode([String: String].self, from: Data(customGroupsJSON.utf8))) ?? [:]
+    }
+    private var customGroupNames: [String] {
+        Array(Set(customGroupMap.values)).sorted()
+    }
+    private var allChannels: [LiveListParser.Channel] {
+        groups.flatMap(\.channels)
+    }
+
+    private func toggleFavourite(_ channel: LiveListParser.Channel) {
+        var keys = favouriteKeys
+        let key = channelKey(channel)
+        if keys.contains(key) { keys.remove(key) } else { keys.insert(key) }
+        if let data = try? JSONEncoder().encode(Array(keys)),
+           let json = String(data: data, encoding: .utf8) {
+            favouritesJSON = json
+        }
+    }
+
+    private func assignGroup(_ channel: LiveListParser.Channel, group: String?) {
+        var map = customGroupMap
+        if let group, !group.isEmpty {
+            map[channelKey(channel)] = group
+        } else {
+            map.removeValue(forKey: channelKey(channel))
+        }
+        if let data = try? JSONEncoder().encode(map),
+           let json = String(data: data, encoding: .utf8) {
+            customGroupsJSON = json
+        }
+    }
+
     private var isTemplateEPG: Bool { (live.epg ?? "").contains("{name}") }
     private var currentChannels: [LiveListParser.Channel] {
-        groups.first { $0.name == selectedGroup }?.channels ?? []
+        if selectedGroup == Self.favouritesGroup {
+            let keys = favouriteKeys
+            return allChannels.filter { keys.contains(channelKey($0)) }
+        }
+        if customGroupNames.contains(selectedGroup) {
+            let map = customGroupMap
+            return allChannels.filter { map[channelKey($0)] == selectedGroup }
+        }
+        return groups.first { $0.name == selectedGroup }?.channels ?? []
     }
     private var playHeader: [String: String] {
         live.ua.map { ["User-Agent": $0] } ?? [:]
@@ -52,23 +107,43 @@ struct LiveView: View {
         .sheet(item: $sheetProgrammes) { entry in
             programmeSheet(entry)
         }
+        .alert("新建分组", isPresented: Binding(
+            get: { groupAssignTarget != nil },
+            set: { if !$0 { groupAssignTarget = nil } }
+        )) {
+            TextField("分组名，如 央视", text: $newGroupName)
+            Button("取消", role: .cancel) { groupAssignTarget = nil }
+            Button("创建并加入") {
+                if let target = groupAssignTarget, !newGroupName.isEmpty {
+                    assignGroup(target, group: newGroupName)
+                    selectedGroup = newGroupName
+                }
+                groupAssignTarget = nil
+            }
+        } message: {
+            Text("频道会同时出现在这个分组里（长按频道可管理）。")
+        }
     }
 
     private var groupChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(groups, id: \.name) { group in
-                    Text(group.name)
-                        .font(.subheadline.weight(selectedGroup == group.name ? .semibold : .regular))
-                        .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(selectedGroup == group.name ? Color.white : Theme.glass, in: Capsule())
-                        .foregroundStyle(selectedGroup == group.name ? .black : Theme.text.opacity(0.85))
-                        .onTapGesture { selectedGroup = group.name }
-                }
+                chip(Self.favouritesGroup)
+                ForEach(customGroupNames, id: \.self) { name in chip(name) }
+                ForEach(groups, id: \.name) { group in chip(group.name) }
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
         }
+    }
+
+    private func chip(_ name: String) -> some View {
+        Text(name)
+            .font(.subheadline.weight(selectedGroup == name ? .semibold : .regular))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(selectedGroup == name ? Color.white : Theme.glass, in: Capsule())
+            .foregroundStyle(selectedGroup == name ? .black : Theme.text.opacity(0.85))
+            .onTapGesture { selectedGroup = name }
     }
 
     private var channelList: some View {
@@ -109,12 +184,43 @@ struct LiveView: View {
                 }
                 .buttonStyle(.plain)
             }
+            if favouriteKeys.contains(channelKey(channel)) {
+                Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
+            }
             Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(Theme.text.opacity(0.9))
         }
         .padding(12)
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
         .contentShape(Rectangle())
         .onTapGesture { playChannel = channel }
+        .contextMenu {
+            Button {
+                toggleFavourite(channel)
+            } label: {
+                Label(favouriteKeys.contains(channelKey(channel)) ? "取消收藏" : "收藏频道",
+                      systemImage: "star")
+            }
+            ForEach(customGroupNames, id: \.self) { name in
+                Button {
+                    assignGroup(channel, group: name)
+                } label: {
+                    Label("加入分组「\(name)」", systemImage: "folder")
+                }
+            }
+            Button {
+                groupAssignTarget = channel
+                newGroupName = ""
+            } label: {
+                Label("新建分组并加入", systemImage: "folder.badge.plus")
+            }
+            if customGroupMap[channelKey(channel)] != nil {
+                Button(role: .destructive) {
+                    assignGroup(channel, group: nil)
+                } label: {
+                    Label("移出自定义分组", systemImage: "folder.badge.minus")
+                }
+            }
+        }
     }
 
     private func logo(_ channel: LiveListParser.Channel) -> some View {

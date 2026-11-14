@@ -36,22 +36,26 @@ struct ContentView: View {
         _config = State(initialValue: ConfigLibrary.loadActive())
     }
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Group {
-                switch tab {
-                case 0: DiscoverView(config: config)
-                case 1: HistoryView()
-                case 2: LibraryView(config: $config) { tab = 3 }
-                default: SettingsView(config: $config)
+        Group {
+            if sizeClass == .regular {
+                // iPad layout (v1.42): a slim glass rail on the
+                // left instead of the floating bottom bar; pages
+                // get the full width for wider grids.
+                HStack(spacing: 0) {
+                    sideRail
+                    tabContent
+                }
+            } else {
+                ZStack(alignment: .bottom) {
+                    tabContent
+                    floatingBar
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 10)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.easeInOut(duration: 0.22), value: tab)
-
-            floatingBar
-                .padding(.horizontal, 18)
-                .padding(.bottom, 10)
         }
         .overlay {
             if appLockEnabled, appLocked {
@@ -99,6 +103,39 @@ struct ContentView: View {
         } message: {
             Text(shareResult ?? "")
         }
+    }
+
+    private var tabContent: some View {
+        Group {
+            switch tab {
+            case 0: DiscoverView(config: config)
+            case 1: HistoryView()
+            case 2: LibraryView(config: $config) { tab = 3 }
+            default: SettingsView(config: $config)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.22), value: tab)
+    }
+
+    private var sideRail: some View {
+        VStack(spacing: 14) {
+            tabButton(index: 0, icon: "house.fill", label: "发现")
+            if showRecordsTab { tabButton(index: 1, icon: "clock.fill", label: "记录") }
+            if showLibraryTab { tabButton(index: 2, icon: "externaldrive.fill", label: "资源库") }
+            tabButton(index: 3, icon: "gearshape.fill", label: "设置")
+            Spacer()
+            Button { showSearch = true } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .frame(width: 52, height: 52)
+                    .glassCircle()
+            }
+        }
+        .padding(.vertical, 22)
+        .padding(.horizontal, 8)
+        .background(Theme.glass.opacity(0.5))
     }
 
     private var floatingBar: some View {

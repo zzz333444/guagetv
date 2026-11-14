@@ -112,13 +112,17 @@ struct SubtitleOverlayView: View {
     @ObservedObject var mpv: MPVController
     @ObservedObject var native: NativeController
     let isMPV: Bool
+    /// Dual-subtitle support (v1.42): the secondary overlay sits
+    /// higher and renders smaller/dimmer.
+    var bottomPadding: CGFloat = 96
+    var fontSize: CGFloat = 16
 
     var body: some View {
         VStack {
             Spacer()
             if let cue = currentCue {
                 Text(cue.text)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: fontSize, weight: .medium))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.8), radius: 3)
@@ -128,7 +132,7 @@ struct SubtitleOverlayView: View {
                     .padding(.horizontal, 30)
             }
         }
-        .padding(.bottom, 96)
+        .padding(.bottom, bottomPadding)
     }
 
     private var currentCue: SubCue? {

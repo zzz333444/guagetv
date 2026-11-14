@@ -254,8 +254,10 @@ struct HistoryView: View {
                     Text("下载中 \(Int(item.progress * 100))%").font(.caption2).foregroundStyle(Theme.textDim)
                 case "done":
                     Text("已下载 · \(sizeText(item.totalBytes))").font(.caption2).foregroundStyle(Theme.ok)
+                case "paused":
+                    Text("已暂停在 \(Int(item.progress * 100))%，点按断点续传").font(.caption2).foregroundStyle(Theme.textDim)
                 default:
-                    Text("下载失败，左滑删除后重试").font(.caption2).foregroundStyle(.red.opacity(0.85))
+                    Text("下载失败，点按重试").font(.caption2).foregroundStyle(.red.opacity(0.85))
                 }
             }
             Spacer()
@@ -268,7 +270,11 @@ struct HistoryView: View {
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
         .contentShape(Rectangle())
         .onTapGesture {
-            if item.state == "done" { playRoute = .download(item) }
+            if item.state == "done" {
+                playRoute = .download(item)
+            } else if item.state == "failed" || item.state == "paused" {
+                DownloadManager.shared.retry(item)
+            }
         }
     }
 

@@ -31,6 +31,12 @@ struct SearchView: View {
     /// rail lists every site that produced results, tapping one
     /// narrows the poster grid to just that site.
     @State private var selectedSiteKey: String?
+    /// Title aggregation (v1.42): same-title hits from many
+    /// sites collapse into one card ("N 条线"), tapping opens
+    /// the per-site list. On by default; the toggle lives above
+    /// the results.
+    @AppStorage("search.aggregate") private var aggregateTitles = true
+    @State private var selectedTitleGroup: TitleGroup?
     /// The left rail can be hidden from the header's filter button.
     @State private var showSiteFilter = true
     /// Progress counters for the rail's 全部 (done/total) label,
@@ -206,7 +212,12 @@ struct SearchView: View {
             // the recents branch first hid every in-flight result
             // behind the recents list until the run ended — the
             // "results only appear when the search finishes" bug.
-            resultsBrowser
+            aggregateToggleBar
+            if aggregateTitles, selectedSiteKey == nil {
+                aggregatedBrowser
+            } else {
+                resultsBrowser
+            }
             if searching {
                 HStack(spacing: 8) {
                     ProgressView().tint(Theme.text)
@@ -220,6 +231,106 @@ struct SearchView: View {
             hint(failureNote.isEmpty ? "没有搜到结果" : "没有搜到结果\n\(failureNote)")
         } else {
             recentsView
+        }
+    }
+
+    private var aggregateToggleBar: some View {
+        HStack {
+            Spacer()
+            Toggle("同名聚合", isOn: $aggregateTitles)
+                .font(.caption)
+                .foregroundStyle(Theme.textDim)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .fixedSize()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+
+    struct TitleGroup: Identifiable {
+        var key: String
+        var title: String
+        var entries: [(site: TVBoxConfig.Site, item: VodItem)]
+        var id: String { key }
+        var representative: VodItem { entries[0].item }
+    }
+
+    private var titleGroups: [TitleGroup] {
+        var order: [String] = []
+        var map: [String: TitleGroup] = [:]
+        for group in results {
+            for item in group.items {
+                let key = Self.normalizedTitle(item.name)
+                if map[key] == nil {
+                    map[key] = TitleGroup(key: key, title: item.name, entries: [])
+                    order.append(key)
+                }
+                map[key]?.entries.append((group.site, item))
+            }
+        }
+        return order.compactMap { map[$0] }
+    }
+
+    static func normalizedTitle(_ name: String) -> String {
+        name.lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "　", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var aggregatedBrowser: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if showSiteFilter { siteRail }
+            ScrollView(showsIndicators: false) {
+                LazyVGrid(columns: gridColumns, spacing: 14) {
+                    ForEach(titleGroups) { group in
+                        Button {
+                            selectedTitleGroup = group
+                        } label: {
+                            SearchPosterCell(
+                                item: group.representative,
+                                badge: group.entries.count > 1 ? "\(group.entries.count) 条线" : group.entries[0].site.name)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 40)
+            }
+        }
+        .sheet(item: $selectedTitleGroup) { group in
+            NavigationStack {
+                List(group.entries, id: \.site.key) { entry in
+                    NavigationLink {
+                        destination(for: entry.site, item: entry.item)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.site.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Theme.text)
+                                if !entry.item.remarks.isEmpty {
+                                    Text(entry.item.remarks)
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.textDim)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Theme.bg)
+                .navigationTitle(group.title)
+                .navigationBarTitleDisplayMode(.inline)
+            }
         }
     }
 

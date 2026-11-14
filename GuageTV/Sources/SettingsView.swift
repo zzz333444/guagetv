@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.41 · 媒体服务器与全网体检"
+    static let buildLabel = "v1.42 · 双字幕与后台下载"
 
     var body: some View {
         NavigationStack {
@@ -1092,11 +1092,13 @@ struct PlaySettingsView: View {
     @AppStorage("player.showRate") private var showRate = true
     @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
     @AppStorage("player.showStats") private var showStats = false
+    @AppStorage("player.backgroundAudio") private var backgroundAudio = true
     @AppStorage("gesture.boostRate") private var boostRate = 2.0
     @AppStorage("danmaku.enabled") private var danmakuEnabled = false
     @AppStorage("danmaku.apiTemplate") private var danmakuAPI = ""
     @AppStorage("danmaku.opacity") private var danmakuOpacity = 0.9
     @AppStorage("danmaku.speed") private var danmakuSpeed = 1.0
+    @AppStorage("danmaku.blockWords") private var danmakuBlockWords = ""
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -1163,6 +1165,8 @@ struct PlaySettingsView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Toggle("播放统计浮层", isOn: $showStats)
                         .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("后台音频播放", isOn: $backgroundAudio)
+                        .font(.subheadline).foregroundStyle(Theme.text)
                     Text("关掉的项不再出现在播放页，对应功能同时停用；下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
@@ -1199,6 +1203,13 @@ struct PlaySettingsView: View {
                     Text("滚动速度").font(.subheadline).foregroundStyle(Theme.text)
                     Slider(value: $danmakuSpeed, in: 0.5...2, step: 0.1)
                         .tint(Theme.text)
+                    Text("屏蔽词").font(.subheadline).foregroundStyle(Theme.text)
+                    TextField("词与词之间用逗号隔开，含词的弹幕不显示", text: $danmakuBlockWords)
+                        .font(.footnote)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(10)
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
         }

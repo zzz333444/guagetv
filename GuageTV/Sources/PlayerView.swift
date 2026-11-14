@@ -217,6 +217,9 @@ struct PlayerView: View {
     @StateObject private var danmakuStore = DanmakuStore()
     @State private var externalCues: [SubCue] = []
     @State private var externalSubName = ""
+    @State private var externalCues2: [SubCue] = []
+    @State private var externalSubName2 = ""
+    @State private var showSubPicker2 = false
     @State private var showDanmakuPicker = false
     @State private var showSubPicker = false
     @State private var showSubSearch = false
@@ -254,6 +257,11 @@ struct PlayerView: View {
                 }
                 if !externalCues.isEmpty {
                     SubtitleOverlayView(cues: externalCues, mpv: mpv, native: native, isMPV: isMPV)
+                        .allowsHitTesting(false)
+                }
+                if !externalCues2.isEmpty {
+                    SubtitleOverlayView(cues: externalCues2, mpv: mpv, native: native, isMPV: isMPV,
+                                        bottomPadding: 148, fontSize: 13.5)
                         .allowsHitTesting(false)
                 }
                 if showStats {
@@ -372,6 +380,24 @@ struct PlayerView: View {
                         externalCues = cues
                         externalSubName = url.lastPathComponent
                         showToast("字幕已加载：\(url.lastPathComponent)")
+                    }
+                }
+            }
+        }
+        .fileImporter(isPresented: $showSubPicker2,
+                      allowedContentTypes: [.plainText, .text],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if let data = try? Data(contentsOf: url) {
+                    let cues = SubtitleParser.parse(data: data, fileName: url.lastPathComponent)
+                    if cues.isEmpty {
+                        showToast("副字幕文件没解析出内容（支持 srt / vtt / ass）")
+                    } else {
+                        externalCues2 = cues
+                        externalSubName2 = url.lastPathComponent
+                        showToast("副字幕已加载：\(url.lastPathComponent)")
                     }
                 }
             }
@@ -990,6 +1016,10 @@ struct PlayerView: View {
                                  current: mpv.currentSubID, allowOff: true) {
                         mpv.selectSub($0)
                     }
+                    trackSection(title: "副字幕（双字幕）", tracks: mpv.subTracks,
+                                 current: mpv.currentSecondarySubID, allowOff: true) {
+                        mpv.selectSecondarySub($0)
+                    }
                 } else {
                     trackSection(title: "音轨", tracks: native.audioTracks,
                                  current: native.currentAudioID, allowOff: false) {
@@ -1148,6 +1178,21 @@ struct PlayerView: View {
                             externalSubName = ""
                         } label: {
                             Label("清除外挂字幕（\(externalSubName)）", systemImage: "trash")
+                        }
+                    }
+                    Button {
+                        showPlayerSettings = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showSubPicker2 = true }
+                    } label: {
+                        Label("加载副字幕文件（双字幕）", systemImage: "doc.badge.plus")
+                            .foregroundStyle(Theme.text)
+                    }
+                    if !externalCues2.isEmpty {
+                        Button(role: .destructive) {
+                            externalCues2 = []
+                            externalSubName2 = ""
+                        } label: {
+                            Label("清除副字幕（\(externalSubName2)）", systemImage: "trash")
                         }
                     }
                 }
@@ -1353,6 +1398,8 @@ struct PlayerView: View {
         prefetchNext()
         externalCues = []
         externalSubName = ""
+        externalCues2 = []
+        externalSubName2 = ""
         loadDanmakuForCurrentEpisode()
         guard let hit = resolved[index] else { return }
         onEpisodeChange?(activeLine, index, hit.url, hit.header)

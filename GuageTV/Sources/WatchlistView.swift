@@ -54,6 +54,7 @@ struct WatchlistView: View {
     @ObservedObject private var history = HistoryStore.shared
     @State private var checking = false
     @AppStorage("watchlistLastCheck") private var lastCheck: Double = 0
+    @AppStorage("watchNotify.enabled") private var notifyEnabled = true
 
     private var sortedFavourites: [HistoryStore.Entry] {
         history.favourites.sorted { a, b in
@@ -91,6 +92,15 @@ struct WatchlistView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             if !sortedFavourites.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        notifyEnabled.toggle()
+                        if notifyEnabled { WatchNotify.requestAuthorizationIfNeeded() }
+                    } label: {
+                        Image(systemName: notifyEnabled ? "bell.fill" : "bell.slash")
+                    }
+                    .foregroundStyle(Theme.text)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(checking ? "检测中…" : "检测更新") { runCheck() }
                         .disabled(checking)

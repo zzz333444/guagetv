@@ -231,7 +231,18 @@ final class MPVController: ObservableObject {
         let center = NotificationCenter.default
         backgroundObservers.append(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.setProperty("vid", "no") })
+        ) { [weak self] _ in
+            // Background audio (v1.42): park the video, keep the
+            // sound running (the app declares the audio background
+            // mode, so iOS lets the process live). With the setting
+            // off, pause outright like a plain video app.
+            let keepAudio = UserDefaults.standard.object(forKey: "player.backgroundAudio") as? Bool ?? true
+            if keepAudio {
+                self?.setProperty("vid", "no")
+            } else {
+                self?.setProperty("pause", "yes")
+            }
+        })
         backgroundObservers.append(center.addObserver(
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.setProperty("vid", "auto") })
@@ -291,6 +302,9 @@ final class MPVController: ObservableObject {
     @Published var subTracks: [PlayerTrack] = []
     @Published var currentAudioID = -1
     @Published var currentSubID = -1
+    /// Dual subtitles (v1.42): mpv's secondary-sid renders a
+    /// second subtitle track above the primary one.
+    @Published var currentSecondarySubID = -1
     private var pollCount = 0
 
     /// track-list via per-index string properties (mpv exposes
@@ -324,6 +338,8 @@ final class MPVController: ObservableObject {
         if subs != subTracks { subTracks = subs }
         currentAudioID = curA
         currentSubID = curS
+        let secondary = stringProperty("secondary-sid").flatMap(Int.init) ?? -1
+        if secondary != currentSecondarySubID { currentSecondarySubID = secondary }
     }
 
     func selectAudio(_ id: Int) {
@@ -334,6 +350,11 @@ final class MPVController: ObservableObject {
     func selectSub(_ id: Int) {
         setProperty("sid", id < 0 ? "no" : "\(id)")
         currentSubID = id
+    }
+
+    func selectSecondarySub(_ id: Int) {
+        setProperty("secondary-sid", id < 0 ? "no" : "\(id)")
+        currentSecondarySubID = id
     }
 
     // MARK: controls
