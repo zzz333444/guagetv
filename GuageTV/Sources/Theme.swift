@@ -49,8 +49,8 @@ struct AmbientBackground: View {
     var body: some View {
         ZStack {
             Theme.bg
-            if let imageURL, let url = URL(string: imageURL) {
-                AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+            if let imageURL {
+                AmbientPosterImage(urlString: imageURL)
                     .blur(radius: 60)
                     .opacity(intensity)
                     .saturation(1.2)
@@ -59,6 +59,31 @@ struct AmbientBackground: View {
                            startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
+    }
+}
+
+/// Ambient glow image: same downsampled PosterCache decode as the
+/// poster grid (ImageIO thumbnail, ≤ 900 px on the long side) instead
+/// of AsyncImage's full-resolution decode — this image only ever shows
+/// blurred at radius 60, so full-res pixels were pure decode cost.
+/// Also goes through NetFetch's okhttp identity (hosts that drop bare
+/// URLSession requests no longer leave the ambient blank) and shares
+/// the poster disk cache, so the detail cover is fetched once.
+private struct AmbientPosterImage: View {
+    let urlString: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: urlString) {
+            image = await PosterCache.shared.load(urlString)
+        }
     }
 }
 
