@@ -102,7 +102,7 @@ struct LiveView: View {
         .task(id: selectedGroup) { await loadTemplateEPG() }
         .fullScreenCover(item: $playChannel) { channel in
             PlayerView(episodes: [PlayerView.EpisodeRef(name: channel.name, url: channel.url)],
-                       startIndex: 0, header: playHeader, title: channel.name)
+                       startIndex: 0, header: playHeader, title: channel.name, isLive: true)
         }
         .sheet(item: $sheetProgrammes) { entry in
             programmeSheet(entry)

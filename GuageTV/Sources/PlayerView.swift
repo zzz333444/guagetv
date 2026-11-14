@@ -40,6 +40,9 @@ struct PlayerView: View {
     var pic: String = ""
     let baseHeader: [String: String]
     var title: String = ""
+    /// Live channel playback (set by LiveView): skip the forward
+    /// buffer so a live stream stays close to real time.
+    let isLive: Bool
     /// All play lines (names + raw episode lists) for in-player
     /// line switching; empty for single-shot players.
     let lineNames: [String]
@@ -113,10 +116,11 @@ struct PlayerView: View {
     private enum DragMode { case scrub, brightness, volume, episodeSwipe }
     @Environment(\.dismiss) private var dismiss
 
-    init(urlString: String, header: [String: String] = [:], title: String = "") {
+    init(urlString: String, header: [String: String] = [:], title: String = "", isLive: Bool = false) {
         _episodes = State(initialValue: [EpisodeRef(name: "", url: urlString)])
         self.baseHeader = header
         self.title = title
+        self.isLive = isLive
         self.lineNames = []
         self.lineEpisodes = []
         self.episodeResolver = nil
@@ -133,11 +137,13 @@ struct PlayerView: View {
          lineNames: [String] = [], lineIndex: Int = 0, lineEpisodes: [[EpisodeRef]] = [],
          initialResolved: (url: String, header: [String: String])? = nil,
          resolver: Resolver? = nil,
-         onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)? = nil) {
+         onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)? = nil,
+         isLive: Bool = false) {
         let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
         _episodes = State(initialValue: episodes)
         self.baseHeader = header
         self.title = title
+        self.isLive = isLive
         self.historyID = historyID
         self.resumeAt = resumeAt
         self.pic = pic
@@ -427,10 +433,10 @@ struct PlayerView: View {
                 AVPlayerLayerView(player: native.player,
                                   onLayer: { native.setupPiP(layer: $0) })
                     .ignoresSafeArea()
-                    .onAppear { native.load(url: url, header: header) }
+                    .onAppear { native.load(url: url, header: header, isLive: isLive) }
                     .onChange(of: current.url) { _ in
                         if let next = URL(string: current.url) {
-                            native.load(url: next, header: header)
+                            native.load(url: next, header: header, isLive: isLive)
                         }
                     }
                     .onDisappear { native.pause() }
@@ -1872,6 +1878,7 @@ final class NativeController: NSObject, ObservableObject {
     }
     private var timeObserver: Any?
     private var loadedURL: URL?
+    private var lastIsLive = false
     private var lastBytes: Int64 = 0
     private var lastBytesAt: Date?
 
@@ -1879,11 +1886,12 @@ final class NativeController: NSObject, ObservableObject {
     /// load() alone would short-circuit and just replay the corpse.
     func reload(url: URL, header: [String: String]) {
         loadedURL = nil
-        load(url: url, header: header)
+        load(url: url, header: header, isLive: lastIsLive)
     }
 
-    func load(url: URL, header: [String: String]) {
+    func load(url: URL, header: [String: String], isLive: Bool = false) {
         specText = ""
+        lastIsLive = isLive
         if loadedURL == url, player.currentItem != nil {
             player.play()
             return
@@ -1901,9 +1909,11 @@ final class NativeController: NSObject, ObservableObject {
             "AVURLAssetPreferPreciseDurationAndTimingKey": false,
         ])
         let item = AVPlayerItem(asset: asset)
-        // Forward buffer maxed (v1.35): a full minute of runway
-        // so brief network dips never reach the screen.
-        item.preferredForwardBufferDuration = 60
+        // Forward buffer (P3): VOD keeps a full minute of runway
+        // (v1.35; already above the 30s target, so kept) so brief
+        // network dips never reach the screen; live keeps the
+        // default 0 so the stream stays close to real time.
+        item.preferredForwardBufferDuration = isLive ? 0 : 60
         // Adaptive HLS opens on the lowest eligible variant and
         // ramps up, instead of probing bandwidth at full rate
         // before the first frame.
