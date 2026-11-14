@@ -4,6 +4,22 @@ import SwiftUI
 /// watch time, history heatmap, 待看 / 收藏 / 在看 counters. Numbers bind to
 /// the history store in stage 3; the module layout matches Rex now.
 struct ProfileView: View {
+    @ObservedObject private var store = HistoryStore.shared
+
+    /// Entries touched today / this week drive the stat cards.
+    private var todayEntries: [HistoryStore.Entry] {
+        store.entries.filter { Calendar.current.isDateInToday($0.updatedAt) }
+    }
+    private var totalHoursText: String {
+        let total = store.entries.reduce(0) { $0 + $1.watchedSeconds }
+        return total >= 3600
+            ? String(format: "%.1f", total / 3600)
+            : String(format: "%.0f", total / 60)
+    }
+    private var totalUnit: String {
+        store.entries.reduce(0) { $0 + $1.watchedSeconds } >= 3600 ? "小时" : "分钟"
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -60,24 +76,26 @@ struct ProfileView: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("今天").font(.subheadline).foregroundStyle(Theme.textDim)
+                    Text("累计观看").font(.subheadline).foregroundStyle(Theme.textDim)
                     Spacer()
                     Text(Date.now.formatted(date: .abbreviated, time: .omitted))
                         .font(.subheadline).foregroundStyle(Theme.textDim)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("0.0").font(.system(size: 34, weight: .bold)).foregroundStyle(Theme.text)
-                    Text("小时").foregroundStyle(Theme.textDim)
+                    Text(totalHoursText).font(.system(size: 34, weight: .bold)).foregroundStyle(Theme.text)
+                    Text(totalUnit).foregroundStyle(Theme.textDim)
                 }
                 HStack(spacing: 16) {
-                    Text("0 部电影").font(.footnote).foregroundStyle(Theme.textDim)
-                    Text("0 集剧").font(.footnote).foregroundStyle(Theme.textDim)
+                    Text("共 \(store.entries.count) 部").font(.footnote).foregroundStyle(Theme.textDim)
+                    Text("今天看了 \(todayEntries.count) 部").font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
+    /// Real heat: last 18 weeks × 7 days, intensity = how many
+    /// titles were touched that day.
     private var heatmapCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
@@ -85,8 +103,11 @@ struct ProfileView: View {
                 let cols = Array(repeating: GridItem(.fixed(14), spacing: 4), count: 18)
                 LazyVGrid(columns: cols, spacing: 4) {
                     ForEach(0..<(18 * 7), id: \.self) { i in
+                        let count = heatCount(cellIndex: i)
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(i % 37 == 0 ? Theme.accent : Color.white.opacity(0.07))
+                            .fill(count == 0
+                                  ? Color.white.opacity(0.07)
+                                  : Theme.accent.opacity(0.35 + 0.2 * Double(min(count, 3))))
                             .frame(width: 14, height: 14)
                     }
                 }
@@ -95,11 +116,22 @@ struct ProfileView: View {
         }
     }
 
+    private func heatCount(cellIndex: Int) -> Int {
+        // Cell 0 = 125 days ago, cells flow day by day to today.
+        let cal = Calendar.current
+        guard let day = cal.date(byAdding: .day, value: -(18 * 7 - 1) + cellIndex,
+                                 to: cal.startOfDay(for: Date())) else { return 0 }
+        return store.entries.filter { cal.isDate($0.updatedAt, inSameDayAs: day) }.count
+    }
+
     private var counters: some View {
         HStack(spacing: 12) {
-            counterCard(title: "收藏", value: "0")
-            counterCard(title: "在看", value: "0")
-            counterCard(title: "待看", value: "0")
+            counterCard(title: "收藏",
+                        value: "\(store.entries.filter { $0.isFavourite }.count)")
+            counterCard(title: "在看",
+                        value: "\(store.entries.filter { $0.positionSeconds > 30 && ($0.durationSeconds <= 0 || $0.positionSeconds < $0.durationSeconds * 0.95) }.count)")
+            counterCard(title: "追剧",
+                        value: "\(store.entries.filter { $0.isWatchlist }.count)")
         }
     }
 

@@ -9,6 +9,47 @@ enum TMDBClient {
         var backdrop: String = ""
         var overview: String = ""
         var score: String = ""
+        /// TMDB identity of the matched title (v1.41), powering
+        /// the cast row and similar titles on the detail page.
+        /// Old cached entries lack these keys, fail to decode,
+        /// and simply refetch once — self-healing.
+        var tmdbID: Int = 0
+        var mediaType: String = ""
+    }
+
+    struct CastMember: Identifiable {
+        var id: Int
+        var name: String
+        var character: String
+        var profile: String   // w185 URL, "" when none
+    }
+
+    static func credits(for info: Info) async -> [CastMember] {
+        guard isOn, info.tmdbID > 0, !info.mediaType.isEmpty else { return [] }
+        var comps = URLComponents(string: base + "/3/\(info.mediaType)/\(info.tmdbID)/credits")
+        comps?.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "language", value: "zh-CN"),
+        ]
+        guard let url = comps?.url,
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cast = root["cast"] as? [[String: Any]] else { return [] }
+        return cast.prefix(15).compactMap { person in
+            guard let pid = (person["id"] as? NSNumber)?.intValue,
+                  let name = person["name"] as? String, !name.isEmpty else { return nil }
+            let path = person["profile_path"] as? String ?? ""
+            return CastMember(
+                id: pid, name: name,
+                character: (person["character"] as? String) ?? "",
+                profile: path.isEmpty ? "" : "https://image.tmdb.org/t/p/w185" + path)
+        }
+    }
+
+    static func similar(for info: Info) async -> [TMDBTitle] {
+        guard info.tmdbID > 0, !info.mediaType.isEmpty else { return [] }
+        return await fetchTitles("/3/\(info.mediaType)/\(info.tmdbID)/similar",
+                                 forcedType: info.mediaType)
     }
 
     static var isOn: Bool {
@@ -65,7 +106,9 @@ enum TMDBClient {
         let info = Info(
             backdrop: backdropPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w780" + backdropPath,
             overview: picked["overview"] as? String ?? "",
-            score: vote > 0 ? String(format: "%.1f", vote) : "")
+            score: vote > 0 ? String(format: "%.1f", vote) : "",
+            tmdbID: (picked["id"] as? NSNumber)?.intValue ?? 0,
+            mediaType: (picked["media_type"] as? String) ?? "")
         // Cache even a partial hit so a title is only searched once.
         var map = (UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String]) ?? [:]
         if let encoded = try? JSONEncoder().encode(info),

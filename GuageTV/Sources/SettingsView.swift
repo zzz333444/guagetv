@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.40 · 播放优化与弹幕字幕"
+    static let buildLabel = "v1.41 · 媒体服务器与全网体检"
 
     var body: some View {
         NavigationStack {
@@ -64,6 +64,10 @@ struct SettingsView: View {
                                 value: jarProxyURL.isEmpty ? "未设置" : "已设置")
                         }
                         .buttonStyle(.plain)
+                        NavigationLink { HealthCheckView() } label: {
+                            row(icon: "stethoscope", title: "配置体检", value: "")
+                        }
+                        .buttonStyle(.plain)
                         NavigationLink { DriveSettingsView() } label: {
                             row(icon: "externaldrive", title: "网盘配置",
                                 value: driveConfigured ? "已配置" : "未配置")
@@ -79,6 +83,18 @@ struct SettingsView: View {
                     group(title: "使用偏好") {
                         NavigationLink { AppearanceSettingsView() } label: {
                             row(icon: "paintbrush", title: "外观与交互", value: "")
+                        }
+                        .buttonStyle(.plain)
+                        NavigationLink { BackupView() } label: {
+                            row(icon: "externaldrive.badge.timemachine", title: "备份与恢复", value: "")
+                        }
+                        .buttonStyle(.plain)
+                        NavigationLink { SecuritySettingsView() } label: {
+                            row(icon: "lock.shield", title: "安全（App 锁）", value: "")
+                        }
+                        .buttonStyle(.plain)
+                        NavigationLink { MediaServerSettingsView() } label: {
+                            row(icon: "server.rack", title: "媒体服务器（Emby / WebDAV）", value: "")
                         }
                         .buttonStyle(.plain)
                         NavigationLink { CacheSettingsView() } label: {
@@ -1040,7 +1056,7 @@ struct AboutView: View {
 
 // MARK: - Setting pages (all functional, persisted via AppStorage)
 
-private struct SettingsPage<Content: View>: View {
+struct SettingsPage<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
 

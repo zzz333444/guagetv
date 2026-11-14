@@ -41,6 +41,8 @@ struct LibraryView: View {
                         }
                 }
 
+                MediaHubSection()
+
                 ForEach(cardSections, id: \.title) { section in
                     Text(section.title).font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {

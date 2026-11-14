@@ -51,6 +51,10 @@ struct DetailView: View {
     /// backdrop for the hero, a synopsis when the feed has none,
     /// and the TMDB score chip under the title.
     @State private var tmdbInfo: TMDBClient.Info?
+    @State private var tmdbCast: [TMDBClient.CastMember] = []
+    @State private var tmdbSimilar: [TMDBClient.TMDBTitle] = []
+    @State private var similarSeed = ""
+    @State private var showSimilarSearch = false
     @ObservedObject private var historyStore = HistoryStore.shared
 
     var body: some View {
@@ -62,6 +66,8 @@ struct DetailView: View {
                     actionRow
                     infoLines
                     if !synopsisText.isEmpty { synopsisBlock }
+                    if !tmdbCast.isEmpty { castBlock }
+                    if !tmdbSimilar.isEmpty { similarBlock }
                     episodeSection
                 }
                 .padding(.horizontal, 18)
@@ -120,7 +126,16 @@ struct DetailView: View {
         .task {
             if TMDBClient.isOn {
                 tmdbInfo = await TMDBClient.lookup(name: detail.name, year: detail.year)
+                if let info = tmdbInfo, info.tmdbID > 0 {
+                    async let cast = TMDBClient.credits(for: info)
+                    async let similar = TMDBClient.similar(for: info)
+                    tmdbCast = await cast
+                    tmdbSimilar = await similar
+                }
             }
+        }
+        .sheet(isPresented: $showSimilarSearch) {
+            SearchView(config: ConfigLibrary.loadActive(), initialKeyword: similarSeed)
         }
         .task(id: playNote) {
             guard let note = playNote else { return }
@@ -300,6 +315,72 @@ struct DetailView: View {
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.accent)
+            }
+        }
+    }
+
+    /// TMDB cast row (v1.41): round profile photos + name/role.
+    private var castBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("演职员").font(.headline).foregroundStyle(Theme.text)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(tmdbCast) { person in
+                        VStack(spacing: 5) {
+                            PosterImage(urlString: person.profile)
+                                .frame(width: 58, height: 58)
+                                .clipShape(Circle())
+                                .background(Circle().fill(Theme.glass))
+                            Text(person.name)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                            if !person.character.isEmpty {
+                                Text(person.character)
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textDim)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(width: 64)
+                    }
+                }
+            }
+        }
+    }
+
+    /// TMDB similar titles (v1.41): tapping one cross-searches it
+    /// on the user's own lines — TMDB itself has no streams.
+    private var similarBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("相似推荐").font(.headline).foregroundStyle(Theme.text)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(tmdbSimilar) { title in
+                        Button {
+                            similarSeed = title.title
+                            showSimilarSearch = true
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                PosterImage(urlString: title.poster)
+                                    .frame(width: 92, height: 138)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                Text(title.title)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Theme.text)
+                                    .lineLimit(1)
+                                if !title.score.isEmpty {
+                                    Text("TMDB \(title.score)")
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textDim)
+                                }
+                            }
+                            .frame(width: 92)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }

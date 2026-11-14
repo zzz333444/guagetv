@@ -71,6 +71,7 @@ struct PlayerView: View {
     @State private var chromeGeneration = 0
     @State private var showEpisodes = false
     @State private var showPlayerSettings = false
+    @State private var showDLNA = false
     /// Screen brightness captured when the player's own
     /// brightness setting （设置 → 音画 → 单独调整播放亮度） takes
     /// over, restored verbatim when the player closes.
@@ -332,6 +333,11 @@ struct PlayerView: View {
         }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showPlayerSettings) { playerSettingsSheet }
+        .sheet(isPresented: $showDLNA) {
+            DLNACastView(mediaURL: current.url, title: title) { message in
+                showToast(message)
+            }
+        }
         .sheet(isPresented: $showSubSearch) {
             SubSearchView(title: title) { cues, name in
                 externalCues = cues
@@ -957,6 +963,24 @@ struct PlayerView: View {
     private var playerSettingsSheet: some View {
         NavigationStack {
             List {
+                Section("投屏") {
+                    Button {
+                        showPlayerSettings = false
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 350_000_000)
+                            showDLNA = true
+                        }
+                    } label: {
+                        HStack {
+                            Label("DLNA 投到电视", systemImage: "tv")
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                        }
+                    }
+                }
                 if isMPV {
                     trackSection(title: "音轨", tracks: mpv.audioTracks,
                                  current: mpv.currentAudioID, allowOff: false) {

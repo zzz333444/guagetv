@@ -16,6 +16,11 @@ struct ContentView: View {
     @AppStorage(SharedImportCenter.counterKey) private var sharedImportCounter = 0
     @State private var shareOfferName: String?
     @State private var shareResult: String?
+    /// App lock (v1.41): locked on cold start and after any trip
+    /// to the background while the setting is on.
+    @AppStorage("appLock.enabled") private var appLockEnabled = false
+    @State private var appLocked = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private var colorScheme: ColorScheme? {
         switch themeMode {
@@ -48,11 +53,22 @@ struct ContentView: View {
                 .padding(.horizontal, 18)
                 .padding(.bottom, 10)
         }
+        .overlay {
+            if appLockEnabled, appLocked {
+                AppLockView { appLocked = false }
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
+        }
         .preferredColorScheme(colorScheme)
         .onAppear {
             clampTab()
+            if appLockEnabled { appLocked = true }
             if let id = ConfigLibrary.activeID() { JarProxyClient.warmLine(id: id) }
             ConfigLibrary.refreshStaleEntries()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background, appLockEnabled { appLocked = true }
         }
         .onChange(of: showRecordsTab) { _ in clampTab() }
         .onChange(of: showLibraryTab) { _ in clampTab() }
