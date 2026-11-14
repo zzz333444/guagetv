@@ -42,6 +42,24 @@ final class PosterCache {
     static let shared = PosterCache()
     private let memory = NSCache<NSString, UIImage>()
     private let store = PosterStore()
+    private var warningObserver: NSObjectProtocol?
+
+    init() {
+        // Memory level only: posters are ≤ 900 px thumbnails, so an
+        // 80 MB cost cap bounds the resident set without starving
+        // grids. Cost is supplied per image at insert time.
+        memory.totalCostLimit = 80 * 1024 * 1024
+        warningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                // Drop the memory level only — the disk level
+                // (Caches/posters) survives, so grids reload from
+                // disk instead of the network.
+                self?.memory.removeAllObjects()
+            }
+    }
+
+    deinit { if let warningObserver { NotificationCenter.default.removeObserver(warningObserver) } }
 
     func load(_ urlString: String) async -> UIImage? {
         let key = urlString as NSString
@@ -51,8 +69,19 @@ final class PosterCache {
         else if !text.contains("://") { text = "https://" + text }
         guard let url = URL(string: text) else { return nil }
         guard let img = await store.image(for: text, url: url) else { return nil }
-        memory.setObject(img, forKey: key)
+        memory.setObject(img, forKey: key, cost: Self.cost(of: img))
         return img
+    }
+
+    /// Approx resident bytes of a decoded image, so totalCostLimit
+    /// actually binds: width × height × scale² × 4 bytes per pixel.
+    private static func cost(of img: UIImage) -> Int {
+        if let cg = img.cgImage {
+            return cg.bytesPerRow * cg.height
+        }
+        let w = Int(img.size.width * img.scale)
+        let h = Int(img.size.height * img.scale)
+        return max(w * h * 4, 1)
     }
 }
 
