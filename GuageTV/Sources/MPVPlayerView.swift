@@ -131,12 +131,14 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "cache", "yes")
             // Buffers maxed (v1.35, at the user's explicit ask —
             // the earlier "60s is enough" call is superseded):
-            // two minutes of cache, a 256MiB forward cap, and a
-            // 60s readahead target. Costs memory on long streams;
+            // two minutes of cache, a 256MiB forward cap, a
+            // 128MiB back cap (v1.43: was 64MiB — more room to
+            // seek back without re-fetching), and a 60s
+            // readahead target. Costs memory on long streams;
             // buys real stall resistance on weak networks.
             setOptionOn(h, "cache-secs", "120")
             setOptionOn(h, "demuxer-max-bytes", "256MiB")
-            setOptionOn(h, "demuxer-max-back-bytes", "64MiB")
+            setOptionOn(h, "demuxer-max-back-bytes", "128MiB")
             // Read further ahead so brief network dips don't reach
             // the screen; hold playback while the cache refills
             // after an underrun instead of stutter-playing.
@@ -144,10 +146,11 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "cache-pause", "yes")
             setOptionOn(h, "cache-pause-wait", "1")
             // Network resilience: fail a stalled connection in
-            // 15s instead of hanging, and let libavformat's HTTP
-            // layer reconnect (streamed content included) with a
-            // capped 5s backoff.
-            setOptionOn(h, "network-timeout", "15")
+            // 30s instead of hanging (v1.43: was 15s — slow
+            // networks need longer before giving up), and let
+            // libavformat's HTTP layer reconnect (streamed
+            // content included) with a capped 5s backoff.
+            setOptionOn(h, "network-timeout", "30")
             setOptionOn(h, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
             // Sync: audio is the master clock; on a weak link the
             // VO drops late frames rather than letting A/V drift.
