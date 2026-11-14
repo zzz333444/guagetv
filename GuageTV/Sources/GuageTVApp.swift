@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct GuageTVApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     init() {
         SelfHeal.checkPreviousRun()
     }
@@ -11,6 +13,19 @@ struct GuageTVApp: App {
             ContentView()
                 .onOpenURL { url in SharedImportCenter.receive(url) }
         }
+    }
+}
+
+/// AppDelegate (v1.49, S3): the only place UIKit delivers a
+/// background URLSession's completion handler. It is forwarded
+/// to DownloadManager, which calls it exactly once (then
+/// clears it) from urlSessionDidFinishEventsForBackgroundURLSession.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        DownloadManager.shared.setBackgroundCompletionHandler(
+            completionHandler, forSessionIdentifier: identifier)
     }
 }
 

@@ -47,6 +47,29 @@ final class DownloadManager: NSObject, ObservableObject {
     private var hlsTasks: [String: AVAssetDownloadTask] = [:]
     private var progressTimer: Timer?
 
+    /// Background-session completion handlers (S3, v1.49): when
+    /// the app is relaunched in the background because a
+    /// download finished, UIKit hands AppDelegate one handler
+    /// per session identifier; it must be called exactly once
+    /// after the session delivers its events, or the system
+    /// never snapshots the app and may kill it. Keyed by
+    /// session identifier because the file + HLS sessions each
+    /// get their own handler. Accessed only on the main queue
+    /// (both sessions use delegateQueue: .main).
+    private var backgroundCompletionHandlers: [String: () -> Void] = [:]
+
+    /// Called from AppDelegate's
+    /// application(_:handleEventsForBackgroundURLSession:completionHandler:).
+    /// Touching both lazy sessions here guarantees they exist
+    /// (with this object as delegate) before the system
+    /// delivers their pending events.
+    func setBackgroundCompletionHandler(_ handler: @escaping () -> Void,
+                                        forSessionIdentifier identifier: String) {
+        backgroundCompletionHandlers[identifier] = handler
+        _ = fileSession
+        _ = hlsSession
+    }
+
     private var mediaDir: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("downloaded-media", isDirectory: true)
@@ -345,6 +368,21 @@ extension DownloadManager: URLSessionDownloadDelegate {
             markFailed(id)
             hlsTasks[id] = nil
         }
+    }
+
+    /// S3 (v1.49): the system calls this once per background
+    /// session after all its pending events are delivered.
+    /// Call the handler UIKit gave AppDelegate for this session
+    /// identifier, then clear it — calling it twice or never
+    /// both break the background-launch contract (no snapshot /
+    /// the app gets killed). Both sessions share this delegate,
+    /// so one implementation covers file + HLS.
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        guard let identifier = session.configuration.identifier,
+              let handler = backgroundCompletionHandlers.removeValue(forKey: identifier)
+        else { return }
+        handler()
+        Diagnostics.log("下载", "后台会话 \(identifier) 事件交付完毕，已调用 completion handler")
     }
 }
 
