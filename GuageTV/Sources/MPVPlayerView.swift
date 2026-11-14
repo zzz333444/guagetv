@@ -156,6 +156,13 @@ final class MPVController: ObservableObject {
             // VO drops late frames rather than letting A/V drift.
             setOptionOn(h, "video-sync", "audio")
             setOptionOn(h, "framedrop", "vo")
+            // Seeking (v1.44): precise seeks — decode to the exact
+            // frame instead of the nearest keyframe, and drop
+            // frames while catching up so a drag lands promptly
+            // instead of stuttering through the gap. Costs a
+            // little CPU per seek; no structural change.
+            setOptionOn(h, "hr-seek", "yes")
+            setOptionOn(h, "hr-seek-framedrop", "yes")
             // HDR handling from 设置 → 音画 (auto = leave mpv's
             // defaults untouched): 动态映射 drives peak detection
             // + the tone-mapping curve; 增强层 sets libplacebo's
