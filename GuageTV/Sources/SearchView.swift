@@ -20,6 +20,15 @@ struct SearchView: View {
     /// The running search, kept so the 停止 button can cancel it
     /// (entry points used to fire untracked Tasks nobody could stop).
     @State private var searchTask: Task<Void, Never>?
+    /// Pending debounced auto-search (F2): each keystroke cancels
+    /// the previous one, so a fast typist fires one search, not
+    /// one per letter. Cancelled in beginSearch() / onDisappear.
+    @State private var debounceTask: Task<Void, Never>?
+    /// Keyword of the last search that actually started (set in
+    /// run() after its guard): the debounce task skips when the
+    /// field still holds it, so a manual submit or a recent-chip
+    /// tap — which already searched — is not searched twice.
+    @State private var lastSearchedKeyword = ""
     /// Kinds sniffed for .unknown subscription sites during this
     /// search (key: site.key) — results from such a site must open
     /// in the probed runtime's detail loader, not the CMS default.
@@ -89,6 +98,7 @@ struct SearchView: View {
                 beginSearch()
             }
         }
+        .onDisappear { debounceTask?.cancel() }
     }
 
     /// Reference-layout header: round back button, the search
@@ -111,6 +121,9 @@ struct SearchView: View {
                     .foregroundStyle(Theme.text)
                     .submitLabel(.search)
                     .onSubmit { beginSearch() }
+                    .onChange(of: keyword) { _, newValue in
+                        scheduleDebouncedSearch(newValue)
+                    }
                 if !keyword.isEmpty {
                     Button { keyword = "" } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textDim)
@@ -520,9 +533,38 @@ struct SearchView: View {
         }
     }
 
+    /// 300 ms debounce on keyword input (F2): wait for a pause in
+    /// typing, then search. Each keystroke cancels the pending
+    /// task, so only the final keyword is searched; a search
+    /// already running is waited out briefly (up to ~3 s) before
+    /// starting the new one, so the debounced search is not lost
+    /// to run()'s `searching` guard — past the wait the fallback
+    /// is the same as a manual submit (cancel + restart).
+    private func scheduleDebouncedSearch(_ newValue: String) {
+        debounceTask?.cancel()
+        let kw = newValue.trimmingCharacters(in: .whitespaces)
+        guard !kw.isEmpty else { return }
+        debounceTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            var waited = 0
+            while searching && waited < 20 {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                if Task.isCancelled { return }
+                waited += 1
+            }
+            guard !Task.isCancelled else { return }
+            let current = keyword.trimmingCharacters(in: .whitespaces)
+            guard current == kw, !current.isEmpty, current != lastSearchedKeyword else { return }
+            beginSearch()
+        }
+    }
+
     /// All search entry points funnel here so the run is tracked
     /// and the 停止 button can actually cancel it.
     private func beginSearch() {
+        debounceTask?.cancel()
+        debounceTask = nil
         searchTask?.cancel()
         searchTask = Task { await run() }
     }
@@ -542,6 +584,7 @@ struct SearchView: View {
     private func run() async {
         let kw = keyword.trimmingCharacters(in: .whitespaces)
         guard !kw.isEmpty, !searching else { return }
+        lastSearchedKeyword = kw
         saveRecent(kw)
         searching = true
         searched = false

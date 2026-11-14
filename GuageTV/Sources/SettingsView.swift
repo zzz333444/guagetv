@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.51 · 夜间优化·海报降采样"
+    static let buildLabel = "v1.52 · 夜间优化·搜索防抖"
 
     var body: some View {
         NavigationStack {
