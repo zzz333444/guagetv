@@ -51,7 +51,9 @@ final class JSRuntime {
     // MARK: loading (queue-confined)
 
     private func loadRuleLocked(_ extReference: String) throws {
-        let ctx = JSContext()!
+        guard let ctx = JSContext() else {
+            throw JSFailure(message: "JS 引擎创建失败")
+        }
         lastException = nil
         ctx.exceptionHandler = { [weak self] _, exception in
             self?.lastException = exception?.toString() ?? "unknown JS error"

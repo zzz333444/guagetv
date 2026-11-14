@@ -155,7 +155,10 @@ enum EmbyClient {
 
     /// Direct-stream URL for a playable item (movie or episode).
     static func streamURL(itemID: String) async throws -> String {
-        var request = URLRequest(url: URL(string: base + "/Items/\(itemID)/PlaybackInfo?api_key=\(token)")!)
+        guard let url = URL(string: base + "/Items/\(itemID)/PlaybackInfo?api_key=\(token)") else {
+            throw failure("Emby 地址无效")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [

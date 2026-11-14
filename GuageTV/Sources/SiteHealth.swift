@@ -22,6 +22,9 @@ enum SiteHealth {
         lock.lock()
         var store = load()
         var entry = store[key] ?? [0, 0, 0]
+        // 本地存量若被旧版/异常写入截断，直接下标会越界崩溃。
+        if entry.count < 3 { entry += Array(repeating: 0, count: 3 - entry.count) }
+        if entry.count > 3 { entry = Array(entry.prefix(3)) }
         entry[ok ? 0 : 1] += 1
         entry[2] += Double(ms)
         store[key] = entry
@@ -36,7 +39,7 @@ enum SiteHealth {
         lock.lock()
         let store = load()
         lock.unlock()
-        guard let entry = store[key], entry[0] + entry[1] >= 2 else { return 0.5 }
+        guard let entry = store[key], entry.count >= 3, entry[0] + entry[1] >= 2 else { return 0.5 }
         let total = entry[0] + entry[1]
         let rate = (entry[0] + 1) / (total + 2)
         let avgMs = entry[2] / max(total, 1)
