@@ -236,6 +236,10 @@ struct PlayerView: View {
     @State private var sleepAtEpisodeEnd = false
     @State private var triedLines: Set<Int> = []
     @State private var prefetching: Set<Int> = []
+    /// P5: which episode index the 70% prefetch has already fired
+    /// for — set once per episode so a failed resolve doesn't
+    /// re-trigger on every progress tick past 70%.
+    @State private var prefetchTriggeredForEpisode: Int?
     /// Same key 设置 → 音画 writes; the in-player settings sheet
     /// offers it too (mpv applies it on the next load).
     @AppStorage("videoGravity") private var videoGravity = "aspect"
@@ -315,7 +319,9 @@ struct PlayerView: View {
             UIDevice.current.isBatteryMonitoringEnabled = true
             batteryLevel = UIDevice.current.batteryLevel
             loadDanmakuForCurrentEpisode()
-            prefetchNext()
+            // P5: no immediate prefetch here any more — the next
+            // episode is pre-resolved once playback passes 70%
+            // (see the currentTime change handler below).
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
             mpv.onFailure = { handlePlaybackFailure($0) }
@@ -333,6 +339,18 @@ struct PlayerView: View {
         .onChange(of: currentTime) { _ in
             if currentTime > 3, recoveryStep != 0 { recoveryStep = 0; triedLines.removeAll() }
             checkOutroSkip()
+            // P5: prefetch the next episode once playback passes
+            // 70% of this episode (was: immediately on appear /
+            // episode change, i.e. at 0% — a spider round trip
+            // even for episodes abandoned seconds in). duration
+            // <= 0 (live / unknown) never triggers; the flag makes
+            // it once per episode so a failed resolve doesn't
+            // re-fire on every tick past 70%.
+            if duration > 0, currentTime / duration >= 0.70,
+               prefetchTriggeredForEpisode != index {
+                prefetchTriggeredForEpisode = index
+                prefetchNext()
+            }
         }
         .onChange(of: showStats) { _ in applyStatsSamplingFlags() }
         .onChange(of: showSpeedPill) { _ in applyStatsSamplingFlags() }
@@ -1461,7 +1479,8 @@ struct PlayerView: View {
     }
 
     private func notifyEpisodeChange() {
-        prefetchNext()
+        // P5: new episode → allow its own 70% prefetch to fire once.
+        prefetchTriggeredForEpisode = nil
         externalCues = []
         externalSubName = ""
         externalCues2 = []
