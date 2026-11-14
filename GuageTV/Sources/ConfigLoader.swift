@@ -506,12 +506,35 @@ enum ConfigLibrary {
         return nil
     }
 
+    /// Parsed-config memo (v1.40 startup/switching speed): big
+    /// configs (160+ sites) cost real time to JSON-parse, and the
+    /// library re-loads them on every activation. The memo keys
+    /// on the stored bytes' fingerprint, so a refreshed file
+    /// (auto-update swaps bytes) invalidates naturally.
+    private static var parsedMemo: [String: (fingerprint: Int, config: TVBoxConfig)] = [:]
+    private static let parsedMemoLock = NSLock()
+
     private static func loadEntry(id: String) -> TVBoxConfig? {
         guard let file = file(for: id), let data = try? Data(contentsOf: file) else { return nil }
-        if MaoYuanAdapter.looksLikeMaoYuan(data) {
-            return try? MaoYuanAdapter.convert(from: data)
+        let fingerprint = data.count &* 31 &+ data.prefix(256).reduce(0) { ($0 &* 131) &+ Int($1) }
+        parsedMemoLock.lock()
+        let cached = parsedMemo[id]
+        parsedMemoLock.unlock()
+        if let cached, cached.fingerprint == fingerprint {
+            return cached.config
         }
-        return try? ConfigLoader.load(from: data)
+        let parsed: TVBoxConfig?
+        if MaoYuanAdapter.looksLikeMaoYuan(data) {
+            parsed = try? MaoYuanAdapter.convert(from: data)
+        } else {
+            parsed = try? ConfigLoader.load(from: data)
+        }
+        if let parsed {
+            parsedMemoLock.lock()
+            parsedMemo[id] = (fingerprint, parsed)
+            parsedMemoLock.unlock()
+        }
+        return parsed
     }
 
     // MARK: auto-refresh （订阅配置自动更新）

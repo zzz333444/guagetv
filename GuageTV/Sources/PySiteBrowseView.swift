@@ -159,6 +159,28 @@ struct PySiteBrowseView: View {
         try await Self.downloadSpider(for: site)
     }
 
+    /// Health-store key matching what SpiderBridge records while
+    /// this site runs ("py:" + cached file stem), so search can
+    /// order its pool without downloading anything first.
+    static func healthKey(for site: TVBoxConfig.Site) -> String {
+        if site.api.hasPrefix("local-spider://") {
+            let name = String(site.api.dropFirst("local-spider://".count))
+            return "py:" + (name.hasSuffix(".py") ? String(name.dropLast(3)) : name)
+        }
+        let resolved: URL?
+        if let direct = URL(string: site.api), direct.scheme?.hasPrefix("http") == true {
+            resolved = direct
+        } else if let baseText = UserDefaults.standard.string(forKey: "configSourceURL"),
+                  let base = URL(string: baseText) {
+            resolved = URL(string: site.api, relativeTo: base)?.absoluteURL
+        } else {
+            resolved = nil
+        }
+        guard let resolved else { return "py:" + site.api }
+        let digest = Insecure.SHA1.hash(data: Data(resolved.absoluteString.utf8))
+        return "py:" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Download (or locate, for imported files) a site's .py and
     /// return its local path. Shared with search and standalone
     /// detail loads, which run outside this browse view.

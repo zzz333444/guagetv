@@ -72,6 +72,22 @@ enum JarProxyClient {
 
     static func run(jar: String, site: TVBoxConfig.Site, action: String,
                     extra: [String: Any] = [:], patient: Bool = false) async throws -> [String: Any] {
+        let healthStarted = Date()
+        do {
+            let result = try await runRetrying(jar: jar, site: site, action: action,
+                                               extra: extra, patient: patient)
+            SiteHealth.record("jar:" + site.key, ok: true,
+                              ms: Int(Date().timeIntervalSince(healthStarted) * 1000))
+            return result
+        } catch {
+            SiteHealth.record("jar:" + site.key, ok: false,
+                              ms: Int(Date().timeIntervalSince(healthStarted) * 1000))
+            throw error
+        }
+    }
+
+    private static func runRetrying(jar: String, site: TVBoxConfig.Site, action: String,
+                    extra: [String: Any] = [:], patient: Bool = false) async throws -> [String: Any] {
         // Cold-start patience: a sleeping free-tier proxy needs
         // wake + JVM boot + jar conversion + spider init before the
         // first call can land — measured in minutes, not seconds

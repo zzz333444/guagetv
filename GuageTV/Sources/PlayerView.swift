@@ -3,6 +3,7 @@ import AVKit
 import MediaPlayer
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Playback page — dual engine under ONE custom chrome (v8, modelled on
 /// the reference layout the user picked):
@@ -108,7 +109,7 @@ struct PlayerView: View {
     @State private var stallTicks = 0
     @State private var lastWatchTime: Double = -1
 
-    private enum DragMode { case scrub, brightness, volume }
+    private enum DragMode { case scrub, brightness, volume, episodeSwipe }
     @Environment(\.dismiss) private var dismiss
 
     init(urlString: String, header: [String: String] = [:], title: String = "") {
@@ -204,6 +205,24 @@ struct PlayerView: View {
     @AppStorage("player.showGravity") private var showGravityButton = true
     @AppStorage("player.showRate") private var showRateButton = true
     @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
+    /// v1.40 additions: HLS quality cap, stats overlay, gesture
+    /// tuning, portrait swipe-to-switch, danmaku and subtitles.
+    @AppStorage("player.hlsQuality") private var hlsQuality = "auto"
+    @AppStorage("player.showStats") private var showStats = false
+    @AppStorage("gesture.boostRate") private var boostRateSetting = 2.0
+    @AppStorage("player.swipeEpisodesPortrait") private var swipeEpisodesPortrait = true
+    @AppStorage("danmaku.enabled") private var danmakuEnabled = false
+    @AppStorage("danmaku.apiTemplate") private var danmakuAPITemplate = ""
+    @StateObject private var danmakuStore = DanmakuStore()
+    @State private var externalCues: [SubCue] = []
+    @State private var externalSubName = ""
+    @State private var showDanmakuPicker = false
+    @State private var showSubPicker = false
+    @State private var showSubSearch = false
+    @State private var sleepDeadline: Date?
+    @State private var sleepAtEpisodeEnd = false
+    @State private var triedLines: Set<Int> = []
+    @State private var prefetching: Set<Int> = []
     /// Same key 设置 → 音画 writes; the in-player settings sheet
     /// offers it too (mpv applies it on the next load).
     @AppStorage("videoGravity") private var videoGravity = "aspect"
@@ -227,6 +246,18 @@ struct PlayerView: View {
                     VStack { scrubPill; Spacer() }
                 } else if hudVisible {
                     hud
+                }
+                if danmakuEnabled, !danmakuStore.items.isEmpty {
+                    DanmakuView(store: danmakuStore, mpv: mpv, native: native, isMPV: isMPV)
+                        .allowsHitTesting(false)
+                }
+                if !externalCues.isEmpty {
+                    SubtitleOverlayView(cues: externalCues, mpv: mpv, native: native, isMPV: isMPV)
+                        .allowsHitTesting(false)
+                }
+                if showStats {
+                    statsOverlay
+                        .allowsHitTesting(false)
                 }
                 if isBuffering || resolvingEpisode {
                     bufferingDots
@@ -265,6 +296,8 @@ struct PlayerView: View {
             }
             UIDevice.current.isBatteryMonitoringEnabled = true
             batteryLevel = UIDevice.current.batteryLevel
+            loadDanmakuForCurrentEpisode()
+            prefetchNext()
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
             mpv.onFailure = { handlePlaybackFailure($0) }
@@ -279,7 +312,7 @@ struct PlayerView: View {
             applyIntroSkipIfNeeded()
         }
         .onChange(of: currentTime) { _ in
-            if currentTime > 3, recoveryStep != 0 { recoveryStep = 0 }
+            if currentTime > 3, recoveryStep != 0 { recoveryStep = 0; triedLines.removeAll() }
             checkOutroSkip()
         }
         .task { await saveProgressLoop() }
@@ -299,6 +332,45 @@ struct PlayerView: View {
         }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showPlayerSettings) { playerSettingsSheet }
+        .sheet(isPresented: $showSubSearch) {
+            SubSearchView(title: title) { cues, name in
+                externalCues = cues
+                externalSubName = name
+                showSubSearch = false
+                showToast("字幕已加载：\(name)")
+            }
+        }
+        .fileImporter(isPresented: $showDanmakuPicker,
+                      allowedContentTypes: [.xml, .json, .plainText],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if let data = try? Data(contentsOf: url) {
+                    danmakuStore.load(data: data)
+                    showToast(danmakuStore.items.isEmpty ? "弹幕文件没解析出内容" : "弹幕已加载（\(danmakuStore.items.count) 条）")
+                }
+            }
+        }
+        .fileImporter(isPresented: $showSubPicker,
+                      allowedContentTypes: [.plainText, .text],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if let data = try? Data(contentsOf: url) {
+                    let cues = SubtitleParser.parse(data: data, fileName: url.lastPathComponent)
+                    if cues.isEmpty {
+                        showToast("字幕文件没解析出内容（支持 srt / vtt / ass）")
+                    } else {
+                        externalCues = cues
+                        externalSubName = url.lastPathComponent
+                        showToast("字幕已加载：\(url.lastPathComponent)")
+                    }
+                }
+            }
+        }
+        .onChange(of: hlsQuality) { _, _ in applyHLSQuality() }
     }
 
     // MARK: engine layers
@@ -354,7 +426,7 @@ struct PlayerView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 14)
                 .onChanged { value in handleDrag(value, size: size) }
-                .onEnded { _ in endDrag() }
+                .onEnded { value in endDrag(value) }
         )
         // Hold to fast-forward (mainstream player behaviour): a
         // deliberate 2-second hold anywhere boosts to 2x until
@@ -375,7 +447,7 @@ struct PlayerView: View {
         guard longPressBoostEnabled, !boostActive, isPlaying else { return }
         boostActive = true
         rateBeforeBoost = currentRate
-        setRate(2.0)
+        setRate(boostRateSetting)
         showToast("2 倍速播放中，松开恢复")
     }
 
@@ -399,6 +471,11 @@ struct PlayerView: View {
                 dragMode = .scrub
                 dragStartTime = currentTime
                 scrubTarget = currentTime
+            } else if swipeEpisodesPortrait, size.height > size.width, episodes.count > 1 {
+                // Portrait (short-drama) mode: a vertical swipe
+                // switches episodes instead of riding brightness /
+                // volume; the switch itself fires in endDrag.
+                dragMode = .episodeSwipe
             } else if value.startLocation.x < size.width / 2 {
                 dragMode = .brightness
                 dragStartLevel = Double(UIScreen.main.brightness)
@@ -408,8 +485,10 @@ struct PlayerView: View {
                 dragStartLevel = VolumeControl.current()
                 dragLevel = dragStartLevel
             }
-            hudGeneration += 1
-            withAnimation { hudVisible = true }
+            if dragMode != .episodeSwipe {
+                hudGeneration += 1
+                withAnimation { hudVisible = true }
+            }
         }
         switch dragMode {
         case .scrub:
@@ -425,13 +504,19 @@ struct PlayerView: View {
             let level = min(max(dragStartLevel - Double(dy) / 220, 0), 1)
             dragLevel = level
             VolumeControl.set(level)
+        case .episodeSwipe:
+            break   // resolved on release in endDrag
         case .none:
             break
         }
     }
 
-    private func endDrag() {
+    private func endDrag(_ value: DragGesture.Value) {
         if dragMode == .scrub, duration > 0 { seek(to: scrubTarget) }
+        if dragMode == .episodeSwipe {
+            let dy = value.translation.height
+            if dy < -70 { nextEpisode() } else if dy > 70 { prevEpisode() }
+        }
         clearPreview()
         dragMode = nil
         hudGeneration += 1
@@ -533,6 +618,39 @@ struct PlayerView: View {
         }
         .padding(.horizontal, 22)
         .padding(.top, 8)
+    }
+
+    /// Playback stats overlay (v1.40): resolution / bitrate /
+    /// fps / dropped frames / cache, for tuning and diagnosis.
+    private var statsOverlay: some View {
+        VStack {
+            HStack {
+                Text(statsText)
+                    .font(.system(size: 10.5).monospaced())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.top, 58)
+        .padding(.leading, 14)
+    }
+
+    private var statsText: String {
+        if isMPV {
+            return [specText, mpv.fpsText, mpv.dropText, mpv.cacheText,
+                    Self.formatSpeed(netSpeedBytes)]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        return [specText, native.bitrateText, Self.formatSpeed(netSpeedBytes)]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func applyHLSQuality() {
+        native.applyQualityCap(hlsQuality)
+        mpv.applyHLSBitrate(hlsQuality)
     }
 
     private var batterySymbol: String {
@@ -946,7 +1064,102 @@ struct PlayerView: View {
                     }
                     .foregroundStyle(Theme.text)
                 }
+                Section("画质（HLS 多码率）") {
+                    ForEach([("auto", "自动"), ("1080", "最高 1080p"), ("720", "最高 720p"), ("480", "最高 480p")], id: \.0) { option in
+                        Button {
+                            hlsQuality = option.0
+                            applyHLSQuality()
+                        } label: {
+                            HStack {
+                                Text(option.1).foregroundStyle(Theme.text)
+                                Spacer()
+                                if hlsQuality == option.0 {
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                }
+                            }
+                        }
+                    }
+                }
+                Section("弹幕") {
+                    Toggle("弹幕", isOn: $danmakuEnabled)
+                    if danmakuEnabled {
+                        Button {
+                            showPlayerSettings = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showDanmakuPicker = true }
+                        } label: {
+                            Label("加载弹幕文件（XML / JSON）", systemImage: "doc.badge.plus")
+                                .foregroundStyle(Theme.text)
+                        }
+                        if !danmakuStore.items.isEmpty {
+                            Button(role: .destructive) {
+                                danmakuStore.clear()
+                            } label: {
+                                Label("清除弹幕（当前 \(danmakuStore.items.count) 条）", systemImage: "trash")
+                            }
+                        }
+                        Text(danmakuAPITemplate.isEmpty
+                             ? "在线弹幕：在「设置 → 播放」里填弹幕接口模板（含 {title} 和 {ep} 占位符）后自动匹配。"
+                             : "在线弹幕接口已配置，每集自动拉取。")
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                    }
+                }
+                Section("外挂字幕") {
+                    Button {
+                        showPlayerSettings = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showSubPicker = true }
+                    } label: {
+                        Label("加载字幕文件（srt / vtt / ass）", systemImage: "doc.badge.plus")
+                            .foregroundStyle(Theme.text)
+                    }
+                    Button {
+                        showPlayerSettings = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showSubSearch = true }
+                    } label: {
+                        Label("在线搜索字幕（OpenSubtitles）", systemImage: "magnifyingglass")
+                            .foregroundStyle(Theme.text)
+                    }
+                    if !externalCues.isEmpty {
+                        Button(role: .destructive) {
+                            externalCues = []
+                            externalSubName = ""
+                        } label: {
+                            Label("清除外挂字幕（\(externalSubName)）", systemImage: "trash")
+                        }
+                    }
+                }
+                Section("睡眠定时") {
+                    ForEach([0, 15, 30, 60], id: \.self) { minutes in
+                        Button {
+                            sleepAtEpisodeEnd = false
+                            sleepDeadline = minutes == 0 ? nil : Date().addingTimeInterval(Double(minutes) * 60)
+                            showToast(minutes == 0 ? "睡眠定时已关" : "\(minutes) 分钟后自动暂停")
+                        } label: {
+                            HStack {
+                                Text(minutes == 0 ? "关" : "\(minutes) 分钟").foregroundStyle(Theme.text)
+                                Spacer()
+                                if minutes == 0, sleepDeadline == nil, !sleepAtEpisodeEnd {
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                }
+                            }
+                        }
+                    }
+                    Button {
+                        sleepDeadline = nil
+                        sleepAtEpisodeEnd = true
+                        showToast("播完本集后暂停")
+                    } label: {
+                        HStack {
+                            Text("播完本集").foregroundStyle(Theme.text)
+                            Spacer()
+                            if sleepAtEpisodeEnd {
+                                Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                            }
+                        }
+                    }
+                }
                 Section("按钮与功能") {
+                    Toggle("播放统计浮层", isOn: $showStats)
+                    Toggle("竖屏上下滑切集", isOn: $swipeEpisodesPortrait)
                     Toggle("网速显示", isOn: $showSpeedPill)
                     Toggle("分辨率显示", isOn: $showResolutionPill)
                     Toggle("画中画按钮", isOn: $showPiPButton)
@@ -1030,6 +1243,12 @@ struct PlayerView: View {
     /// callbacks and the outro skip land here, so the 播放设置
     /// auto-next switch gates all of them. Off = stay at the end.
     private func advanceToNext() {
+        if sleepAtEpisodeEnd {
+            sleepAtEpisodeEnd = false
+            if isPlaying { togglePlay() }
+            showToast("睡眠定时：本集播完，已暂停")
+            return
+        }
         guard autoNextEnabled, index < episodes.count - 1 else { return }
         goToEpisode(index + 1)
     }
@@ -1107,8 +1326,48 @@ struct PlayerView: View {
     }
 
     private func notifyEpisodeChange() {
+        prefetchNext()
+        externalCues = []
+        externalSubName = ""
+        loadDanmakuForCurrentEpisode()
         guard let hit = resolved[index] else { return }
         onEpisodeChange?(activeLine, index, hit.url, hit.header)
+    }
+
+    /// Pre-resolve the NEXT episode in the background once the
+    /// current one is playing, so stepping/auto-advance lands
+    /// instantly instead of spinning through a spider round trip.
+    private func prefetchNext() {
+        let target = index + 1
+        guard let episodeResolver, episodes.indices.contains(target),
+              resolved[target] == nil, !prefetching.contains(target) else { return }
+        prefetching.insert(target)
+        let line = activeLine
+        Task {
+            if case .ok(let url, let header) = await episodeResolver(line, target) {
+                if activeLine == line { resolved[target] = (url, header) }
+            }
+            prefetching.remove(target)
+        }
+    }
+
+    /// Auto-fetch danmaku for the current episode when the user
+    /// configured an API template ({title} / {ep} placeholders,
+    /// bilibili-style XML or JSON array responses both parse).
+    private func loadDanmakuForCurrentEpisode() {
+        guard danmakuEnabled, !danmakuAPITemplate.isEmpty else {
+            danmakuStore.clear()
+            return
+        }
+        let urlText = danmakuAPITemplate
+            .replacingOccurrences(of: "{title}", with: title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? title)
+            .replacingOccurrences(of: "{ep}", with: String(index + 1))
+        guard let url = URL(string: urlText) else { return }
+        let store = danmakuStore
+        Task {
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+            store.load(data: data)
+        }
     }
 
     /// Failure ladder, driven by both engines' failure callbacks:
@@ -1131,8 +1390,29 @@ struct PlayerView: View {
             showToast("正在切换引擎重试…")
             switchEngine(manual: false)
         default:
-            showToast("播放失败：" + message)
+            // One more rung (v1.40): if this line is hopeless, hop
+            // to another play line of the same title automatically
+            // instead of dying on the error toast.
+            if failoverToNextLine() {
+                recoveryStep = 1
+            } else {
+                showToast("播放失败：" + message)
+            }
         }
+    }
+
+    /// Try the title's other play lines in order, skipping ones
+    /// already tried during this failure streak.
+    private func failoverToNextLine() -> Bool {
+        triedLines.insert(activeLine)
+        guard let next = lineEpisodes.indices.first(where: {
+            $0 != activeLine && !triedLines.contains($0) && !lineEpisodes[$0].isEmpty
+        }) else { return false }
+        triedLines.insert(next)
+        Diagnostics.log("播放", "自动换线 · \(title)：线路 \(activeLine + 1) → \(next + 1)")
+        showToast("这条线路播不了，自动切换线路…")
+        switchLine(next)
+        return true
     }
 
     private func reloadCurrentEngine() {
@@ -1253,6 +1533,11 @@ struct PlayerView: View {
             saveProgress()
             watchdogTick()
             batteryLevel = UIDevice.current.batteryLevel
+            if let sleepDeadline, Date() >= sleepDeadline {
+                self.sleepDeadline = nil
+                if isPlaying { togglePlay() }
+                showToast("睡眠定时到，已暂停")
+            }
         }
     }
 
@@ -1358,6 +1643,39 @@ final class NativeController: NSObject, ObservableObject {
     @Published var specText: String = ""
     @Published var isPiPActive = false
     private var pipController: AVPictureInPictureController?
+    /// Observed bitrate for the stats overlay (v1.40).
+    @Published var bitrateText = ""
+
+    /// Cap HLS variant selection (player.hlsQuality): maximum
+    /// resolution + peak bitrate on the current item.
+    func applyQualityCap(_ mode: String) {
+        guard let item = player.currentItem else { return }
+        switch mode {
+        case "1080":
+            item.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
+            item.preferredPeakBitRate = 8_000_000
+        case "720":
+            item.preferredMaximumResolution = CGSize(width: 1280, height: 720)
+            item.preferredPeakBitRate = 4_500_000
+        case "480":
+            item.preferredMaximumResolution = CGSize(width: 854, height: 480)
+            item.preferredPeakBitRate = 1_800_000
+        default:
+            item.preferredMaximumResolution = .zero
+            item.preferredPeakBitRate = 0
+        }
+    }
+
+    /// Refresh the observed-bitrate stat from the access log.
+    func refreshBitrateStat() {
+        guard let event = player.currentItem?.accessLog()?.events.last,
+              event.observedBitrate > 0 else { return }
+        let mbps = event.observedBitrate / 1_000_000
+        let text = mbps >= 1
+            ? String(format: "%.1f Mbps", mbps)
+            : String(format: "%.0f Kbps", event.observedBitrate / 1_000)
+        if text != bitrateText { bitrateText = text }
+    }
 
     // MARK: tracks （音轨 / 字幕，via media selection groups)
 
@@ -1444,6 +1762,8 @@ final class NativeController: NSObject, ObservableObject {
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             if item.status == .readyToPlay {
                 self?.refreshTracks()
+                self?.applyQualityCap(
+                    UserDefaults.standard.string(forKey: "player.hlsQuality") ?? "auto")
                 return
             }
             guard item.status == .failed else { return }
@@ -1563,6 +1883,7 @@ final class NativeController: NSObject, ObservableObject {
             if dt >= 1.0 {
                 let rate = Double(max(total - lastBytes, 0)) / dt
                 netSpeedBytes = netSpeedBytes == 0 ? rate : netSpeedBytes * 0.5 + rate * 0.5
+                refreshBitrateStat()
                 lastBytes = total
                 lastBytesAt = now
             }

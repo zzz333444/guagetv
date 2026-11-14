@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.39 · 按钮修复与 py 补漏"
+    static let buildLabel = "v1.40 · 播放优化与弹幕字幕"
 
     var body: some View {
         NavigationStack {
@@ -1075,6 +1075,12 @@ struct PlaySettingsView: View {
     @AppStorage("player.showGravity") private var showGravity = true
     @AppStorage("player.showRate") private var showRate = true
     @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
+    @AppStorage("player.showStats") private var showStats = false
+    @AppStorage("gesture.boostRate") private var boostRate = 2.0
+    @AppStorage("danmaku.enabled") private var danmakuEnabled = false
+    @AppStorage("danmaku.apiTemplate") private var danmakuAPI = ""
+    @AppStorage("danmaku.opacity") private var danmakuOpacity = 0.9
+    @AppStorage("danmaku.speed") private var danmakuSpeed = 1.0
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -1139,8 +1145,44 @@ struct PlaySettingsView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Toggle("切集按钮（上一集/下一集）", isOn: $showEpisodeSwitch)
                         .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("播放统计浮层", isOn: $showStats)
+                        .font(.subheadline).foregroundStyle(Theme.text)
                     Text("关掉的项不再出现在播放页，对应功能同时停用；下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("手势").font(.headline).foregroundStyle(Theme.text)
+                    Text("长按倍速的倍数").font(.subheadline).foregroundStyle(Theme.text)
+                    Picker("倍速", selection: $boostRate) {
+                        Text("1.5x").tag(1.5)
+                        Text("2x").tag(2.0)
+                        Text("3x").tag(3.0)
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("弹幕").font(.headline).foregroundStyle(Theme.text)
+                    Toggle("弹幕总开关", isOn: $danmakuEnabled)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("在线弹幕接口模板").font(.subheadline).foregroundStyle(Theme.text)
+                    TextField("https://…/danmaku?title={title}&ep={ep}", text: $danmakuAPI)
+                        .font(.footnote)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(10)
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    Text("填一个返回弹幕数据的接口地址，用 {title} 和 {ep} 占位剧名和集数；返回 B 站式 XML 或 JSON 数组都能解析。留空则只能在播放页手动加载弹幕文件。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                    Text("不透明度").font(.subheadline).foregroundStyle(Theme.text)
+                    Slider(value: $danmakuOpacity, in: 0.2...1, step: 0.05)
+                        .tint(Theme.text)
+                    Text("滚动速度").font(.subheadline).foregroundStyle(Theme.text)
+                    Slider(value: $danmakuSpeed, in: 0.5...2, step: 0.1)
+                        .tint(Theme.text)
                 }
             }
         }
@@ -1298,9 +1340,23 @@ struct ControlSettingsView: View {
 /// 字幕： subtitle scale applied by the mpv engine (libass rendering).
 struct SubtitleSettingsView: View {
     @AppStorage("subtitleScale") private var scale = 1.0
+    @AppStorage("subtitles.osKey") private var osKey = ""
 
     var body: some View {
         SettingsPage(title: "字幕") {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("外挂字幕 · OpenSubtitles").font(.headline).foregroundStyle(Theme.text)
+                    SecureField("API Key", text: $osKey)
+                        .font(.footnote)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(10)
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    Text("播放页 → 播放设置 → 外挂字幕 → 在线搜索字幕 用它搜字幕。Key 在 opensubtitles.com 免费注册后、于 API consumers 里自建，只存本机。本地字幕文件（srt/vtt/ass）不需要 Key。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("字幕大小（mpv 引擎）").font(.headline).foregroundStyle(Theme.text)

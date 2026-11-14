@@ -444,9 +444,39 @@ final class MPVController: ObservableObject {
         return String(cString: c)
     }
 
+    /// Stats-overlay fields (v1.40), refreshed with the track poll.
+    @Published var fpsText = ""
+    @Published var dropText = ""
+    @Published var cacheText = ""
+
+    private func refreshStats() {
+        if let fps = stringProperty("estimated-vf-fps").flatMap(Double.init), fps > 0 {
+            fpsText = String(format: "%.0f fps", fps)
+        }
+        if let drops = stringProperty("frame-drop-count").flatMap(Int.init) {
+            dropText = "丢帧 \(drops)"
+        }
+        if let cache = stringProperty("demuxer-cache-duration").flatMap(Double.init), cache > 0 {
+            cacheText = String(format: "缓存 %.0fs", cache)
+        }
+    }
+
+    /// Cap HLS variant bitrate (player.hlsQuality): mpv's
+    /// hls-bitrate option takes max=<bytes/s>.
+    func applyHLSBitrate(_ mode: String) {
+        let value: String
+        switch mode {
+        case "1080": value = "max=8000000"
+        case "720": value = "max=4500000"
+        case "480": value = "max=1800000"
+        default: value = "no"
+        }
+        setProperty("hls-bitrate", value)
+    }
+
     private func poll() {
         pollCount += 1
-        if pollCount % 4 == 0 { refreshTracks() }
+        if pollCount % 4 == 0 { refreshTracks(); refreshStats() }
         duration = stringProperty("duration").flatMap(Double.init) ?? 0
         currentTime = stringProperty("time-pos").flatMap(Double.init) ?? 0
         let userPaused = stringProperty("pause") == "yes"

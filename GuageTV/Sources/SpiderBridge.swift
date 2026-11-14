@@ -48,11 +48,13 @@ final class SpiderBridge {
     private var timeoutStreak: [String: Int] = [:]
     private var activePath: String?
     private var inFlight: [UUID: String] = [:]
+    private var invokeStarted: [UUID: Date] = [:]
 
     private func beginInvoke(path: String?) -> UUID {
         let token = UUID()
         breakerLock.lock()
         inFlight[token] = path ?? activePath ?? ""
+        invokeStarted[token] = Date()
         breakerLock.unlock()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) { [weak self] in
             self?.checkStuck(token)
@@ -75,8 +77,15 @@ final class SpiderBridge {
     private func endInvoke(_ token: UUID, success: Bool) {
         breakerLock.lock()
         let path = inFlight.removeValue(forKey: token)
+        let started = invokeStarted.removeValue(forKey: token)
         if success, let path, !path.isEmpty { timeoutStreak[path] = 0 }
         breakerLock.unlock()
+        if let path, !path.isEmpty, let started {
+            let name = (path as NSString).lastPathComponent
+            let stem = name.hasSuffix(".py") ? String(name.dropLast(3)) : name
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            SiteHealth.record("py:" + stem, ok: success, ms: ms)
+        }
     }
 
     func isPoisoned(path: String) -> Bool {

@@ -582,6 +582,13 @@ struct SearchView: View {
         // later site on that bridge can only ever time out — after
         // 3 misses in a row, skip the rest of that pool instead of
         // burning 15 s per site on a dead queue.
+        // Health ordering (v1.40): sites with a proven record
+        // answer first; chronic failures sink to the back of
+        // their serial pool instead of eating the front of it.
+        pyPool.sort {
+            SiteHealth.score(PySiteBrowseView.healthKey(for: $0))
+                > SiteHealth.score(PySiteBrowseView.healthKey(for: $1))
+        }
         var pyMisses = 0
         for (index, site) in pyPool.enumerated() {
             if Task.isCancelled { break }
@@ -624,7 +631,10 @@ struct SearchView: View {
             }
             tick()
         }
-        for site in jarPool {
+        let orderedJarPool = jarPool.sorted {
+            SiteHealth.score("jar:" + $0.key) > SiteHealth.score("jar:" + $1.key)
+        }
+        for site in orderedJarPool {
             if Task.isCancelled { break }
             catTried["Jar", default: 0] += 1
             progressText = statusLine("正在搜 Jar 站：\(site.name)")
