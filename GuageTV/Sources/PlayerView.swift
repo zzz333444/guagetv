@@ -112,6 +112,9 @@ struct PlayerView: View {
     /// Stall watchdog state (see watchdogTick).
     @State private var stallTicks = 0
     @State private var lastWatchTime: Double = -1
+    /// P4 音频中断恢复：中断开始时记下当时是否在播，中断结束
+    /// 且系统建议恢复时用它决定要不要续播。
+    @State private var wasPlayingBeforeInterruption = false
 
     private enum DragMode { case scrub, brightness, volume, episodeSwipe }
     @Environment(\.dismiss) private var dismiss
@@ -337,6 +340,11 @@ struct PlayerView: View {
                 UIScreen.main.brightness = brightnessBeforePlay
             }
             brightnessBeforePlay = nil
+        }
+        // P4 音频中断恢复：订阅走 .onReceive，生命周期跟视图走，
+        // 视图消失即取消订阅，无需手动移除，不泄漏。
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { note in
+            handleAudioInterruption(note)
         }
         .onChange(of: index) { _ in
             didSkipIntro = false
@@ -1266,6 +1274,28 @@ struct PlayerView: View {
     private var currentRate: Double { isMPV ? mpv.speed : Double(native.rate) }
 
     private func togglePlay() { isMPV ? mpv.togglePlay() : native.toggle() }
+
+    /// P4 音频中断恢复（来电 / 闹钟 / Siri 打断时系统暂停音频会话）：
+    /// 中断开始记下当时是否在播；中断结束且系统建议恢复（shouldResume）
+    /// 时，若中断前在播就续播。只对原生引擎续播；mpv 引擎仅记录
+    /// 状态（mpv 核心自己管暂停 / 恢复，App 侧不替它按播放）。
+    private func handleAudioInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
+        switch type {
+        case .began:
+            wasPlayingBeforeInterruption = isPlaying
+        case .ended:
+            defer { wasPlayingBeforeInterruption = false }
+            guard let rawOptions = info[AVAudioSessionInterruptionOptionKey] as? UInt,
+                  AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume),
+                  wasPlayingBeforeInterruption, !isMPV else { return }
+            native.toggle()
+        @unknown default:
+            break
+        }
+    }
     private func seek(to seconds: Double, tolerant: Bool = false) {
         if isMPV { mpv.seek(to: seconds) } else { native.seek(to: seconds, tolerant: tolerant) }
     }
