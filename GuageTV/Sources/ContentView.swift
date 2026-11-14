@@ -105,14 +105,25 @@ struct ContentView: View {
         }
     }
 
+    /// F4 (v1.56): four pages stay mounted in a ZStack and only
+    /// visibility/hit-testing flips with `tab`, so switching tabs no
+    /// longer destroys and rebuilds DiscoverView (its feed, scroll
+    /// position and in-flight loads survive). Hidden pages get
+    /// allowsHitTesting(false) so they cannot swallow touches.
     private var tabContent: some View {
-        Group {
-            switch tab {
-            case 0: DiscoverView(config: config)
-            case 1: HistoryView()
-            case 2: LibraryView(config: $config) { tab = 3 }
-            default: SettingsView(config: $config)
-            }
+        ZStack {
+            DiscoverView(config: config)
+                .opacity(tab == 0 ? 1 : 0)
+                .allowsHitTesting(tab == 0)
+            HistoryView()
+                .opacity(tab == 1 ? 1 : 0)
+                .allowsHitTesting(tab == 1)
+            LibraryView(config: $config) { tab = 3 }
+                .opacity(tab == 2 ? 1 : 0)
+                .allowsHitTesting(tab == 2)
+            SettingsView(config: $config)
+                .opacity(tab == 3 ? 1 : 0)
+                .allowsHitTesting(tab == 3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.22), value: tab)
