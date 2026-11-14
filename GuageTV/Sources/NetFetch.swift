@@ -42,9 +42,12 @@ enum NetFetch {
         var attempts: [URL] = [url]
         if let swapped = schemeSwapped(url) { attempts.append(swapped) }
         attempts.append(url)
+        // 幂等 GET 最多 2 次重试，指数退避 0.6s、1.5s；仅网络类错误重试，
+        // HTTP 状态错误（badServerResponse）立即抛出，不重试、不换候选 URL。
+        let backoff: [UInt64] = [600_000_000, 1_500_000_000]
         var lastError: Error = URLError(.unknown)
         for (i, candidate) in attempts.enumerated() {
-            if i > 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
+            if i > 0 { try? await Task.sleep(nanoseconds: backoff[min(i - 1, backoff.count - 1)]) }
             do {
                 let (data, response) = try await URLSession.shared.data(for: request(for: candidate, ua: ua, extraHeader: extraHeader))
                 if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
@@ -52,10 +55,25 @@ enum NetFetch {
                 }
                 return data
             } catch {
+                guard isRetryableNetworkError(error) else { throw error }
                 lastError = error
             }
         }
         throw lastError
+    }
+
+    /// 仅瞬时网络类错误可重试：超时、断连、无网、DNS/建连失败等。
+    /// HTTP 状态错误（.badServerResponse）与解析/证书类错误不在此列。
+    private static func isRetryableNetworkError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+             .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+             .resourceUnavailable, .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Single-attempt image fetch (poster grids load dozens of these;
