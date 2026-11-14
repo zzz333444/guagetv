@@ -479,6 +479,11 @@ final class MPVController: ObservableObject {
     @Published var fpsText = ""
     @Published var dropText = ""
     @Published var cacheText = ""
+    /// F3 (v1.53): stats sampling runs only while the overlay is
+    /// open — PlayerView flips this with player.showStats. The
+    /// 0.25s poll itself keeps running (time-pos / EOF / failure
+    /// detection feed live playback); only the 1s stats reads stop.
+    var statsSamplingEnabled = false
 
     private func refreshStats() {
         if let fps = stringProperty("estimated-vf-fps").flatMap(Double.init), fps > 0 {
@@ -491,6 +496,11 @@ final class MPVController: ObservableObject {
             cacheText = String(format: "缓存 %.0fs", cache)
         }
     }
+
+    /// Immediate one-shot stats read for the moment the overlay
+    /// opens, so it shows values at once instead of waiting for
+    /// the next 1s tick.
+    func refreshStatsNow() { refreshStats() }
 
     /// Cap HLS variant bitrate (player.hlsQuality): mpv's
     /// hls-bitrate option takes max=<bytes/s>.
@@ -507,7 +517,10 @@ final class MPVController: ObservableObject {
 
     private func poll() {
         pollCount += 1
-        if pollCount % 4 == 0 { refreshTracks(); refreshStats() }
+        if pollCount % 4 == 0 {
+            refreshTracks()
+            if statsSamplingEnabled { refreshStats() }
+        }
         duration = stringProperty("duration").flatMap(Double.init) ?? 0
         currentTime = stringProperty("time-pos").flatMap(Double.init) ?? 0
         let userPaused = stringProperty("pause") == "yes"

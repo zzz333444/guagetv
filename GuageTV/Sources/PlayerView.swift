@@ -323,6 +323,7 @@ struct PlayerView: View {
             native.onFailure = { handlePlaybackFailure($0) }
             native.onEnded = { advanceToNext() }
             scheduleChromeHide()
+            applyStatsSamplingFlags()
         }
         .onChange(of: duration) { _ in
             applyPendingStartIfNeeded()
@@ -333,9 +334,24 @@ struct PlayerView: View {
             if currentTime > 3, recoveryStep != 0 { recoveryStep = 0; triedLines.removeAll() }
             checkOutroSkip()
         }
+        .onChange(of: showStats) { _ in applyStatsSamplingFlags() }
+        .onChange(of: showSpeedPill) { _ in applyStatsSamplingFlags() }
         .task { await saveProgressLoop() }
         .onDisappear {
             saveProgress(accumulate: false)
+            // F3: stop the mpv poll timer and the native progress
+            // observer; with PiP off, also drop the engine
+            // callbacks so the controllers can deallocate instead
+            // of ticking on a dismissed player (the .task loop
+            // above is cancelled by SwiftUI automatically).
+            mpv.stop()
+            native.teardown()
+            if !native.isPiPActive {
+                mpv.onFailure = nil
+                mpv.onEnded = nil
+                native.onFailure = nil
+                native.onEnded = nil
+            }
             if let brightnessBeforePlay {
                 UIScreen.main.brightness = brightnessBeforePlay
             }
@@ -697,6 +713,20 @@ struct PlayerView: View {
     private func applyHLSQuality() {
         native.applyQualityCap(hlsQuality)
         mpv.applyHLSBitrate(hlsQuality)
+    }
+
+    /// F3: stats sampling follows the overlay toggle; the speed
+    /// pill keeps the native access-log sampler alive on its own.
+    /// Opening the overlay refreshes once immediately so it is
+    /// not blank until the next 1s tick.
+    private func applyStatsSamplingFlags() {
+        mpv.statsSamplingEnabled = showStats
+        native.statsSamplingEnabled = showStats
+        native.speedSamplingEnabled = showSpeedPill || showStats
+        if showStats {
+            mpv.refreshStatsNow()
+            native.refreshBitrateStat()
+        }
     }
 
     private var batterySymbol: String {
@@ -1752,6 +1782,12 @@ final class NativeController: NSObject, ObservableObject {
     private var pipController: AVPictureInPictureController?
     /// Observed bitrate for the stats overlay (v1.40).
     @Published var bitrateText = ""
+    /// F3 (v1.53): stats/speed sampling follows the overlay and
+    /// speed-pill toggles — PlayerView sets these from
+    /// player.showStats / player.showSpeed. When both are off,
+    /// sampleSpeed() skips the access-log enumeration entirely.
+    var statsSamplingEnabled = false
+    var speedSamplingEnabled = true
 
     /// Cap HLS variant selection (player.hlsQuality): maximum
     /// resolution + peak bitrate on the current item.
@@ -1922,6 +1958,10 @@ final class NativeController: NSObject, ObservableObject {
     func load(url: URL, header: [String: String], isLive: Bool = false) {
         specText = ""
         lastIsLive = isLive
+        // F3: re-attach the progress observer after a teardown —
+        // load() runs on every re-appear, so a dismissed player
+        // that comes back resumes ticking.
+        ensureTimeObserver()
         if loadedURL == url, player.currentItem != nil {
             player.play()
             return
@@ -1950,51 +1990,61 @@ final class NativeController: NSObject, ObservableObject {
         item.startsOnFirstEligibleVariant = true
         attachItemObservers(item)
         player.replaceCurrentItem(with: item)
-        if timeObserver == nil {
-            timeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
-                queue: .main
-            ) { [weak self] time in
-                guard let self else { return }
-                self.currentTime = time.seconds.isFinite ? time.seconds : 0
-                if let d = self.player.currentItem?.duration.seconds, d.isFinite {
-                    self.duration = d
-                    if self.specText.isEmpty, let item = self.player.currentItem {
-                        let size = item.presentationSize
-                        if size.width > 0 {
-                            var text = "\(Int(size.width))×\(Int(size.height))"
-                            Task { @MainActor in
-                                if let track = try? await item.asset.loadTracks(withMediaType: .video).first,
-                                   let descs = try? await track.load(.formatDescriptions),
-                                   let desc = descs.first {
-                                    let codec = PlayerView.codecName(CMFormatDescriptionGetMediaSubType(desc))
-                                    if !codec.isEmpty { self.specText = text + " · " + codec }
-                                }
+        player.play()
+    }
+
+    /// (Re)attach the 0.25s progress observer; no-op when one is
+    /// already registered.
+    private func ensureTimeObserver() {
+        guard timeObserver == nil else { return }
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            self.currentTime = time.seconds.isFinite ? time.seconds : 0
+            if let d = self.player.currentItem?.duration.seconds, d.isFinite {
+                self.duration = d
+                if self.specText.isEmpty, let item = self.player.currentItem {
+                    let size = item.presentationSize
+                    if size.width > 0 {
+                        var text = "\(Int(size.width))×\(Int(size.height))"
+                        Task { @MainActor in
+                            if let track = try? await item.asset.loadTracks(withMediaType: .video).first,
+                               let descs = try? await track.load(.formatDescriptions),
+                               let desc = descs.first {
+                                let codec = PlayerView.codecName(CMFormatDescriptionGetMediaSubType(desc))
+                                if !codec.isEmpty { self.specText = text + " · " + codec }
                             }
-                            self.specText = text
                         }
+                        self.specText = text
                     }
                 }
-                self.isPlaying = self.player.timeControlStatus == .playing
-                self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-                self.sampleSpeed()
             }
+            self.isPlaying = self.player.timeControlStatus == .playing
+            self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            self.sampleSpeed()
         }
-        player.play()
     }
 
     /// Download rate from cumulative access-log bytes, sampled on a
     /// ~1 s cadence and lightly smoothed so the readout doesn't jitter.
     private func sampleSpeed() {
+        // F3: the access log only feeds the speed pill
+        // (netSpeedBytes) and the stats overlay (bitrateText) —
+        // skip the enumeration entirely when neither is on screen.
+        guard statsSamplingEnabled || speedSamplingEnabled else { return }
         guard let events = player.currentItem?.accessLog()?.events, !events.isEmpty else { return }
         let total = events.reduce(Int64(0)) { $0 + max($1.numberOfBytesTransferred, 0) }
         let now = Date()
         if let lastAt = lastBytesAt {
             let dt = now.timeIntervalSince(lastAt)
             if dt >= 1.0 {
-                let rate = Double(max(total - lastBytes, 0)) / dt
-                netSpeedBytes = netSpeedBytes == 0 ? rate : netSpeedBytes * 0.5 + rate * 0.5
-                refreshBitrateStat()
+                if speedSamplingEnabled {
+                    let rate = Double(max(total - lastBytes, 0)) / dt
+                    netSpeedBytes = netSpeedBytes == 0 ? rate : netSpeedBytes * 0.5 + rate * 0.5
+                }
+                if statsSamplingEnabled { refreshBitrateStat() }
                 lastBytes = total
                 lastBytesAt = now
             }
@@ -2005,6 +2055,18 @@ final class NativeController: NSObject, ObservableObject {
     }
 
     func pause() { player.pause() }
+
+    /// F3: invalidate the polling timer when the player goes away.
+    /// The periodic time observer only feeds on-screen state, so
+    /// it is always removed; with PiP active the player itself
+    /// keeps running, so playback is left alone.
+    func teardown() {
+        if let observer = timeObserver {
+            player.removeTimeObserver(observer)
+            timeObserver = nil
+        }
+        if !isPiPActive { player.pause() }
+    }
 
     func toggle() {
         if player.timeControlStatus == .playing {
