@@ -34,8 +34,10 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "1.41"
-        CFBundleVersion: "141"
+        CFBundleShortVersionString: "1.42"
+        CFBundleVersion: "142"
+        UIBackgroundModes:
+          - audio
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         NSFaceIDUsageDescription: 用面容 ID 解锁呱壳
         NSLocalNetworkUsageDescription: 连接局域网里的 Emby / WebDAV 服务器和 DLNA 电视
