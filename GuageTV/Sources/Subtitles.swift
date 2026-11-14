@@ -13,8 +13,7 @@ struct SubCue: Equatable {
 
 enum SubtitleParser {
     static func parse(data: Data, fileName: String) -> [SubCue] {
-        let text = String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .gb18030_2000) ?? ""
+        let text = guageDecodeText(data)
         let lower = fileName.lowercased()
         if lower.hasSuffix(".ass") || lower.hasSuffix(".ssa") || text.contains("[Events]") {
             return parseASS(text)

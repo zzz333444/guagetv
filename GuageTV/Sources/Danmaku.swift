@@ -1,6 +1,17 @@
 import Foundation
 import SwiftUI
 
+/// Decode user-supplied text files (danmaku / subtitles): UTF-8
+/// first, then GB18030 for the many Chinese files still saved in
+/// GBK. (String.Encoding has no named GB18030 member in the SDK,
+/// hence the CoreFoundation conversion.)
+func guageDecodeText(_ data: Data) -> String {
+    if let utf8 = String(data: data, encoding: .utf8) { return utf8 }
+    let gb = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+        CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+    return String(data: data, encoding: gb) ?? ""
+}
+
 /// Danmaku (bullet comments): a small store + canvas renderer.
 /// Data comes from a local file (bilibili-style XML or a JSON
 /// array) or from a user-configured API template in Settings —
@@ -23,8 +34,7 @@ final class DanmakuStore: ObservableObject {
     }
 
     func load(data: Data) {
-        let text = String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .gb18030_2000) ?? ""
+        let text = guageDecodeText(data)
         let parsed: [DanmakuItem]
         if text.contains("<d p=") || text.contains("<d p =") {
             parsed = Self.parseXML(text)

@@ -554,7 +554,7 @@ struct PlayerView: View {
     private var hud: some View {
         VStack(spacing: 8) {
             switch dragMode {
-            case .scrub:
+            case .scrub, .episodeSwipe:
                 EmptyView()
             case .brightness:
                 hudBar(icon: "sun.max.fill", level: dragLevel)
