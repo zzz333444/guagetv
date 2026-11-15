@@ -29,6 +29,9 @@ enum EmbyClient {
         var indexNumber: Int?     // episode number
         var parentIndexNumber: Int?
         var childCount: Int?
+        var positionTicks: Int64 = 0   // resume position (UserData)
+        var runTimeTicks: Int64 = 0
+        var rating: Double = 0         // CommunityRating
     }
 
     private static let clientInfo = "Client=\"GuageTV\", Device=\"iPhone\", DeviceId=\"guagetv-ios\", Version=\"1.41\""
@@ -94,8 +97,16 @@ enum EmbyClient {
         item.parentIndexNumber = (raw["ParentIndexNumber"] as? NSNumber)?.intValue
         item.childCount = (raw["ChildCount"] as? NSNumber)?.intValue
         if let ticks = (raw["RunTimeTicks"] as? NSNumber)?.int64Value {
+            item.runTimeTicks = ticks
             let minutes = Int(ticks / 10_000_000 / 60)
             item.runtimeText = minutes >= 60 ? "\(minutes / 60)小时\(minutes % 60)分" : "\(minutes)分钟"
+        }
+        if let r = (raw["CommunityRating"] as? NSNumber)?.doubleValue {
+            item.rating = r
+        }
+        if let ud = raw["UserData"] as? [String: Any],
+           let pos = (ud["PlaybackPositionTicks"] as? NSNumber)?.int64Value {
+            item.positionTicks = pos
         }
         return item
     }
@@ -123,12 +134,24 @@ enum EmbyClient {
         return (rows ?? []).compactMap(mapItem)
     }
 
+    /// In-progress items for the home page's 继续观看 row,
+    /// most recently played first (the server orders Resume).
+    static func resume() async throws -> [Item] {
+        let json = try await get("/Users/\(userID)/Items/Resume", query: [
+            "Limit": "16", "MediaTypes": "Video",
+            "Fields": "ProductionYear,Overview",
+        ])
+        return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
+    }
+
     static func items(parentID: String, recursive: Bool = false,
-                      types: String = "", search: String = "") async throws -> [Item] {
+                      types: String = "", search: String = "",
+                      sortBy: String = "SortName",
+                      sortOrder: String = "Ascending") async throws -> [Item] {
         var query: [String: String] = [
             "ParentId": parentID,
-            "Fields": "ProductionYear,Overview,ChildCount",
-            "SortBy": "SortName", "SortOrder": "Ascending",
+            "Fields": "ProductionYear,Overview,ChildCount,CommunityRating",
+            "SortBy": sortBy, "SortOrder": sortOrder,
             "Limit": "200",
         ]
         if recursive { query["Recursive"] = "true" }
@@ -192,6 +215,7 @@ enum EmbyClient {
 struct EmbyHomeView: View {
     @State private var views: [EmbyClient.Item] = []
     @State private var latestItems: [EmbyClient.Item] = []
+    @State private var resumeItems: [EmbyClient.Item] = []
     @State private var errorText: String?
     @State private var loading = true
     @State private var searchText = ""
@@ -234,28 +258,42 @@ struct EmbyHomeView: View {
                     sectionTitle("搜索结果")
                     posterGrid(searchResults)
                 }
+                if !resumeItems.isEmpty {
+                    sectionTitle("继续观看")
+                    resumeRow(resumeItems)
+                }
                 sectionTitle("媒体库")
-                ForEach(views) { view in
-                    NavigationLink {
-                        EmbyLibraryView(library: view)
-                    } label: {
-                        HStack {
-                            Image(systemName: "folder.fill")
-                                .foregroundStyle(Theme.accent)
-                            Text(view.name).foregroundStyle(Theme.text)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(Theme.textDim)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
+                                    GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    ForEach(views) { view in
+                        NavigationLink {
+                            EmbyLibraryView(library: view)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(Theme.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(view.name)
+                                        .foregroundStyle(Theme.text)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(1)
+                                    if let count = view.childCount {
+                                        Text("\(count) 项")
+                                            .font(.caption2)
+                                            .foregroundStyle(Theme.textDim)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(14)
+                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
                         }
-                        .padding(14)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 if !latestItems.isEmpty {
                     sectionTitle("最近加入")
-                    posterGrid(latestItems)
+                    posterRow(latestItems)
                 }
             }
             .padding(.horizontal, 18)
@@ -295,12 +333,103 @@ struct EmbyHomeView: View {
         }
     }
 
+    /// Wide 16:9 cards with a progress bar and remaining time —
+    /// the reference Emby client's home-screen resume row.
+    private func resumeRow(_ items: [EmbyClient.Item]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(items) { item in
+                    NavigationLink {
+                        EmbyItemDestination(item: item)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ZStack(alignment: .bottom) {
+                                PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                                    .aspectRatio(16/9, contentMode: .fill)
+                                    .frame(width: 232, height: 130)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                if item.runTimeTicks > 0, item.positionTicks > 0 {
+                                    GeometryReader { geo in
+                                        Rectangle()
+                                            .fill(Theme.accent)
+                                            .frame(width: geo.size.width * CGFloat(item.positionTicks) / CGFloat(item.runTimeTicks), height: 3)
+                                    }
+                                    .frame(height: 3)
+                                }
+                            }
+                            .frame(width: 232, height: 130)
+                            Text(item.name)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                                .frame(width: 232, alignment: .leading)
+                            Text(resumeSubtitle(item))
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textDim)
+                                .lineLimit(1)
+                                .frame(width: 232, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func resumeSubtitle(_ item: EmbyClient.Item) -> String {
+        var parts: [String] = []
+        if item.type == "Episode", let s = item.parentIndexNumber, let e = item.indexNumber {
+            parts.append("第\(s)季 第\(e)集")
+        } else if !item.year.isEmpty {
+            parts.append(item.year)
+        }
+        if item.runTimeTicks > 0, item.positionTicks > 0 {
+            let remaining = Int((item.runTimeTicks - item.positionTicks) / 10_000_000 / 60)
+            if remaining > 0 { parts.append("还剩 \(remaining) 分钟") }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Horizontal poster strip (home page rows).
+    private func posterRow(_ items: [EmbyClient.Item]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(items) { item in
+                    NavigationLink {
+                        EmbyItemDestination(item: item)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                                .aspectRatio(2/3, contentMode: .fill)
+                                .frame(width: 104, height: 156)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                            Text(item.name)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                                .frame(width: 104, alignment: .leading)
+                            if !item.year.isEmpty {
+                                Text(item.year).font(.caption2).foregroundStyle(Theme.textDim)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private func load() async {
         loading = true
         errorText = nil
         do {
             views = try await EmbyClient.libraryViews()
             latestItems = (try? await EmbyClient.latest()) ?? []
+            resumeItems = (try? await EmbyClient.resume()) ?? []
         } catch {
             errorText = "连接 Emby 失败：\(error.localizedDescription)"
         }
@@ -335,6 +464,29 @@ struct EmbyLibraryView: View {
     @State private var items: [EmbyClient.Item] = []
     @State private var loading = true
     @State private var errorText: String?
+    @State private var sortMode: SortMode = .recent
+
+    /// Library ordering (v1.57): server-side sorts, defaulting
+    /// to newest-added first like the reference client.
+    enum SortMode: String, CaseIterable {
+        case recent, name, year, rating
+        var label: String {
+            switch self {
+            case .recent: return "最近加入"
+            case .name: return "名称"
+            case .year: return "年份"
+            case .rating: return "评分"
+            }
+        }
+        var params: (by: String, order: String) {
+            switch self {
+            case .recent: return ("DateCreated", "Descending")
+            case .name: return ("SortName", "Ascending")
+            case .year: return ("PremiereDate", "Descending")
+            case .rating: return ("CommunityRating", "Descending")
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -345,25 +497,37 @@ struct EmbyLibraryView: View {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
             } else {
                 ScrollView(showsIndicators: false) {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
-                              spacing: 16) {
-                        ForEach(items) { item in
-                            NavigationLink {
-                                EmbyItemDestination(item: item)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
-                                        .aspectRatio(2/3, contentMode: .fill)
-                                        .frame(maxWidth: .infinity)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
-                                    Text(item.name)
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(Theme.text)
-                                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("共 \(items.count) 部")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                            Spacer()
+                            Text("排序 · \(sortMode.label)")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
+                                  spacing: 16) {
+                            ForEach(items) { item in
+                                NavigationLink {
+                                    EmbyItemDestination(item: item)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                                            .aspectRatio(2/3, contentMode: .fill)
+                                            .frame(maxWidth: .infinity)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                        Text(item.name)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(Theme.text)
+                                            .lineLimit(1)
+                                        metaLine(item)
+                                    }
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 18)
@@ -375,14 +539,51 @@ struct EmbyLibraryView: View {
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(library.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            do {
-                items = try await EmbyClient.items(parentID: library.id)
-            } catch {
-                errorText = "读取失败：\(error.localizedDescription)"
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    ForEach(SortMode.allCases, id: \.self) { mode in
+                        Button {
+                            sortMode = mode
+                        } label: {
+                            if mode == sortMode {
+                                Label(mode.label, systemImage: "checkmark")
+                            } else {
+                                Text(mode.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .foregroundStyle(Theme.text)
+                }
             }
-            loading = false
         }
+        .task(id: sortMode) { await reload() }
+    }
+
+    private func metaLine(_ item: EmbyClient.Item) -> some View {
+        var parts: [String] = []
+        if !item.year.isEmpty { parts.append(item.year) }
+        if item.rating > 0 { parts.append("★\(String(format: "%.1f", item.rating))") }
+        if item.type == "Series", let count = item.childCount { parts.append("\(count) 季") }
+        return Text(parts.joined(separator: " · "))
+            .font(.caption2)
+            .foregroundStyle(Theme.textDim)
+            .lineLimit(1)
+    }
+
+    private func reload() async {
+        loading = true
+        errorText = nil
+        do {
+            items = try await EmbyClient.items(parentID: library.id,
+                                               sortBy: sortMode.params.by,
+                                               sortOrder: sortMode.params.order)
+        } catch {
+            errorText = "读取失败：\(error.localizedDescription)"
+        }
+        loading = false
     }
 }
 
@@ -435,17 +636,31 @@ struct EmbySeriesView: View {
                             Button {
                                 Task { await playFrom(ep) }
                             } label: {
-                                HStack(spacing: 12) {
-                                    Text(ep.indexNumber.map { "第\($0)集" } ?? ep.name)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(Theme.text)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    if !ep.runtimeText.isEmpty {
-                                        Text(ep.runtimeText).font(.caption).foregroundStyle(Theme.textDim)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 8) {
+                                        Text(ep.indexNumber.map { "第\($0)集" } ?? "正片")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(Theme.text)
+                                        if ep.indexNumber != nil, !ep.name.isEmpty {
+                                            Text(ep.name)
+                                                .font(.subheadline)
+                                                .foregroundStyle(Theme.text.opacity(0.75))
+                                                .lineLimit(1)
+                                        }
+                                        Spacer()
+                                        if !ep.runtimeText.isEmpty {
+                                            Text(ep.runtimeText).font(.caption).foregroundStyle(Theme.textDim)
+                                        }
+                                        Image(systemName: "play.circle")
+                                            .foregroundStyle(Theme.accent)
                                     }
-                                    Image(systemName: "play.circle")
-                                        .foregroundStyle(Theme.accent)
+                                    if !ep.overview.isEmpty {
+                                        Text(ep.overview)
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.textDim)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                    }
                                 }
                                 .padding(12)
                                 .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
@@ -481,7 +696,8 @@ struct EmbySeriesView: View {
 
     private func pickSeason(_ season: EmbyClient.Item) async {
         selectedSeason = season
-        episodes = (try? await EmbyClient.episodes(seriesID: series.id, seasonID: season.id)) ?? []
+        let fetched = (try? await EmbyClient.episodes(seriesID: series.id, seasonID: season.id)) ?? []
+        episodes = fetched.sorted { ($0.indexNumber ?? Int.max) < ($1.indexNumber ?? Int.max) }
     }
 
     /// Hand the player the season's episode refs (url = Emby

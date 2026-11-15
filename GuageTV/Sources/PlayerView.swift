@@ -665,10 +665,10 @@ struct PlayerView: View {
 
     private func chrome(isLandscape: Bool) -> some View {
         VStack(spacing: 2) {
-            statusStrip
+            statusStrip(compact: !isLandscape)
             topBar(isLandscape: isLandscape)
             Spacer()
-            bottomBar
+            bottomBar(compact: !isLandscape)
         }
         .transition(.opacity)
     }
@@ -676,14 +676,15 @@ struct PlayerView: View {
     /// Reference-player (Rex) status strip: plain white text and
     /// glyphs straight on the picture — clock at the far left,
     /// resolution / net speed / battery at the far right. No glass.
-    private var statusStrip: some View {
-        HStack(spacing: 10) {
+    private func statusStrip(compact: Bool) -> some View {
+        HStack(spacing: compact ? 6 : 10) {
             if showClock { clockText }
-            Spacer()
+            Spacer(minLength: 4)
             if showResolutionPill, !specText.isEmpty {
                 Text(specText)
-                    .font(.system(size: 12))
+                    .font(.system(size: compact ? 11 : 12))
                     .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
             }
             if showSpeedPill {
                 Text(Self.formatSpeed(netSpeedBytes))
@@ -693,10 +694,10 @@ struct PlayerView: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
             Image(systemName: batterySymbol)
-                .font(.system(size: 16))
+                .font(.system(size: compact ? 14 : 16))
                 .foregroundStyle(.white.opacity(0.9))
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, compact ? 14 : 22)
         .padding(.top, 8)
     }
 
@@ -764,59 +765,65 @@ struct PlayerView: View {
     /// and its lock moved into the settings sheet — the reference
     /// chrome carries neither.
     private func topBar(isLandscape: Bool) -> some View {
-        HStack(spacing: 12) {
+        // Portrait phones are narrow (360–430pt): six 38pt icons
+        // plus the close button and title used to sum wider than
+        // the screen and push the last icons off the right edge
+        // (v1.57 device report). Compact metrics keep every icon
+        // on screen; landscape keeps the roomy reference metrics.
+        let compact = !isLandscape
+        return HStack(spacing: compact ? 6 : 12) {
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 19, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
+                    .frame(width: compact ? 38 : 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             Text(titleLine)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: compact ? 15 : 16, weight: .medium))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-            Spacer()
-            HStack(spacing: 14) {
+            Spacer(minLength: 2)
+            HStack(spacing: compact ? 6 : 14) {
                 if showGravityButton {
                     Button { toggleGravity(); pokeChrome() } label: {
-                        topIcon("aspectratio")
+                        topIcon("aspectratio", compact: compact)
                     }
                     .buttonStyle(.plain)
                 }
                 if showScreenshotButton {
                     Button { saveSnapshot() } label: {
-                        topIcon("camera")
+                        topIcon("camera", compact: compact)
                     }
                     .buttonStyle(.plain)
                 }
                 if showEpisodeButton, episodes.count > 1 {
                     Button { showEpisodes = true; pokeChrome() } label: {
-                        topIcon("film")
+                        topIcon("film", compact: compact)
                     }
                     .buttonStyle(.plain)
                 }
                 if !isMPV {
                     if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
                         Button { native.togglePiP() } label: {
-                            topIcon(native.isPiPActive ? "pip.exit" : "pip.enter")
+                            topIcon(native.isPiPActive ? "pip.exit" : "pip.enter", compact: compact)
                         }
                         .buttonStyle(.plain)
                     }
                     if showAirPlayButton {
                         RoutePickerView()
-                            .frame(width: 40, height: 40)
+                            .frame(width: compact ? 34 : 40, height: 40)
                             .contentShape(Rectangle())
                     }
                 }
                 Button { showPlayerSettings = true; pokeChrome() } label: {
-                    topIcon("ellipsis")
+                    topIcon("ellipsis", compact: compact)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, compact ? 10 : 18)
         .padding(.top, 2)
     }
 
@@ -826,18 +833,19 @@ struct PlayerView: View {
     /// the whole frame is hot, glyph unchanged at 19pt. Width is
     /// 38 so six icons plus the close button still fit a portrait
     /// screen without clipping the edges.
-    private func topIcon(_ name: String) -> some View {
+    private func topIcon(_ name: String, compact: Bool = false) -> some View {
         Image(systemName: name)
             .font(.system(size: 19, weight: .regular))
             .foregroundStyle(.white)
-            .frame(width: 38, height: 44)
+            .frame(width: compact ? 32 : 38, height: 44)
             .contentShape(Rectangle())
     }
 
     private var titleLine: String {
-        if title.isEmpty { return current.name }
+        let epName = guageEpisodeDisplayName(current.name, index: index)
+        if title.isEmpty { return epName }
         if current.name.isEmpty || current.name == title { return title }
-        return "\(title) \(current.name)"
+        return "\(title) \(epName)"
     }
 
     /// Bottom chrome in the reference layout: elapsed time at the
@@ -845,9 +853,9 @@ struct PlayerView: View {
     /// flip to remaining), then a control row — transport icons
     /// bottom-left, plain-text buttons bottom-right （引擎 / 选集 /
     /// 倍速， where the reference shows 原画 / 选集 / 倍速）.
-    private var bottomBar: some View {
+    private func bottomBar(compact: Bool) -> some View {
         VStack(spacing: 8) {
-            HStack(spacing: 12) {
+            HStack(spacing: compact ? 8 : 12) {
                 Text(timeLabel(currentTime))
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white)
@@ -864,12 +872,12 @@ struct PlayerView: View {
                     .foregroundStyle(.white)
                     .onTapGesture { showRemaining.toggle(); pokeChrome() }
             }
-            HStack(spacing: 24) {
+            HStack(spacing: compact ? 10 : 24) {
                 Button { togglePlay(); pokeChrome() } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                        .frame(width: compact ? 36 : 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -882,7 +890,7 @@ struct PlayerView: View {
                         Image(systemName: "backward.end.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(index > 0 ? .white : .white.opacity(0.35))
-                            .frame(width: 40, height: 40)
+                            .frame(width: compact ? 36 : 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -890,24 +898,28 @@ struct PlayerView: View {
                         Image(systemName: "forward.end.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(index < episodes.count - 1 ? .white : .white.opacity(0.35))
-                            .frame(width: 40, height: 40)
+                            .frame(width: compact ? 36 : 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 Button { switchEngine(manual: true); pokeChrome() } label: {
                     Text(isMPV ? "MPV" : "原生")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: compact ? 14 : 15, weight: .semibold))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
                 if showEpisodeButton, episodes.count > 1 {
                     Button { showEpisodes = true; pokeChrome() } label: {
                         Text("选集")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.plain)
@@ -915,15 +927,17 @@ struct PlayerView: View {
                 if showRateButton {
                     Button { cycleRate(); pokeChrome() } label: {
                         Text(currentRate == 1 ? "倍速" : "倍速 \(String(format: "%.2g", currentRate))")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, compact ? 14 : 22)
         .padding(.bottom, 16)
     }
 
@@ -991,7 +1005,7 @@ struct PlayerView: View {
                         goToEpisode(i)
                     } label: {
                         HStack {
-                            Text(episodes[i].name.isEmpty ? "第\(i + 1)集" : episodes[i].name)
+                            Text(guageEpisodeDisplayName(episodes[i].name, index: i))
                                 .foregroundStyle(Theme.text)
                             Spacer()
                             if i == index { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }

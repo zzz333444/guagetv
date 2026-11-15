@@ -21,6 +21,25 @@ enum ResolveOutcome {
     }
 }
 
+/// Episode names from sources are often bare numbers ("1",
+/// "01") or codes ("EP01"). The user wants them read as episodes:
+/// those become 「第N集」; names that already say something
+/// （第3集 / 正片 / 加长版…） stay untouched. Shared by the detail
+/// grid, the in-player episode sheet and the player title line.
+func guageEpisodeDisplayName(_ rawName: String, index: Int) -> String {
+    let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+    if name.isEmpty { return "第\(index + 1)集" }
+    if name.allSatisfy(\.isNumber), let n = Int(name) { return "第\(n)集" }
+    let upper = name.uppercased()
+    if (upper.hasPrefix("EP") || upper.hasPrefix("E")), name.count <= 6 {
+        let digits = upper.drop(while: { !$0.isNumber })
+        if !digits.isEmpty, digits.allSatisfy(\.isNumber), let n = Int(digits) {
+            return "第\(n)集"
+        }
+    }
+    return name
+}
+
 /// 详情 (Detail) — Rex-style: ambient backdrop header, meta block, synopsis,
 /// play-line chips, episode grid. Tapping an episode hands its URL (plus the
 /// site's required headers) to the player; parse-needed sites resolve through
@@ -42,6 +61,8 @@ struct DetailView: View {
     /// them on tap.
     var parses: [TVBoxConfig.Parse] = []
     @State private var lineIndex = 0
+    @State private var episodesReversed = false
+    @State private var episodeSegment = 0
     @State private var playSelection: PlaySelection?
     @State private var resolving = false
     @State private var playNote: String?
@@ -443,10 +464,36 @@ struct DetailView: View {
     /// when there is more than one line) over the episode grid.
     private var episodeSection: some View {
         let episodes = detail.playGroups.indices.contains(lineIndex) ? detail.playGroups[lineIndex] : []
+        // Display order: original indices ride along so reversed /
+        // segmented views still name episodes by their true number.
+        let ordered: [(offset: Int, element: VodDetail.Episode)] = episodesReversed
+            ? Array(episodes.enumerated().reversed())
+            : Array(episodes.enumerated())
+        let chunks: [[(offset: Int, element: VodDetail.Episode)]] =
+            ordered.isEmpty ? [] : stride(from: 0, to: ordered.count, by: 30).map {
+                Array(ordered[$0..<min($0 + 30, ordered.count)])
+            }
+        let visible = chunks.indices.contains(episodeSegment)
+            ? chunks[episodeSegment] : (chunks.first ?? [])
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("选集").font(.headline).foregroundStyle(Theme.text)
                 Spacer()
+                if episodes.count > 1 {
+                    Button { episodesReversed.toggle() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.arrow.down")
+                                .font(.caption2.weight(.bold))
+                            Text(episodesReversed ? "倒序" : "正序")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Theme.glass, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
                 if detail.playFrom.count > 1 {
                     Menu {
                         ForEach(detail.playFrom.indices, id: \.self) { i in
@@ -476,11 +523,27 @@ struct DetailView: View {
                     }
                 }
             }
+            if chunks.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(chunks.indices, id: \.self) { ci in
+                            let first = chunks[ci].first?.offset ?? 0
+                            let last = chunks[ci].last?.offset ?? 0
+                            Text("\(first + 1)–\(last + 1)")
+                                .font(.caption.weight(episodeSegment == ci ? .semibold : .regular))
+                                .padding(.horizontal, 11).padding(.vertical, 6)
+                                .background(episodeSegment == ci ? Color.white : Theme.glass, in: Capsule())
+                                .foregroundStyle(episodeSegment == ci ? .black : Theme.text.opacity(0.85))
+                                .onTapGesture { episodeSegment = ci }
+                        }
+                    }
+                }
+            }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                                 GridItem(.flexible(), spacing: 10)],
                       spacing: 10) {
-                ForEach(episodes) { ep in
-                    episodeCard(ep, in: episodes)
+                ForEach(visible, id: \.element.id) { pair in
+                    episodeCard(pair.element, origIndex: pair.offset, in: episodes)
                 }
             }
             if episodes.count > 1 {
@@ -499,12 +562,13 @@ struct DetailView: View {
                 Text("该线路暂无选集").font(.footnote).foregroundStyle(Theme.textDim)
             }
         }
+        .onChange(of: lineIndex) { _, _ in episodeSegment = 0 }
     }
 
     /// One episode: poster thumbnail + name on a glass card; the
     /// episode the history entry sits on (with real progress)
     /// carries the white watched-check badge.
-    private func episodeCard(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) -> some View {
+    private func episodeCard(_ ep: VodDetail.Episode, origIndex: Int, in episodes: [VodDetail.Episode]) -> some View {
         HStack(spacing: 10) {
             ZStack(alignment: .topTrailing) {
                 if !detail.pic.isEmpty {
@@ -527,7 +591,7 @@ struct DetailView: View {
                         .offset(x: 4, y: -4)
                 }
             }
-            Text(ep.name)
+            Text(guageEpisodeDisplayName(ep.name, index: origIndex))
                 .font(.subheadline)
                 .foregroundStyle(Theme.text)
                 .lineLimit(2)
