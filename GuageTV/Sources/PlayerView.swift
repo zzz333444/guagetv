@@ -808,10 +808,22 @@ struct PlayerView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Text(titleLine)
-                .font(.system(size: compact ? 15 : 16, weight: .medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
+            // P2 (v1.69): line name under the title so the viewer
+            // always knows which play line is active. Derived
+            // from the @State activeLine, so a manual or automatic
+            // line switch updates it in the same render pass.
+            VStack(alignment: .leading, spacing: 1) {
+                Text(titleLine)
+                    .font(.system(size: compact ? 15 : 16, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let lineName = activeLineName {
+                    Text(lineName)
+                        .font(.system(size: compact ? 11 : 12))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 2)
             HStack(spacing: compact ? 6 : 14) {
                 if showGravityButton {
@@ -874,6 +886,15 @@ struct PlayerView: View {
         if title.isEmpty { return epName }
         if current.name.isEmpty || current.name == title { return title }
         return "\(title) \(epName)"
+    }
+
+    /// P2 (v1.69): name of the line currently playing, or nil
+    /// when the player was opened without line info (plain URL
+    /// playback) or the name is blank — the subtitle row hides.
+    private var activeLineName: String? {
+        guard lineNames.indices.contains(activeLine) else { return nil }
+        let name = lineNames[activeLine].trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     /// Bottom chrome in the reference layout: elapsed time at the
