@@ -442,6 +442,10 @@ struct MediaHubSection: View {
                 hubRow(icon: "folder", title: "本地视频", value: "导入手机里的视频文件")
             }
             .buttonStyle(.plain)
+            NavigationLink { ModulesView() } label: {
+                hubRow(icon: "puzzlepiece.extension", title: "模块", value: "Forward 规范 JS 模块")
+            }
+            .buttonStyle(.plain)
             if !EmbyClient.configured {
                 Text("Emby / WebDAV 在「设置 → 媒体服务器」里添加。")
                     .font(.caption).foregroundStyle(Theme.textDim)

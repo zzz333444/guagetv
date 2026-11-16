@@ -63,12 +63,12 @@ struct DiscoverView: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 26) {
+                LazyVStack(alignment: .leading, spacing: 26) {
                     discoverHeader
                     if tmdbReady {
                         // TMDB catalogue layout: trending hero,
                         // personal rows, then the TMDB poster rows.
-                        VStack(alignment: .leading, spacing: 26) {
+                        LazyVStack(alignment: .leading, spacing: 26) {
                             tmdbHero
                             calendarStrip
                         }
@@ -103,6 +103,7 @@ struct DiscoverView: View {
             }
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
             .background(AmbientBackground(imageURL: ambientPic))
+            .refreshable { await refreshDiscover() }
             .overlay(alignment: .bottomLeading) {
                 editButton
                     .padding(.leading, 18)
@@ -161,6 +162,33 @@ struct DiscoverView: View {
         tmdbShows = await shows
         tmdbTop = await top
         tmdbLoading = false
+        prefetchPosters(tmdbTrending.map { $0.backdrop.isEmpty ? $0.poster : $0.backdrop }
+            + tmdbMovies.prefix(6).map(\.poster)
+            + tmdbShows.prefix(6).map(\.poster))
+    }
+
+    /// Pull-to-refresh: drop both feeds' cached rows and reload
+    /// through the normal dispatcher.
+    private func refreshDiscover() async {
+        tmdbTrending = []
+        tmdbMovies = []
+        tmdbShows = []
+        tmdbTop = []
+        liveHero = []
+        liveSections = []
+        await loadHome()
+    }
+
+    /// Warm the poster cache for the art the user is about to
+    /// scroll past, so rows and hero pages don't flash in.
+    private func prefetchPosters(_ urls: [String]) {
+        let targets = Array(Set(urls.filter { !$0.isEmpty })).prefix(14)
+        guard !targets.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for url in targets {
+                _ = await PosterCache.shared.load(url)
+            }
+        }
     }
 
     /// A TMDB title tap: seed the search sheet with the title and
@@ -584,6 +612,7 @@ struct DiscoverView: View {
                 }
             }
         }
+        prefetchPosters((liveHero + (liveSections.first?.items ?? [])).map(\.pic))
     }
 
     // MARK: Hero carousel

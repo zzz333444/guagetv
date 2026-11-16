@@ -144,15 +144,38 @@ enum EmbyClient {
         return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
     }
 
+    /// The user's favourites (starred on the server), newest
+    /// favourited content in server order.
+    static func favorites() async throws -> [Item] {
+        let json = try await get("/Users/\(userID)/Items", query: [
+            "Recursive": "true", "Filters": "IsFavorite",
+            "IncludeItemTypes": "Movie,Series",
+            "Fields": "ProductionYear,Overview,ChildCount,CommunityRating",
+            "SortBy": "SortName", "SortOrder": "Ascending",
+            "Limit": "24",
+        ])
+        return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
+    }
+
+    /// Next episode(s) up for a series, from watch progress.
+    static func nextUp(seriesID: String) async throws -> [Item] {
+        let json = try await get("/Shows/NextUp", query: [
+            "UserId": userID, "SeriesId": seriesID, "Limit": "3",
+            "Fields": "Overview",
+        ])
+        return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
+    }
+
     static func items(parentID: String, recursive: Bool = false,
                       types: String = "", search: String = "",
                       sortBy: String = "SortName",
-                      sortOrder: String = "Ascending") async throws -> [Item] {
+                      sortOrder: String = "Ascending",
+                      limit: Int = 200) async throws -> [Item] {
         var query: [String: String] = [
             "ParentId": parentID,
             "Fields": "ProductionYear,Overview,ChildCount,CommunityRating",
             "SortBy": sortBy, "SortOrder": sortOrder,
-            "Limit": "200",
+            "Limit": "\(limit)",
         ]
         if recursive { query["Recursive"] = "true" }
         if !types.isEmpty { query["IncludeItemTypes"] = types }
@@ -216,6 +239,8 @@ struct EmbyHomeView: View {
     @State private var views: [EmbyClient.Item] = []
     @State private var latestItems: [EmbyClient.Item] = []
     @State private var resumeItems: [EmbyClient.Item] = []
+    @State private var favoriteItems: [EmbyClient.Item] = []
+    @State private var libraryLatest: [(library: EmbyClient.Item, items: [EmbyClient.Item])] = []
     @State private var errorText: String?
     @State private var loading = true
     @State private var searchText = ""
@@ -262,6 +287,10 @@ struct EmbyHomeView: View {
                     sectionTitle("继续观看")
                     resumeRow(resumeItems)
                 }
+                if !favoriteItems.isEmpty {
+                    sectionTitle("我的收藏")
+                    posterRow(favoriteItems)
+                }
                 sectionTitle("媒体库")
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
                                     GridItem(.flexible(), spacing: 12)], spacing: 12) {
@@ -294,6 +323,10 @@ struct EmbyHomeView: View {
                 if !latestItems.isEmpty {
                     sectionTitle("最近加入")
                     posterRow(latestItems)
+                }
+                ForEach(libraryLatest, id: \.library.id) { entry in
+                    sectionTitle("\(entry.library.name) · 最新")
+                    posterRow(entry.items)
                 }
             }
             .padding(.horizontal, 18)
@@ -430,6 +463,17 @@ struct EmbyHomeView: View {
             views = try await EmbyClient.libraryViews()
             latestItems = (try? await EmbyClient.latest()) ?? []
             resumeItems = (try? await EmbyClient.resume()) ?? []
+            favoriteItems = (try? await EmbyClient.favorites()) ?? []
+            var rows: [(library: EmbyClient.Item, items: [EmbyClient.Item])] = []
+            for view in views.prefix(4) {
+                let recent = (try? await EmbyClient.items(
+                    parentID: view.id, recursive: true,
+                    types: "Movie,Series",
+                    sortBy: "DateCreated", sortOrder: "Descending",
+                    limit: 12)) ?? []
+                if !recent.isEmpty { rows.append((view, recent)) }
+            }
+            libraryLatest = rows
         } catch {
             errorText = "连接 Emby 失败：\(error.localizedDescription)"
         }
@@ -465,6 +509,7 @@ struct EmbyLibraryView: View {
     @State private var loading = true
     @State private var errorText: String?
     @State private var sortMode: SortMode = .recent
+    @State private var typeFilter: String = ""
 
     /// Library ordering (v1.57): server-side sorts, defaulting
     /// to newest-added first like the reference client.
@@ -498,6 +543,17 @@ struct EmbyLibraryView: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            ForEach([("", "全部"), ("Movie", "电影"), ("Series", "剧集")], id: \.0) { option in
+                                Text(option.1)
+                                    .font(.caption.weight(typeFilter == option.0 ? .semibold : .regular))
+                                    .padding(.horizontal, 11).padding(.vertical, 6)
+                                    .background(typeFilter == option.0 ? Color.white : Theme.glass, in: Capsule())
+                                    .foregroundStyle(typeFilter == option.0 ? .black : Theme.text.opacity(0.85))
+                                    .onTapGesture { typeFilter = option.0 }
+                            }
+                            Spacer()
+                        }
                         HStack {
                             Text("共 \(items.count) 部")
                                 .font(.caption)
@@ -559,7 +615,7 @@ struct EmbyLibraryView: View {
                 }
             }
         }
-        .task(id: sortMode) { await reload() }
+        .task(id: sortMode.rawValue + "|" + typeFilter) { await reload() }
     }
 
     private func metaLine(_ item: EmbyClient.Item) -> some View {
@@ -578,6 +634,7 @@ struct EmbyLibraryView: View {
         errorText = nil
         do {
             items = try await EmbyClient.items(parentID: library.id,
+                                               types: typeFilter,
                                                sortBy: sortMode.params.by,
                                                sortOrder: sortMode.params.order)
         } catch {
@@ -591,6 +648,7 @@ struct EmbySeriesView: View {
     let series: EmbyClient.Item
     @State private var seasons: [EmbyClient.Item] = []
     @State private var episodes: [EmbyClient.Item] = []
+    @State private var nextUpItem: EmbyClient.Item?
     @State private var selectedSeason: EmbyClient.Item?
     @State private var loading = true
     @State private var errorText: String?
@@ -619,6 +677,32 @@ struct EmbySeriesView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(Theme.text.opacity(0.75))
                                 .lineSpacing(4)
+                        }
+                        if let next = nextUpItem {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("接下来").font(.headline).foregroundStyle(Theme.text)
+                                Button {
+                                    Task { await playSingle(next) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(next.indexNumber.map { "第\($0)集" } ?? "下一集")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(Theme.text)
+                                        if next.indexNumber != nil, !next.name.isEmpty {
+                                            Text(next.name)
+                                                .font(.subheadline)
+                                                .foregroundStyle(Theme.text.opacity(0.75))
+                                                .lineLimit(1)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "play.circle.fill")
+                                            .foregroundStyle(Theme.accent)
+                                    }
+                                    .padding(12)
+                                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
@@ -687,11 +771,30 @@ struct EmbySeriesView: View {
             do {
                 seasons = try await EmbyClient.seasons(seriesID: series.id)
                 if let first = seasons.first { await pickSeason(first) }
+                nextUpItem = (try? await EmbyClient.nextUp(seriesID: series.id))?.first
             } catch {
                 errorText = "读取失败：\(error.localizedDescription)"
             }
             loading = false
         }
+    }
+
+    /// NextUp episodes are not necessarily in the selected
+    /// season's list, so they play as a one-item selection.
+    private func playSingle(_ ep: EmbyClient.Item) async {
+        let firstURL = try? await EmbyClient.streamURL(itemID: ep.id)
+        playSelection = EmbyPlaySelection(
+            episodes: [PlayerView.EpisodeRef(
+                name: ep.indexNumber.map { "第\($0)集" } ?? ep.name, url: ep.id)],
+            index: 0,
+            initial: firstURL.map { ($0, [:]) },
+            resolver: { _, _ in
+                do {
+                    return .ok(url: try await EmbyClient.streamURL(itemID: ep.id), header: [:])
+                } catch {
+                    return .failed(error.localizedDescription)
+                }
+            })
     }
 
     private func pickSeason(_ season: EmbyClient.Item) async {

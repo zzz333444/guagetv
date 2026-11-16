@@ -16,6 +16,10 @@ struct LibraryView: View {
     /// Line cards precomputed at refresh time: the grid renders
     /// these models only and never re-derives card content in body.
     @State private var cardSections: [(title: String, models: [LineCardModel])] = []
+    /// The automatic Python-file group, collapsed into ONE entry
+    /// card (v1.58, user request): tapping it opens a picker page
+    /// listing the py sites instead of one card per file.
+    @State private var pyGroupEntries: [ConfigLibrary.Entry] = []
     @State private var renamingEntry: ConfigLibrary.Entry?
     @State private var renameText = ""
     /// Direct-open route for single-file (py / JS) lines: tapping
@@ -42,6 +46,39 @@ struct LibraryView: View {
                 }
 
                 MediaHubSection()
+
+                if !pyGroupEntries.isEmpty {
+                    Text("Python 站点").font(.headline).foregroundStyle(Theme.section)
+                    NavigationLink {
+                        PyGroupView(config: $config,
+                                    onPick: { entry in
+                                        if let route = fileRoute(for: entry) {
+                                            directRoute = route
+                                        }
+                                    })
+                    } label: {
+                        LightGlassCard(padding: 14) {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
+                                    Text("py").font(.headline).foregroundStyle(Theme.text)
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Python 站点")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Theme.text)
+                                    Text("共 \(pyGroupEntries.count) 个单文件源 · 点按选择")
+                                        .font(.caption).foregroundStyle(Theme.textDim)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption).foregroundStyle(Theme.textDim)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 ForEach(cardSections, id: \.title) { section in
                     Text(section.title).font(.headline).foregroundStyle(Theme.section)
@@ -267,11 +304,14 @@ struct LibraryView: View {
             let items = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == group.id }
             if !items.isEmpty { sections.append((group.name, items.map(model))) }
         }
-        let pyItems = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == ConfigLibrary.pyAutoGroupID }
-        if !pyItems.isEmpty { sections.append(("Python 文件", pyItems.map(model))) }
+        // Python files no longer render as a card grid: they
+        // collapse into the single group entry above the sections.
+        pyGroupEntries = entries.filter {
+            ConfigLibrary.effectiveGroupID(for: $0) == ConfigLibrary.pyAutoGroupID
+        }
         let loose = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == nil }
         if !loose.isEmpty {
-            sections.append((sections.isEmpty ? "我的线路" : "未分组", loose.map(model)))
+            sections.append((sections.isEmpty && pyGroupEntries.isEmpty ? "我的线路" : "未分组", loose.map(model)))
         }
         cardSections = sections
     }
@@ -477,6 +517,73 @@ struct GroupEditorView: View {
         case ConfigLibrary.pyAutoGroupID: return "Python 文件"
         case let gid?: return groups.first { $0.id == gid }?.name ?? "未分组"
         default: return "未分组"
+        }
+    }
+}
+
+/// The collapsed Python group's picker page (v1.58): every
+/// auto-grouped py file line as one row; tapping opens its site
+/// directly (routed back through LibraryView's direct-open
+/// destination), long-press deletes.
+struct PyGroupView: View {
+    @Binding var config: TVBoxConfig?
+    var onPick: (ConfigLibrary.Entry) -> Void
+    @State private var entries: [ConfigLibrary.Entry] = []
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(entries) { entry in
+                    LightGlassCard(padding: 14) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(Theme.accent.opacity(0.25)).frame(width: 38, height: 38)
+                                Text("py").font(.subheadline.weight(.bold)).foregroundStyle(Theme.text)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(ConfigLibrary.shownName(entry))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.text).lineLimit(1)
+                                Text(entry.sourceURL.replacingOccurrences(of: "py-import://", with: ""))
+                                    .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption).foregroundStyle(Theme.textDim)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        Haptics.tap()
+                        onPick(entry)
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            config = ConfigLibrary.remove(id: entry.id)
+                            reload()
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
+                }
+                if entries.isEmpty {
+                    Text("分组是空的").font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 110)
+        }
+        .background(StaticPageBackground())
+        .navigationTitle("Python 站点")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reload() }
+    }
+
+    private func reload() {
+        entries = ConfigLibrary.entries().filter {
+            ConfigLibrary.effectiveGroupID(for: $0) == ConfigLibrary.pyAutoGroupID
         }
     }
 }
