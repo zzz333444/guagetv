@@ -756,18 +756,18 @@ enum FWDDanmu {
         }
         // 1. searchDanmu: match the title to a danmu-side id.
         // Some modules answer with danmu directly — take it.
-        var matchID: String?
+        var matchedID: String?
         if let search = entry(id: "searchDanmu", fn: "searchDanmu") {
             if let result = try? await runtime.call(function: search.functionName,
                                                     params: params, source: source) {
                 if let data = danmuData(from: result) { return data }
-                matchID = matchID(from: result)
+                matchedID = matchID(from: result)
             }
         }
         // 2. getCommentsById: the episode's comments.
         if let comments = entry(id: "getComments", fn: "getCommentsById") {
             var p2 = params
-            if let matchID { p2["commentId"] = matchID; p2["animeId"] = matchID }
+            if let matchedID { p2["commentId"] = matchedID; p2["animeId"] = matchedID }
             p2["segmentTime"] = 0
             if let result = try? await runtime.call(function: comments.functionName,
                                                     params: p2, source: source),
@@ -778,7 +778,7 @@ enum FWDDanmu {
         // to tell whether the cache landed.
         if let segment = entry(id: "getDanmuWithSegmentTime", fn: "getDanmuWithSegmentTime") {
             var p3 = params
-            if let matchID { p3["commentId"] = matchID; p3["animeId"] = matchID }
+            if let matchedID { p3["commentId"] = matchedID; p3["animeId"] = matchedID }
             p3["segmentTime"] = 0
             if let result = try? await runtime.call(function: segment.functionName,
                                                     params: p3, source: source),
