@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.71 · 发现页长按菜单"
+    static let buildLabel = "v1.72 · 原生缓冲审计"
 
     var body: some View {
         NavigationStack {

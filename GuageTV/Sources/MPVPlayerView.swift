@@ -145,6 +145,17 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "demuxer-readahead-secs", "60")
             setOptionOn(h, "cache-pause", "yes")
             setOptionOn(h, "cache-pause-wait", "1")
+            // P3 buffer audit (v1.72), mpv side — cache table
+            // verified consistent (120s / 256MiB forward /
+            // 128MiB back / 60s readahead; the byte cap binds
+            // first only above ~17Mbps, as intended) and live is
+            // deliberately not split out: a live HLS demuxer
+            // cannot read past the live edge, so the 120s cap
+            // adds no latency by itself. FIXED here: the
+            // low-level stream buffer was still mpv's 128KiB
+            // default — 1MiB smooths throughput on
+            // high-latency links without touching the cache above.
+            setOptionOn(h, "stream-buffer-size", "1MiB")
             // Network resilience: fail a stalled connection in
             // 30s instead of hanging (v1.43: was 15s — slow
             // networks need longer before giving up), and let

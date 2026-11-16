@@ -2114,11 +2114,22 @@ final class NativeController: NSObject, ObservableObject {
             "AVURLAssetPreferPreciseDurationAndTimingKey": false,
         ])
         let item = AVPlayerItem(asset: asset)
-        // Forward buffer (P3): VOD keeps a full minute of runway
-        // (v1.35; already above the 30s target, so kept) so brief
-        // network dips never reach the screen; live keeps the
-        // default 0 so the stream stays close to real time.
+        // P3 buffer audit (v1.72), native side — checked line by
+        // line, kept as-is unless noted:
+        //  • preferredForwardBufferDuration: VOD 60s (above the
+        //    30s target), live 0 so the stream stays at the live
+        //    edge — both correct, unchanged.
+        //  • startsOnFirstEligibleVariant = true (fast first
+        //    frame) + precise-duration scan off — correct.
+        //  • automaticallyWaitsToMinimizeStalling: default true,
+        //    correct as-is, not set explicitly.
+        //  • quality cap via preferredMaximumResolution /
+        //    preferredPeakBitRate (applyQualityCap) — correct.
+        //  • FIXED here: live items did not fetch while paused
+        //    (canUseNetworkResourcesForLiveStreamingWhilePaused
+        //    defaults false), so a resume re-buffered from cold.
         item.preferredForwardBufferDuration = isLive ? 0 : 60
+        if isLive { item.canUseNetworkResourcesForLiveStreamingWhilePaused = true }
         // Adaptive HLS opens on the lowest eligible variant and
         // ramps up, instead of probing bandwidth at full rate
         // before the first frame.
