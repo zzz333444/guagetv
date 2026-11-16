@@ -24,15 +24,17 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.72 · 原生缓冲审计"
+    static let buildLabel = "v1.73 · 设置页对齐 Rex"
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("设置").font(.largeTitle.bold()).foregroundStyle(Theme.text)
+                        .frame(maxWidth: .infinity, alignment: .center)
 
-                    HStack(spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                              spacing: 12) {
                         NavigationLink { PlaySettingsView() } label: {
                             quickTile(icon: "slider.horizontal.3", title: "播放")
                         }
@@ -49,66 +51,66 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
 
                     group(title: "配置") {
-                        NavigationLink { TVBoxConfigSettingsView(config: $config) } label: {
-                            row(icon: "link", title: "TVBox 配置",
-                                value: config.map { "\($0.sites.count) 个站点" } ?? "未导入")
+                        linkRow(icon: "link", title: "TVBox 配置",
+                                value: config.map { "\($0.sites.count) 个站点" } ?? "未导入") {
+                            TVBoxConfigSettingsView(config: $config)
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { ConfigLibrarySettingsView(config: $config) } label: {
-                            row(icon: "square.stack.3d.up", title: "配置库",
-                                value: "\(entries.count) 条线路")
+                        rexDivider()
+                        linkRow(icon: "square.stack.3d.up", title: "配置库",
+                                value: "\(entries.count) 条线路") {
+                            ConfigLibrarySettingsView(config: $config)
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { JarProxySettingsView() } label: {
-                            row(icon: "server.rack", title: "Jar 代理",
-                                value: jarProxyURL.isEmpty ? "未设置" : "已设置")
+                        rexDivider()
+                        linkRow(icon: "server.rack", title: "Jar 代理",
+                                value: jarProxyURL.isEmpty ? "未设置" : "已设置") {
+                            JarProxySettingsView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { HealthCheckView() } label: {
-                            row(icon: "stethoscope", title: "配置体检", value: "")
+                        rexDivider()
+                        linkRow(icon: "stethoscope", title: "配置体检") {
+                            HealthCheckView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { DriveSettingsView() } label: {
-                            row(icon: "externaldrive", title: "网盘配置",
-                                value: driveConfigured ? "已配置" : "未配置")
+                        rexDivider()
+                        linkRow(icon: "externaldrive", title: "网盘配置",
+                                value: driveConfigured ? "已配置" : "未配置") {
+                            DriveSettingsView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { TMDBSettingsView() } label: {
-                            row(icon: "film", title: "TMDB 增强",
-                                value: tmdbEnabled ? "开" : "关")
+                        rexDivider()
+                        linkRow(icon: "film", title: "TMDB 增强",
+                                value: tmdbEnabled ? "开" : "关") {
+                            TMDBSettingsView()
                         }
-                        .buttonStyle(.plain)
                     }
 
                     group(title: "使用偏好") {
-                        NavigationLink { AppearanceSettingsView() } label: {
-                            row(icon: "paintbrush", title: "外观与交互", value: "")
+                        linkRow(icon: "paintbrush", title: "外观与交互") {
+                            AppearanceSettingsView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { BackupView() } label: {
-                            row(icon: "externaldrive.badge.timemachine", title: "备份与恢复", value: "")
+                        rexDivider()
+                        linkRow(icon: "externaldrive.badge.timemachine", title: "备份与恢复") {
+                            BackupView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { SecuritySettingsView() } label: {
-                            row(icon: "lock.shield", title: "安全（App 锁）", value: "")
+                        rexDivider()
+                        linkRow(icon: "lock.shield", title: "安全（App 锁）") {
+                            SecuritySettingsView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { MediaServerSettingsView() } label: {
-                            row(icon: "server.rack", title: "媒体服务器（Emby / WebDAV）", value: "")
+                        rexDivider()
+                        linkRow(icon: "server.rack", title: "媒体服务器（Emby / WebDAV）") {
+                            MediaServerSettingsView()
                         }
-                        .buttonStyle(.plain)
-                        NavigationLink { CacheSettingsView() } label: {
-                            row(icon: "archivebox", title: "缓存管理", value: cacheSummary)
+                        rexDivider()
+                        linkRow(icon: "archivebox", title: "缓存管理", value: cacheSummary) {
+                            CacheSettingsView()
                         }
-                        .buttonStyle(.plain)
-                        row(icon: "square.grid.2x2", title: "模块", value: "")
+                        rexDivider()
+                        linkRow(icon: "square.grid.2x2", title: "模块") {
+                            ModulesView()
+                        }
                     }
 
                     group(title: "应用") {
-                        NavigationLink { AboutView() } label: {
-                            row(icon: "info.circle", title: "关于呱壳", value: "")
+                        linkRow(icon: "info.circle", title: "关于呱壳") {
+                            AboutView()
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -122,19 +124,34 @@ struct SettingsView: View {
     }
 
     private func quickTile(icon: String, title: String) -> some View {
-        GlassCard(padding: 12) {
-            VStack(spacing: 8) {
-                Image(systemName: icon).font(.title3).foregroundStyle(Theme.text)
-                Text(title).font(.footnote).foregroundStyle(Theme.text.opacity(0.85))
+        GlassCard(padding: 16) {
+            VStack(spacing: 10) {
+                Image(systemName: icon).font(.title2).foregroundStyle(Theme.text)
+                Text(title).font(.subheadline).foregroundStyle(Theme.text.opacity(0.85))
             }
             .frame(maxWidth: .infinity)
         }
     }
 
+    /// Rex-style row link: line icon + title + value + chevron.
+    private func linkRow<Destination: View>(icon: String, title: String, value: String = "",
+                                            @ViewBuilder destination: () -> Destination) -> some View {
+        NavigationLink { destination() } label: {
+            row(icon: icon, title: title, value: value)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Rex-style inset separator: starts where the row text starts
+    /// (icon 22pt + 10pt gap), not at the card edge.
+    private func rexDivider() -> some View {
+        Rectangle().fill(Theme.glassStroke).frame(height: 1).padding(.leading, 32)
+    }
+
     private func group<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.headline).foregroundStyle(Theme.section)
-            GlassCard { VStack(alignment: .leading, spacing: 12) { content() } }
+            GlassCard { VStack(alignment: .leading, spacing: 10) { content() } }
         }
     }
 
