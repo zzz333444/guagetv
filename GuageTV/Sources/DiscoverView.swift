@@ -44,6 +44,8 @@ struct DiscoverView: View {
     @State private var tmdbTop: [TMDBClient.TMDBTitle] = []
     @State private var tmdbLoading = false
     @State private var searchSeed = ""
+    /// Long-press target: the TMDB title whose detail sheet is open.
+    @State private var tmdbDetailItem: TMDBClient.TMDBTitle?
 
     private var tmdbMode: Bool { TMDBClient.isOn }
     /// TMDB layout only once the catalogue actually landed; an
@@ -131,6 +133,9 @@ struct DiscoverView: View {
             .sheet(isPresented: $showSearch) {
                 SearchView(config: config, initialKeyword: searchSeed)
             }
+            .sheet(item: $tmdbDetailItem) { item in
+                TMDBDetailSheet(item: item) { openSearch(for: item.title) }
+            }
             .fullScreenCover(item: $cwPlayEntry) { entry in
                 PlayerView(
                     episodes: [PlayerView.EpisodeRef(name: entry.episodeName, url: entry.episodeURL)],
@@ -205,6 +210,23 @@ struct DiscoverView: View {
             for url in targets {
                 _ = await PosterCache.shared.load(url)
             }
+        }
+    }
+
+    /// Long-press menu shared by the TMDB hero and poster cards:
+    /// cross-line search, or the TMDB detail sheet.
+    @ViewBuilder
+    private func tmdbContextMenu(for item: TMDBClient.TMDBTitle) -> some View {
+        Button {
+            openSearch(for: item.title)
+        } label: {
+            Label("跨线搜索", systemImage: "magnifyingglass")
+        }
+        Button {
+            Haptics.tap()
+            tmdbDetailItem = item
+        } label: {
+            Label("TMDB 详情", systemImage: "info.circle")
         }
     }
 
@@ -782,6 +804,7 @@ struct DiscoverView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { openSearch(for: item.title) }
+        .contextMenu { tmdbContextMenu(for: item) }
     }
 
     /// One TMDB poster row （热门电影 / 热门剧集 / 高分佳作）.
@@ -843,6 +866,7 @@ struct DiscoverView: View {
         .glassPanel(cornerRadius: 18)
         .contentShape(Rectangle())
         .onTapGesture { openSearch(for: item.title) }
+        .contextMenu { tmdbContextMenu(for: item) }
     }
 
     /// Rex's hero: full-bleed art, everything centred — big title,
@@ -1206,5 +1230,93 @@ struct DiscoverView: View {
             }
         }
         .padding(.horizontal, 18)
+    }
+}
+
+/// TMDB detail sheet opened from a long-press on a Discover TMDB
+/// poster or hero page: art, meta, synopsis, and a cross-line
+/// search button. TMDB carries no streams, so the sheet never
+/// plays — it hands the title to the same cross-line search a
+/// tap does (dismissed first, then the search sheet opens).
+private struct TMDBDetailSheet: View {
+    var item: TMDBClient.TMDBTitle
+    var onSearch: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                ZStack(alignment: .bottomLeading) {
+                    let art = item.backdrop.isEmpty ? item.poster : item.backdrop
+                    if !art.isEmpty {
+                        PosterImage(urlString: art)
+                            .frame(height: 260).clipped()
+                    } else {
+                        Rectangle().fill(Theme.glass).frame(height: 260)
+                    }
+                    LinearGradient(colors: [.clear, .black.opacity(0.55)],
+                                   startPoint: .top, endPoint: .bottom)
+                    Text(item.title)
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.6), radius: 8, y: 2)
+                        .padding(18)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                HStack(spacing: 8) {
+                    Text(item.mediaType == "tv" ? "剧集" : "电影")
+                    if !item.year.isEmpty { Text(item.year) }
+                    if !item.score.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill").font(.caption2)
+                            Text("TMDB \(item.score)").font(.caption.weight(.bold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.text.opacity(0.92))
+                .padding(.horizontal, 4)
+
+                if !item.overview.isEmpty {
+                    Text(item.overview)
+                        .font(.body)
+                        .foregroundStyle(Theme.text.opacity(0.9))
+                        .padding(.horizontal, 4)
+                } else {
+                    Text("暂无简介")
+                        .font(.body)
+                        .foregroundStyle(Theme.textDim)
+                        .padding(.horizontal, 4)
+                }
+
+                Button {
+                    dismiss()
+                    Task {
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        onSearch()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                        Text("跨线搜索「\(item.title)」")
+                    }
+                    .font(.headline)
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(.white, in: Capsule())
+                }
+                .padding(.horizontal, 4)
+            }
+            .padding(18)
+            .padding(.bottom, 20)
+        }
+        .background(Theme.bg)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }

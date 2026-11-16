@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.70 · 诊断降噪与错误分类"
+    static let buildLabel = "v1.71 · 发现页长按菜单"
 
     var body: some View {
         NavigationStack {
