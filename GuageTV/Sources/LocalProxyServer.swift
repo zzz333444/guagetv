@@ -14,7 +14,25 @@ final class LocalProxyServer {
 
     private var listener: NWListener?
     private(set) var baseURL: String?
+    private(set) var rootBase: String?
     private let lock = NSLock()
+
+    /// The server root (no path) when it is already running —
+    /// the HLS filter checks this without ever blocking a view.
+    var rootIfRunning: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return rootBase
+    }
+
+    /// Fire-and-forget warm-up (PlayerView calls this on appear
+    /// so the HLS filter is ready by the time playback starts).
+    func startInBackground() {
+        if rootIfRunning != nil { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            _ = self?.ensureStarted()
+        }
+    }
 
     /// Idempotent and cheap once running. Waits briefly for the
     /// ephemeral port on first start; nil when the listener
@@ -31,6 +49,7 @@ final class LocalProxyServer {
         let ready = DispatchSemaphore(value: 0)
         created.stateUpdateHandler = { [weak self] state in
             if case .ready = state, let port = created.port?.rawValue {
+                self?.rootBase = "http://127.0.0.1:\(port)"
                 self?.baseURL = "http://127.0.0.1:\(port)/proxy"
                 ready.signal()
             }
@@ -81,16 +100,26 @@ final class LocalProxyServer {
         }
         let target = lines.first?.components(separatedBy: " ").dropFirst().first ?? "/"
         DispatchQueue.global(qos: .userInitiated).async {
-            let (status, contentType, body, extra) = self.dispatch(target: target)
+            let (status, contentType, body, extra) = self.dispatch(target: target,
+                                                                   range: headers["range"])
             self.send(conn, status: status, contentType: contentType, body: body,
                       extraHeaders: extra, rangeHeader: headers["range"])
         }
     }
 
-    /// Route /proxy/<token>… into the bridge; anything else 404s.
-    private func dispatch(target: String) -> (Int, String, Data, [String: String]) {
-        guard let components = URLComponents(string: "http://local" + target),
-              components.path.hasPrefix("/proxy/") else {
+    /// Routes: /proxy/<token>… into the spider bridge, /hls and
+    /// /seg into the HLS ad filter; anything else 404s.
+    private func dispatch(target: String, range: String?) -> (Int, String, Data, [String: String]) {
+        guard let components = URLComponents(string: "http://local" + target) else {
+            return (404, "text/plain; charset=utf-8", Data("not found".utf8), [:])
+        }
+        if components.path == "/hls/media.m3u8" {
+            return handleHLS(components)
+        }
+        if components.path.hasPrefix("/seg/") {
+            return handleSegment(components, range: range)
+        }
+        guard components.path.hasPrefix("/proxy/") else {
             return (404, "text/plain; charset=utf-8", Data("not found".utf8), [:])
         }
         let token = String(components.path.dropFirst("/proxy/".count))
@@ -119,6 +148,55 @@ final class LocalProxyServer {
             return (502, "text/plain; charset=utf-8",
                     Data("localProxy 失败：\(error.localizedDescription)".utf8), [:])
         }
+    }
+
+    // MARK: HLS ad filter endpoints
+
+    private func queryMap(_ components: URLComponents) -> [String: String] {
+        var map: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            map[item.name] = item.value ?? ""
+        }
+        return map
+    }
+
+    private func handleHLS(_ components: URLComponents) -> (Int, String, Data, [String: String]) {
+        let query = queryMap(components)
+        guard let target = query["u"], let url = URL(string: target),
+              let root = rootIfRunning else {
+            return (400, "text/plain; charset=utf-8", Data("bad hls request".utf8), [:])
+        }
+        let headers = HLSAdFilter.decodeHeaders(query["hdrs"])
+        let (status, type, data, _) = HLSAdFilter.fetch(url: url, headers: headers, range: nil)
+        guard status == 200 else {
+            return (status, type, data, [:])
+        }
+        let text = String(data: data, encoding: .utf8)
+            ?? String(decoding: data, as: UTF8.self)
+        let result = HLSAdFilter.rewrite(playlist: text, base: url,
+                                         root: root, headersB64: query["hdrs"])
+        if result.removed > 0 {
+            Diagnostics.log("去广告", "移除 \(result.removed) 段（约 \(Int(result.removedSeconds)) 秒）：\(target)")
+        }
+        return (200, "application/vnd.apple.mpegurl",
+                Data(result.text.utf8), [:])
+    }
+
+    private func handleSegment(_ components: URLComponents,
+                               range: String?) -> (Int, String, Data, [String: String]) {
+        let query = queryMap(components)
+        guard let target = query["u"], let url = URL(string: target) else {
+            return (400, "text/plain; charset=utf-8", Data("bad segment request".utf8), [:])
+        }
+        let headers = HLSAdFilter.decodeHeaders(query["hdrs"])
+        let (status, type, data, responseHeaders) =
+            HLSAdFilter.fetch(url: url, headers: headers, range: range)
+        var extra: [String: String] = [:]
+        for (key, value) in responseHeaders
+        where ["content-range", "accept-ranges"].contains(key.lowercased()) {
+            extra[key] = value
+        }
+        return (status, type, data, extra)
     }
 
     private func send(_ conn: NWConnection, status: Int, contentType: String,

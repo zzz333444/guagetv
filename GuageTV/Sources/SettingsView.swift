@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.59 · Rex模块与TMDB接口"
+    static let buildLabel = "v1.60 · HLS去广告与语音搜索"
 
     var body: some View {
         NavigationStack {
@@ -1093,6 +1093,7 @@ struct PlaySettingsView: View {
     @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
     @AppStorage("player.showStats") private var showStats = false
     @AppStorage("player.backgroundAudio") private var backgroundAudio = true
+    @AppStorage("player.hlsAdblock") private var hlsAdblock = true
     @AppStorage("gesture.boostRate") private var boostRate = 2.0
     @AppStorage("danmaku.enabled") private var danmakuEnabled = false
     @AppStorage("danmaku.apiTemplate") private var danmakuAPI = ""
@@ -1166,6 +1167,10 @@ struct PlaySettingsView: View {
                     Toggle("播放统计浮层", isOn: $showStats)
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Toggle("后台音频播放", isOn: $backgroundAudio)
+                    Toggle("HLS 去广告", isOn: $hlsAdblock)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("点播 m3u8 经本地代理过滤广告片段（异域名插播 / 标记广告段）；某部片播不了时关掉它再试。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Text("关掉的项不再出现在播放页，对应功能同时停用；下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)

@@ -11,6 +11,7 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var keyword = ""
+    @StateObject private var voice = VoiceSearchController()
     @State private var results: [(site: TVBoxConfig.Site, items: [VodItem])] = []
     @State private var searching = false
     @State private var searched = false
@@ -93,12 +94,22 @@ struct SearchView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .onAppear {
+            voice.onFinal = { text in
+                keyword = text
+                beginSearch()
+            }
             if keyword.isEmpty, !initialKeyword.isEmpty {
                 keyword = initialKeyword
                 beginSearch()
             }
         }
-        .onDisappear { debounceTask?.cancel() }
+        .onChange(of: voice.partial) { _, text in
+            if voice.listening { keyword = text }
+        }
+        .onDisappear {
+            debounceTask?.cancel()
+            voice.stop()
+        }
     }
 
     /// Reference-layout header: round back button, the search
@@ -130,6 +141,11 @@ struct SearchView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                Button { voice.toggle() } label: {
+                    Image(systemName: voice.listening ? "mic.fill" : "mic")
+                        .foregroundStyle(voice.listening ? Color.red : Theme.textDim)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
             .glassCapsule()

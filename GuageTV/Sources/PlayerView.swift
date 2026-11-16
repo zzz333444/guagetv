@@ -318,6 +318,7 @@ struct PlayerView: View {
             }
             UIDevice.current.isBatteryMonitoringEnabled = true
             batteryLevel = UIDevice.current.batteryLevel
+            LocalProxyServer.shared.startInBackground()
             loadDanmakuForCurrentEpisode()
             // P5: no immediate prefetch here any more — the next
             // episode is pre-resolved once playback passes 70%
@@ -467,7 +468,11 @@ struct PlayerView: View {
 
     @ViewBuilder
     private var engineLayer: some View {
-        if let url = URL(string: current.url) {
+        // VOD m3u8 goes through the HLS ad filter when enabled;
+        // every other URL loads exactly as resolved.
+        let playURL = HLSAdFilter.proxyURL(for: current.url, header: header,
+                                           isLive: isLive)
+        if let url = URL(string: playURL) {
             if isMPV {
                 MPVPlayerView(url: url, header: header,
                               startAt: effectiveStartAt, controller: mpv)
@@ -476,8 +481,8 @@ struct PlayerView: View {
                                   onLayer: { native.setupPiP(layer: $0) })
                     .ignoresSafeArea()
                     .onAppear { native.load(url: url, header: header, isLive: isLive) }
-                    .onChange(of: current.url) { _ in
-                        if let next = URL(string: current.url) {
+                    .onChange(of: playURL) { _ in
+                        if let next = URL(string: playURL) {
                             native.load(url: next, header: header, isLive: isLive)
                         }
                     }
