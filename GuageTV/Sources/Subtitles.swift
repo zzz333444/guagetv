@@ -255,7 +255,11 @@ struct SubSearchView: View {
     private func download(_ result: OSResult) async {
         downloadingID = result.id
         defer { downloadingID = nil }
-        var request = URLRequest(url: URL(string: "https://api.opensubtitles.com/api/v1/download")!)
+        guard let downloadURL = URL(string: "https://api.opensubtitles.com/api/v1/download") else {
+            message = "下载地址无效"
+            return
+        }
+        var request = URLRequest(url: downloadURL)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "Api-Key")
         request.setValue("GuageTV/1.40", forHTTPHeaderField: "User-Agent")

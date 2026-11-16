@@ -1496,6 +1496,7 @@ struct FWDDetailView: View {
     private func playEpisode(at idx: Int) async {
         resolvingNote = nil
         let list = episodes
+        guard list.indices.contains(idx) else { return }
         let refs = list.enumerated().map { i, ep in
             PlayerView.EpisodeRef(
                 name: guageEpisodeDisplayName(ep.title, index: ep.episode.map { $0 - 1 } ?? i),

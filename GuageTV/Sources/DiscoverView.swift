@@ -824,7 +824,10 @@ struct DiscoverView: View {
     /// TMDB score join the feed's own score.
     private func heroPage(_ item: VodItem) -> some View {
         let info = tmdbInfo[item.id]
-        let art = (info?.backdrop.isEmpty == false) ? info!.backdrop : item.pic
+        let art: String = {
+            if let backdrop = info?.backdrop, !backdrop.isEmpty { return backdrop }
+            return item.pic
+        }()
         return ZStack {
             if !art.isEmpty {
                 PosterImage(urlString: art)

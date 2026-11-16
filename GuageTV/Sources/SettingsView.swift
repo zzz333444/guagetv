@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.62 · 倍速跨集记忆"
+    static let buildLabel = "v1.63 · 稳定扫荡二轮"
 
     var body: some View {
         NavigationStack {
