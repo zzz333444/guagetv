@@ -34,13 +34,15 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "1.59"
-        CFBundleVersion: "159"
+        CFBundleShortVersionString: "1.60"
+        CFBundleVersion: "160"
         UIBackgroundModes:
           - audio
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         NSFaceIDUsageDescription: 用面容 ID 解锁呱壳
         NSLocalNetworkUsageDescription: 连接局域网里的 Emby / WebDAV 服务器和 DLNA 电视
+        NSSpeechRecognitionUsageDescription: 语音搜索片名
+        NSMicrophoneUsageDescription: 语音搜索需要使用麦克风
         UILaunchScreen: {}
         # TVBox configs, CMS APIs and media streams are very often plain
         # HTTP; without this, App Transport Security blocks every load
