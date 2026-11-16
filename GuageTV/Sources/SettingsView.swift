@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.64 · 资源库海报预取与列表稳定"
+    static let buildLabel = "v1.65 · 全集下载并发与重试"
 
     var body: some View {
         NavigationStack {

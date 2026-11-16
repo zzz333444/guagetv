@@ -664,10 +664,14 @@ struct DetailView: View {
         enqueueChecked(url: ep.url, header: header, ep: ep)
     }
 
-    /// Whole-line download (v1.42): resolve every episode of the
-    /// active line through the same resolver playback uses, then
-    /// enqueue each downloadable one. Runs sequentially — spider
-    /// resolvers are serial anyway — with progress in the note.
+    /// Whole-line download (v1.42, D1 并发于 v1.65): resolve every
+    /// episode of the active line through the same resolver playback
+    /// uses, then enqueue each downloadable one. Resolves run 3 at
+    /// a time (a stalled episode no longer blocks the whole line);
+    /// a failed episode retries once after a short pause before it
+    /// is counted as skipped. Enqueue stays on the parent task so
+    /// DownloadManager's @Published list is only touched from the
+    /// main actor. Tuple: (index, url, header, retriedAndSucceeded).
     private func downloadWholeLine(episodes: [VodDetail.Episode]) {
         guard !resolving else { return }
         resolving = true
@@ -676,23 +680,54 @@ struct DetailView: View {
         Task {
             var added = 0
             var skipped = 0
-            for (index, ep) in episodes.enumerated() {
-                playNote = "正在加入下载 \(index + 1)/\(episodes.count)…"
-                switch await resolver(line, index) {
-                case .ok(let url, let resolvedHeader):
-                    if await DownloadManager.probeDownloadable(url: url, header: resolvedHeader) {
-                        DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
-                                                       pic: detail.pic, url: url, header: resolvedHeader)
-                        added += 1
-                    } else {
-                        skipped += 1
+            var retriedOK = 0
+            var done = 0
+            let total = episodes.count
+            // One chunk = up to 3 episodes resolving concurrently.
+            for chunkStart in stride(from: 0, to: total, by: 3) {
+                let chunkEnd = min(chunkStart + 3, total)
+                let outcomes = await withTaskGroup(
+                    of: (Int, String, [String: String]?, Bool).self) { group in
+                    for index in chunkStart..<chunkEnd {
+                        group.addTask {
+                            var outcome = await resolver(line, index)
+                            var retried = false
+                            if case .failed = outcome {
+                                try? await Task.sleep(nanoseconds: 500_000_000)
+                                outcome = await resolver(line, index)
+                                retried = true
+                            }
+                            switch outcome {
+                            case .ok(let url, let resolvedHeader):
+                                guard await DownloadManager.probeDownloadable(
+                                    url: url, header: resolvedHeader) else {
+                                    return (index, "", nil, false)
+                                }
+                                return (index, url, resolvedHeader, retried)
+                            case .failed:
+                                return (index, "", nil, false)
+                            }
+                        }
                     }
-                case .failed:
-                    skipped += 1
+                    var results: [(Int, String, [String: String]?, Bool)] = []
+                    for await result in group { results.append(result) }
+                    return results
                 }
+                for (index, url, header, retried) in outcomes.sorted(by: { $0.0 < $1.0 }) {
+                    done += 1
+                    guard !url.isEmpty, let header else { skipped += 1; continue }
+                    let ep = episodes[index]
+                    DownloadManager.shared.enqueue(vodName: detail.name, episodeName: ep.name,
+                                                   pic: detail.pic, url: url, header: header)
+                    added += 1
+                    if retried { retriedOK += 1 }
+                }
+                playNote = "正在加入下载 \(done)/\(total)…"
             }
             resolving = false
-            playNote = "全集下载已加入 \(added) 集" + (skipped > 0 ? "，\(skipped) 集解析不了跳过" : "")
+            playNote = "全集下载已加入 \(added) 集"
+                + (retriedOK > 0 ? "（其中 \(retriedOK) 集重试后成功）" : "")
+                + (skipped > 0 ? "，\(skipped) 集解析不了跳过" : "")
         }
     }
 
