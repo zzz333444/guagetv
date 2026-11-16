@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.65 · 全集下载并发与重试"
+    static let buildLabel = "v1.66 · Emby 搜索与收藏管理"
 
     var body: some View {
         NavigationStack {
