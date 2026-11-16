@@ -157,6 +157,20 @@ enum EmbyClient {
         return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
     }
 
+    /// Star / unstar an item (POST adds, DELETE removes).
+    /// Emby's FavoriteItems endpoint, same auth as the rest.
+    static func setFavorite(itemID: String, favorite: Bool) async throws {
+        var comps = URLComponents(string: base + "/Users/\(userID)/FavoriteItems/\(itemID)")
+        comps?.queryItems = [URLQueryItem(name: "api_key", value: token)]
+        guard let url = comps?.url else { throw failure("地址拼装失败") }
+        var request = URLRequest(url: url)
+        request.httpMethod = favorite ? "POST" : "DELETE"
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw failure("服务器拒绝（HTTP \(http.statusCode)）")
+        }
+    }
+
     /// Next episode(s) up for a series, from watch progress.
     static func nextUp(seriesID: String) async throws -> [Item] {
         let json = try await get("/Shows/NextUp", query: [
@@ -172,16 +186,20 @@ enum EmbyClient {
                       sortOrder: String = "Ascending",
                       limit: Int = 200) async throws -> [Item] {
         var query: [String: String] = [
-            "ParentId": parentID,
             "Fields": "ProductionYear,Overview,ChildCount,CommunityRating",
             "SortBy": sortBy, "SortOrder": sortOrder,
             "Limit": "\(limit)",
         ]
+        // An empty ParentId used to be sent as `ParentId=`, which the
+        // server reads as Guid.Empty and answers with zero rows —
+        // that silently broke Emby search (E1 audit).
+        if !parentID.isEmpty { query["ParentId"] = parentID }
         if recursive { query["Recursive"] = "true" }
         if !types.isEmpty { query["IncludeItemTypes"] = types }
         if !search.isEmpty {
             query["SearchTerm"] = search
             query["Recursive"] = "true"
+            if types.isEmpty { query["IncludeItemTypes"] = "Movie,Series,Episode,Season" }
         }
         let json = try await get("/Users/\(userID)/Items", query: query)
         return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
@@ -245,6 +263,9 @@ struct EmbyHomeView: View {
     @State private var loading = true
     @State private var searchText = ""
     @State private var searchResults: [EmbyClient.Item] = []
+    @State private var searching = false
+    @State private var searchedKeyword = ""
+    @State private var showUnfavoriteError = false
 
     var body: some View {
         Group {
@@ -264,6 +285,11 @@ struct EmbyHomeView: View {
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle("Emby")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("取消收藏失败", isPresented: $showUnfavoriteError) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查网络后重试")
+        }
         .task { await load() }
     }
 
@@ -275,9 +301,35 @@ struct EmbyHomeView: View {
                         .font(.subheadline)
                         .padding(10)
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .submitLabel(.search)
+                        .onSubmit { Task { await search() } }
+                        .onChange(of: searchText) { _, newValue in
+                            if newValue.isEmpty { searchResults = []; searchedKeyword = "" }
+                        }
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""; searchResults = []; searchedKeyword = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     Button("搜索") { Task { await search() } }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.accent)
+                        .disabled(searchText.trimmingCharacters(in: .whitespaces).isEmpty || searching)
+                }
+                if searching {
+                    ProgressView().tint(Theme.text)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                } else if !searchedKeyword.isEmpty && searchResults.isEmpty {
+                    Text("没有找到与「\(searchedKeyword)」相关的内容")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
                 }
                 if !searchResults.isEmpty {
                     sectionTitle("搜索结果")
@@ -288,8 +340,14 @@ struct EmbyHomeView: View {
                     resumeRow(resumeItems)
                 }
                 if !favoriteItems.isEmpty {
-                    sectionTitle("我的收藏")
-                    posterRow(favoriteItems)
+                    HStack(alignment: .firstTextBaseline) {
+                        sectionTitle("我的收藏")
+                        Spacer()
+                        Text("长按可取消收藏")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    favoritesRow(favoriteItems)
                 }
                 sectionTitle("媒体库")
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
@@ -425,6 +483,27 @@ struct EmbyHomeView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// Shared poster card for the home rows (resume uses its own
+    /// wide 16:9 cards, posterGrid its own 3-column cards).
+    private func posterCard(_ item: EmbyClient.Item) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                .aspectRatio(2/3, contentMode: .fill)
+                .frame(width: 104, height: 156)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+            Text(item.name)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .frame(width: 104, alignment: .leading)
+            if !item.year.isEmpty {
+                Text(item.year).font(.caption2).foregroundStyle(Theme.textDim)
+            }
+        }
+    }
+
     /// Horizontal poster strip (home page rows).
     private func posterRow(_ items: [EmbyClient.Item]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -433,26 +512,42 @@ struct EmbyHomeView: View {
                     NavigationLink {
                         EmbyItemDestination(item: item)
                     } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
-                                .aspectRatio(2/3, contentMode: .fill)
-                                .frame(width: 104, height: 156)
-                                .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
-                            Text(item.name)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Theme.text)
-                                .lineLimit(1)
-                                .frame(width: 104, alignment: .leading)
-                            if !item.year.isEmpty {
-                                Text(item.year).font(.caption2).foregroundStyle(Theme.textDim)
-                            }
-                        }
+                        posterCard(item)
                     }
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    /// Favorites row: same poster cards, but a long-press menu
+    /// offers 取消收藏 (DELETE FavoriteItems on the server).
+    private func favoritesRow(_ items: [EmbyClient.Item]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(items) { item in
+                    NavigationLink {
+                        EmbyItemDestination(item: item)
+                    } label: {
+                        posterCard(item)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("取消收藏", role: .destructive) {
+                            Task { await unfavorite(item) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func unfavorite(_ item: EmbyClient.Item) async {
+        do {
+            try await EmbyClient.setFavorite(itemID: item.id, favorite: false)
+            favoriteItems.removeAll { $0.id == item.id }
+        } catch {
+            showUnfavoriteError = true
         }
     }
 
@@ -481,8 +576,12 @@ struct EmbyHomeView: View {
     }
 
     private func search() async {
-        guard !searchText.isEmpty else { return }
-        searchResults = (try? await EmbyClient.items(parentID: "", search: searchText)) ?? []
+        let keyword = searchText.trimmingCharacters(in: .whitespaces)
+        guard !keyword.isEmpty else { return }
+        searching = true
+        defer { searching = false }
+        searchResults = (try? await EmbyClient.items(parentID: "", search: keyword)) ?? []
+        searchedKeyword = keyword
     }
 }
 
