@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.66 · Emby 搜索与收藏管理"
+    static let buildLabel = "v1.67 · 去广告强化"
 
     var body: some View {
         NavigationStack {
@@ -1094,12 +1094,26 @@ struct PlaySettingsView: View {
     @AppStorage("player.showStats") private var showStats = false
     @AppStorage("player.backgroundAudio") private var backgroundAudio = true
     @AppStorage("player.hlsAdblock") private var hlsAdblock = true
+    @AppStorage("hlsAdblock.lastRemovedSegments") private var lastRemovedSegments = 0
+    @AppStorage("hlsAdblock.lastRemovedSeconds") private var lastRemovedSeconds = 0.0
+    @AppStorage("hlsAdblock.lastFilteredAt") private var lastFilteredAt = 0.0
     @AppStorage("gesture.boostRate") private var boostRate = 2.0
     @AppStorage("danmaku.enabled") private var danmakuEnabled = false
     @AppStorage("danmaku.apiTemplate") private var danmakuAPI = ""
     @AppStorage("danmaku.opacity") private var danmakuOpacity = 0.9
     @AppStorage("danmaku.speed") private var danmakuSpeed = 1.0
     @AppStorage("danmaku.blockWords") private var danmakuBlockWords = ""
+
+    /// 上次去广告过滤的统计行（v1.67）；无记录时提示尚未过滤过。
+    private var lastAdFilterText: String {
+        guard lastRemovedSegments > 0, lastFilteredAt > 0 else {
+            return "尚未过滤过广告段——打开一部点播片后，这里会显示上次过滤结果。"
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        let when = formatter.string(from: Date(timeIntervalSince1970: lastFilteredAt))
+        return "上次过滤：移除 \(lastRemovedSegments) 段（约 \(Int(lastRemovedSeconds)) 秒）· \(when)"
+    }
 
     var body: some View {
         SettingsPage(title: "播放") {
@@ -1171,7 +1185,8 @@ struct PlaySettingsView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Text("点播 m3u8 经本地代理过滤广告片段（异域名插播 / 标记广告段）；某部片播不了时关掉它再试。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
-                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text(lastAdFilterText)
+                        .font(.footnote).foregroundStyle(Theme.textDim)
                     Text("关掉的项不再出现在播放页，对应功能同时停用；下次打开播放器生效。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }

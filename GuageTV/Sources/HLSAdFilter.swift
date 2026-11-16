@@ -7,7 +7,10 @@ import Foundation
 ///   • it sits inside an #EXT-X-CUE-OUT … #EXT-X-CUE-IN span, or
 ///   • every segment URI lives on a different host than the
 ///     playlist itself (the classic 采集站 ad-CDN insertion), or
-///   • a segment URI contains /ad/, /ads/ or advert.
+///   • a segment URI contains /ad/, /ads/, advert, /gg/,
+///     /tuan or tuan. (conservative keyword set:宁漏勿误 —
+///     each pattern is a path segment or host fragment, so a
+///     content segment named e.g. "tuanjie.ts" never matches).
 /// Safety valve: if the "ads" would eat more than half the total
 /// runtime, the playlist passes through unfiltered — a wrong call
 /// must never gut an episode. Live playlists (no ENDLIST) are
@@ -16,6 +19,18 @@ import Foundation
 enum HLSAdFilter {
     static var enabled: Bool {
         UserDefaults.standard.object(forKey: "player.hlsAdblock") as? Bool ?? true
+    }
+
+    // MARK: last-filter stats (v1.67)
+
+    /// Written whenever a playlist actually loses segments, so
+    /// Settings → 播放 can show "上次过滤：移除 N 段约 M 秒".
+    /// Keys are read with @AppStorage in SettingsView.
+    static func recordRemoval(segments: Int, seconds: Double) {
+        let d = UserDefaults.standard
+        d.set(segments, forKey: "hlsAdblock.lastRemovedSegments")
+        d.set(seconds, forKey: "hlsAdblock.lastRemovedSeconds")
+        d.set(Date().timeIntervalSince1970, forKey: "hlsAdblock.lastFilteredAt")
     }
 
     /// The URL the engines should load instead of `urlString`
@@ -191,6 +206,7 @@ enum HLSAdFilter {
                 if members.contains(where: {
                     let u = $0.uri.lowercased()
                     return u.contains("/ad/") || u.contains("/ads/") || u.contains("advert")
+                        || u.contains("/gg/") || u.contains("/tuan") || u.contains("tuan.")
                 }) {
                     adGroups.insert(gid)
                 }
@@ -243,6 +259,9 @@ enum HLSAdFilter {
         out.append(contentsOf: trailingTags.filter {
             !$0.hasPrefix("#EXT-X-CUE-OUT") && !$0.hasPrefix("#EXT-X-CUE-IN")
         })
+        if !removedSegments.isEmpty {
+            recordRemoval(segments: removedSegments.count, seconds: removedDuration)
+        }
         return (out.joined(separator: "\n"),
                 removedSegments.count, removedDuration)
     }
