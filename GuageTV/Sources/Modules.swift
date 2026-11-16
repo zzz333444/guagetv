@@ -719,7 +719,7 @@ struct ModulesView: View {
         .onAppear { records = FWDStore.records() }
         .fileImporter(isPresented: $showFileImporter,
                       allowedContentTypes: [.javaScript, .plainText, .data]) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
+            guard case .success(let url) = result else { return }
             importing = true
             Task {
                 defer { importing = false }
