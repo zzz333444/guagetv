@@ -226,6 +226,16 @@ final class MPVController: ObservableObject {
         setProperty("sub-scale", String(scale))
         specText = ""
         command(["loadfile", url.absoluteString])
+        // P1 (v1.62): a fresh mpv core defaults to 1x speed, so
+        // restore the user's saved rate here (reload/recovery and
+        // reopen all come through start(); resident load() keeps
+        // the live handle's speed). Also resyncs the @Published
+        // speed, which stop() left holding the stale value.
+        if let saved = UserDefaults.standard.object(forKey: PlayerView.savedRateKey) as? Double,
+           saved > 0.25, saved <= 4.0, saved != 1.0 {
+            speed = saved
+            setProperty("speed", String(saved))
+        }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.poll()
         }

@@ -555,14 +555,14 @@ struct PlayerView: View {
         guard longPressBoostEnabled, !boostActive, isPlaying else { return }
         boostActive = true
         rateBeforeBoost = currentRate
-        setRate(boostRateSetting)
+        setRate(boostRateSetting, persist: false)
         showToast("2 倍速播放中，松开恢复")
     }
 
     private func releaseBoost() {
         guard boostActive else { return }
         boostActive = false
-        setRate(rateBeforeBoost)
+        setRate(rateBeforeBoost, persist: false)
     }
 
     /// One drag, three jobs (mainstream player behaviour): horizontal
@@ -1152,7 +1152,7 @@ struct PlayerView: View {
                         }
                     }
                 }
-                Section("倍速") {
+                Section("倍速 · 当前 \(String(format: "%.2g", currentRate))x") {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
                         Button {
                             setRate(rate); pokeChrome()
@@ -1394,7 +1394,15 @@ struct PlayerView: View {
         if isMPV { mpv.seek(to: seconds) } else { native.seek(to: seconds, tolerant: tolerant) }
     }
     private func seekBy(_ delta: Double) { isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
-    private func setRate(_ rate: Double) {
+    /// P1 (v1.62): playback speed survives episode changes and
+    /// player reopens — the chosen rate is stored in UserDefaults
+    /// under this key. Both engines restore it when a fresh core /
+    /// item starts (NativePlayer.load, MPVController.start); the
+    /// long-press 2x boost deliberately does NOT persist.
+    static let savedRateKey = "player.rate"
+
+    private func setRate(_ rate: Double, persist: Bool = true) {
+        if persist { UserDefaults.standard.set(rate, forKey: Self.savedRateKey) }
         if isMPV { mpv.setSpeed(rate) } else { native.setRate(Float(rate)) }
     }
 
@@ -2042,6 +2050,24 @@ final class NativeController: NSObject, ObservableObject {
         load(url: url, header: header, isLive: lastIsLive)
     }
 
+    /// P1 (v1.62): re-apply the user's saved playback rate on
+    /// every (re)load — a fresh AVPlayerItem resets the effective
+    /// rate to 1x (play() uses defaultRate), so without this the
+    /// speed chosen last episode is silently lost on every episode
+    /// change, engine switch and recovery reload. defaultRate is
+    /// set too so pause → play resumes at the saved rate.
+    private func applySavedRate() {
+        let saved = UserDefaults.standard.object(forKey: PlayerView.savedRateKey) as? Double ?? 1.0
+        guard saved > 0.25, saved <= 4.0 else { return }
+        rate = Float(saved)
+        player.defaultRate = Float(saved)
+        // Unconditional: load() always calls play() first, and
+        // AVPlayer holds the rate until the fresh item is ready.
+        // (Gating on .playing here would miss — the status flips
+        // to .playing asynchronously after play().)
+        player.rate = Float(saved)
+    }
+
     func load(url: URL, header: [String: String], isLive: Bool = false) {
         specText = ""
         lastIsLive = isLive
@@ -2051,6 +2077,7 @@ final class NativeController: NSObject, ObservableObject {
         ensureTimeObserver()
         if loadedURL == url, player.currentItem != nil {
             player.play()
+            applySavedRate()
             return
         }
         loadedURL = url
@@ -2078,6 +2105,7 @@ final class NativeController: NSObject, ObservableObject {
         attachItemObservers(item)
         player.replaceCurrentItem(with: item)
         player.play()
+        applySavedRate()
     }
 
     /// (Re)attach the 0.25s progress observer; no-op when one is
@@ -2180,6 +2208,10 @@ final class NativeController: NSObject, ObservableObject {
 
     func setRate(_ value: Float) {
         rate = value
+        // P1 (v1.62): keep defaultRate in step so pause → play
+        // (toggle() → play()) resumes at the chosen speed instead
+        // of dropping back to 1x.
+        player.defaultRate = value
         if player.timeControlStatus == .playing { player.rate = value }
     }
 
