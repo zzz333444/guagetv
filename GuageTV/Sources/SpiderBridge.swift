@@ -11,6 +11,52 @@ final class SpiderBridge {
 
     struct BridgeFailure: Error, CustomStringConvertible, LocalizedError {
         let message: String
+
+        /// 错误分类（v1.70）：超时 / 网络 / 脚本 / 未知。
+        /// 诊断日志与报错展示按类分组，定位时先看是哪一类。
+        enum Kind: String {
+            case timeout, network, script, unknown
+            var label: String {
+                switch self {
+                case .timeout: return "超时"
+                case .network: return "网络"
+                case .script: return "脚本"
+                case .unknown: return "未知"
+                }
+            }
+        }
+        let kind: Kind
+
+        init(message: String, kind: Kind? = nil) {
+            self.message = message
+            self.kind = kind ?? Self.classify(message)
+        }
+
+        static func classify(_ message: String) -> Kind {
+            let lower = message.lowercased()
+            let timeoutMarks = ["timed out", "timeout", "readtimeout", "connecttimeout",
+                                "20 秒无响应", "防卡死", "timedout", "operation timed out"]
+            if timeoutMarks.contains(where: { lower.contains($0) || message.contains($0) }) {
+                return .timeout
+            }
+            let networkMarks = ["urlerror", "connectionerror", "connection refused",
+                                "connection reset", "connection aborted", "broken pipe",
+                                "remote end closed", "network is unreachable",
+                                "name or service not known", "temporary failure in name resolution",
+                                "ssl", "httperror", "max retries", "failed to establish",
+                                "networkerror", "无法连接", "网络", "连接失败"]
+            if networkMarks.contains(where: { lower.contains($0) || message.contains($0) }) {
+                return .network
+            }
+            let scriptMarks = ["traceback", "nameerror", "attributeerror", "syntaxerror",
+                               "importerror", "modulenotfounderror", "keyerror", "indexerror",
+                               "typeerror", "valueerror", "zerodivisionerror", "exception"]
+            if scriptMarks.contains(where: { lower.contains($0) }) {
+                return .script
+            }
+            return .unknown
+        }
+
         var description: String { message }
         // Without LocalizedError, surfaces that print
         // `error.localizedDescription` show the opaque
@@ -179,8 +225,9 @@ final class SpiderBridge {
             if (dict["ok"] as? Bool) != true {
                 endInvoke(token, success: false)
                 let message = (dict["error"] as? String) ?? "Spider 调用失败"
-                Diagnostics.log("py", "\(function)：\(message)")
-                throw BridgeFailure(message: message)
+                let failure = BridgeFailure(message: message)
+                Diagnostics.log("py", "【\(failure.kind.label)】\(function)：\(message)")
+                throw failure
             }
             endInvoke(token, success: true)
             return dict

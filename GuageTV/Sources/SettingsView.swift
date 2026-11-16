@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.69 · 播放器线路名"
+    static let buildLabel = "v1.70 · 诊断降噪与错误分类"
 
     var body: some View {
         NavigationStack {
