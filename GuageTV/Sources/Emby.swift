@@ -270,13 +270,22 @@ struct EmbyHomeView: View {
     var body: some View {
         Group {
             if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        SkeletonRowList(count: 2)
+                        SkeletonPosterGrid()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .padding(.bottom, 110)
+                }
             } else if let errorText {
-                Text(errorText)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textDim)
-                    .padding(24)
+                EmptyStateView(icon: "wifi.exclamationmark",
+                               title: "Emby 没连上",
+                               message: errorText,
+                               actionTitle: "重新加载",
+                               action: { Task { await load() } })
+                    .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 content
@@ -321,15 +330,15 @@ struct EmbyHomeView: View {
                         .disabled(searchText.trimmingCharacters(in: .whitespaces).isEmpty || searching)
                 }
                 if searching {
-                    ProgressView().tint(Theme.text)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                    SkeletonRowList(count: 3)
                         .padding(.vertical, 8)
                 } else if !searchedKeyword.isEmpty && searchResults.isEmpty {
-                    Text("没有找到与「\(searchedKeyword)」相关的内容")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textDim)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 8)
+                    EmptyStateView(icon: "magnifyingglass",
+                                   title: "没有找到与「\(searchedKeyword)」相关的内容",
+                                   message: "换个关键词试试",
+                                   actionTitle: "清除搜索",
+                                   action: { searchText = ""; searchResults = []; searchedKeyword = "" },
+                                   compact: true)
                 }
                 if !searchResults.isEmpty {
                     sectionTitle("搜索结果")
@@ -385,6 +394,13 @@ struct EmbyHomeView: View {
                 ForEach(libraryLatest, id: \.library.id) { entry in
                     sectionTitle("\(entry.library.name) · 最新")
                     posterRow(entry.items)
+                }
+                if views.isEmpty && resumeItems.isEmpty && favoriteItems.isEmpty
+                    && latestItems.isEmpty && libraryLatest.isEmpty
+                    && searchResults.isEmpty && searchedKeyword.isEmpty {
+                    EmptyStateView(icon: "server.rack",
+                                   title: "服务器上还没有内容",
+                                   message: "在 Emby 里加个媒体库，这里就会出现")
                 }
             }
             .padding(.horizontal, 18)
@@ -635,10 +651,20 @@ struct EmbyLibraryView: View {
     var body: some View {
         Group {
             if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScrollView(showsIndicators: false) {
+                    SkeletonPosterGrid()
+                        .padding(.horizontal, 18)
+                        .padding(.top, 12)
+                        .padding(.bottom, 110)
+                }
             } else if let errorText {
-                Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
+                EmptyStateView(icon: "wifi.exclamationmark",
+                               title: "媒体库没拉到",
+                               message: errorText,
+                               actionTitle: "重新加载",
+                               action: { Task { await reload() } })
+                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -662,26 +688,33 @@ struct EmbyLibraryView: View {
                                 .font(.caption)
                                 .foregroundStyle(Theme.textDim)
                         }
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
-                                  spacing: 16) {
-                            ForEach(items) { item in
-                                NavigationLink {
-                                    EmbyItemDestination(item: item)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
-                                            .aspectRatio(2/3, contentMode: .fill)
-                                            .frame(maxWidth: .infinity)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
-                                        Text(item.name)
-                                            .font(.caption.weight(.medium))
-                                            .foregroundStyle(Theme.text)
-                                            .lineLimit(1)
-                                        metaLine(item)
+                        if items.isEmpty {
+                            EmptyStateView(icon: "folder",
+                                           title: "这个媒体库是空的",
+                                           message: "服务器上这个库里还没有内容",
+                                           compact: true)
+                        } else {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
+                                      spacing: 16) {
+                                ForEach(items) { item in
+                                    NavigationLink {
+                                        EmbyItemDestination(item: item)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                                                .aspectRatio(2/3, contentMode: .fill)
+                                                .frame(maxWidth: .infinity)
+                                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                            Text(item.name)
+                                                .font(.caption.weight(.medium))
+                                                .foregroundStyle(Theme.text)
+                                                .lineLimit(1)
+                                            metaLine(item)
+                                        }
                                     }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -764,10 +797,20 @@ struct EmbySeriesView: View {
     var body: some View {
         Group {
             if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScrollView(showsIndicators: false) {
+                    SkeletonRowList(count: 5)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 12)
+                        .padding(.bottom, 110)
+                }
             } else if let errorText {
-                Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
+                EmptyStateView(icon: "wifi.exclamationmark",
+                               title: "剧集没拉到",
+                               message: errorText,
+                               actionTitle: "重新加载",
+                               action: { Task { await load() } })
+                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
@@ -866,16 +909,22 @@ struct EmbySeriesView: View {
                        initialResolved: sel.initial,
                        resolver: sel.resolver)
         }
-        .task {
-            do {
-                seasons = try await EmbyClient.seasons(seriesID: series.id)
-                if let first = seasons.first { await pickSeason(first) }
-                nextUpItem = (try? await EmbyClient.nextUp(seriesID: series.id))?.first
-            } catch {
-                errorText = "读取失败：\(error.localizedDescription)"
-            }
-            loading = false
+        .task { await load() }
+    }
+
+    /// First load (and the error-state retry): seasons, the first
+    /// season's episodes, and the NextUp card.
+    private func load() async {
+        loading = true
+        errorText = nil
+        do {
+            seasons = try await EmbyClient.seasons(seriesID: series.id)
+            if let first = seasons.first { await pickSeason(first) }
+            nextUpItem = (try? await EmbyClient.nextUp(seriesID: series.id))?.first
+        } catch {
+            errorText = "读取失败：\(error.localizedDescription)"
         }
+        loading = false
     }
 
     /// NextUp episodes are not necessarily in the selected

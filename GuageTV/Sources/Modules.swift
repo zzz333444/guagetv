@@ -905,17 +905,9 @@ struct ModulesView: View {
                     Text(note).font(.footnote).foregroundStyle(Theme.textDim)
                 }
                 if records.isEmpty {
-                    GlassCard {
-                        VStack(spacing: 10) {
-                            Image(systemName: "puzzlepiece.extension")
-                                .font(.title2).foregroundStyle(Theme.textDim)
-                            Text("还没有模块").foregroundStyle(Theme.text)
-                            Text("导入 Forward 规范的 JS 模块文件，或粘贴模块 / .fwd 订阅链接。")
-                                .font(.footnote).foregroundStyle(Theme.textDim)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
+                    EmptyStateView(icon: "puzzlepiece.extension",
+                                   title: "还没有模块",
+                                   message: "导入 Forward 规范的 JS 模块文件，或粘贴模块 / .fwd 订阅链接。")
                 }
                 ForEach(records) { record in
                     NavigationLink {
@@ -1044,10 +1036,19 @@ struct FWDWidgetView: View {
     var body: some View {
         Group {
             if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScrollView(showsIndicators: false) {
+                    SkeletonPosterGrid()
+                        .padding(.horizontal, 18)
+                        .padding(.top, 12)
+                        .padding(.bottom, 110)
+                }
             } else if let errorText, items.isEmpty {
-                Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
+                EmptyStateView(icon: "wifi.exclamationmark",
+                               title: "模块没拉到数据",
+                               message: errorText,
+                               actionTitle: "重新加载",
+                               action: { Task { await load(reset: true) } })
+                    .padding(.horizontal, 18)
             } else {
                 content
             }
@@ -1101,8 +1102,12 @@ struct FWDWidgetView: View {
                     }
                 }
                 if items.isEmpty {
-                    Text("这个栏目暂时没有内容")
-                        .font(.footnote).foregroundStyle(Theme.textDim)
+                    EmptyStateView(icon: "square.stack.3d.up.slash",
+                                   title: "这个栏目暂时没有内容",
+                                   message: "换个栏目或关键词试试",
+                                   actionTitle: "重新加载",
+                                   action: { Task { await load(reset: true) } },
+                                   compact: true)
                 } else {
                     posterGrid(items)
                 }

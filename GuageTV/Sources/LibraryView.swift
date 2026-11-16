@@ -125,22 +125,11 @@ struct LibraryView: View {
                         }
                     }
                 } else {
-                    GlassCard {
-                        VStack(spacing: 10) {
-                            Image(systemName: "tray.and.arrow.down")
-                                .font(.title2).foregroundStyle(Theme.textDim)
-                            Text("还没有资源").foregroundStyle(Theme.text)
-                            Text("导入一个 TVBox 配置或猫源，站点会出现在这里")
-                                .font(.footnote).foregroundStyle(Theme.textDim)
-                                .multilineTextAlignment(.center)
-                            Button("去导入", action: onImportTap)
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 18).padding(.vertical, 8)
-                                .background(.white, in: Capsule())
-                                .foregroundStyle(.black)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
+                    EmptyStateView(icon: "tray.and.arrow.down",
+                                   title: "还没有资源",
+                                   message: "导入一个 TVBox 配置或猫源，站点会出现在这里",
+                                   actionTitle: "去导入",
+                                   action: onImportTap)
                 }
 
                 if let lives = config?.lives, !lives.isEmpty {
@@ -444,8 +433,10 @@ struct GroupEditorView: View {
                         }
                     }
                     if groups.isEmpty {
-                        Text("还没有自建分组。导入的 py 文件会自动收进「Python 文件」组。")
-                            .font(.footnote).foregroundStyle(Theme.textDim)
+                        EmptyStateView(icon: "folder.badge.plus",
+                                       title: "还没有自建分组",
+                                       message: "导入的 py 文件会自动收进「Python 文件」组。",
+                                       compact: true)
                     }
                     ForEach(groups) { group in
                         GlassCard(padding: 14) {
@@ -608,7 +599,10 @@ struct PyGroupView: View {
                     }
                 }
                 if entries.isEmpty {
-                    Text("分组是空的").font(.footnote).foregroundStyle(Theme.textDim)
+                    EmptyStateView(icon: "folder",
+                                   title: "这个分组是空的",
+                                   message: "长按资源库的线路卡片可以把它移进来",
+                                   compact: true)
                 }
             }
             .padding(.horizontal, 18)

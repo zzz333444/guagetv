@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.67 · 去广告强化"
+    static let buildLabel = "v1.68 · 空状态与骨架统一"
 
     var body: some View {
         NavigationStack {

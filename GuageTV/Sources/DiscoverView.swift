@@ -84,13 +84,30 @@ struct DiscoverView: View {
                         ForEach(layout.visibleModules) { module in
                             switch module {
                             case .hero:
-                                VStack(alignment: .leading, spacing: 26) {
-                                    hero
-                                    calendarStrip
+                                // While TMDB is still loading and no
+                                // feed art has landed, the hero would
+                                // be a blank 520pt box — show the
+                                // glass skeleton instead.
+                                if tmdbLoading && displayHero.isEmpty {
+                                    VStack(alignment: .leading, spacing: 26) {
+                                        SkeletonHero()
+                                        calendarStrip
+                                    }
+                                } else {
+                                    VStack(alignment: .leading, spacing: 26) {
+                                        hero
+                                        calendarStrip
+                                    }
                                 }
                             case .continueWatching: continueWatchingRow
                             case .updates: updatesRow
-                            case .sections: sectionsGroup
+                            case .sections:
+                                if tmdbLoading && displaySections.isEmpty {
+                                    SkeletonPosterGrid()
+                                        .padding(.horizontal, 18)
+                                } else {
+                                    sectionsGroup
+                                }
                             case .categories: categoryBrowse
                             }
                         }
@@ -529,9 +546,19 @@ struct DiscoverView: View {
                             .buttonStyle(.plain)
                         }
                         if shown.isEmpty {
-                            Text(allSites.isEmpty ? "首页线路还没有站点" : "没有匹配的站点")
-                                .font(.footnote).foregroundStyle(Theme.textDim)
-                                .padding(.top, 30)
+                            if allSites.isEmpty {
+                                EmptyStateView(icon: "tray.and.arrow.down",
+                                               title: "首页线路还没有站点",
+                                               message: "导入一个 TVBox 配置，站点会出现在这里")
+                                    .padding(.top, 12)
+                            } else {
+                                EmptyStateView(icon: "magnifyingglass",
+                                               title: "没有匹配的站点",
+                                               message: "换个关键词试试",
+                                               actionTitle: "清除搜索",
+                                               action: { siteQuery = "" },
+                                               compact: true)
+                            }
                         }
                     }
                     .padding(.horizontal, 18)

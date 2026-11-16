@@ -170,17 +170,11 @@ struct WatchlistView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.largeTitle).foregroundStyle(Theme.textDim)
-            Text("还没有在追的剧")
-                .font(.headline).foregroundStyle(Theme.text)
-            Text("在详情页点爱心收藏，连载剧更新了会在这里标出来")
-                .font(.subheadline).foregroundStyle(Theme.textDim)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "calendar.badge.clock",
+                       title: "还没有在追的剧",
+                       message: "在详情页点爱心收藏，连载剧更新了会在这里标出来")
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func runCheck() {
