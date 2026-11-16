@@ -45,13 +45,14 @@ struct FWDModuleEntry: Codable {
     var params: [FWDParam] = []
 }
 
-struct FWDMeta: Codable {
+struct FWDMeta {
     var id: String = ""
     var title: String = ""
     var version: String = ""
     var author: String = ""
     var description: String = ""
     var site: String = ""
+    var icon: String = ""
     var modules: [FWDModuleEntry] = []
     var searchFunction: String?
     var searchParams: [FWDParam] = []
@@ -65,6 +66,32 @@ struct FWDMeta: Codable {
     }
     var resourceFunction: String? {
         modules.first { $0.id == "loadResource" || $0.type == "stream" }?.functionName
+    }
+}
+
+/// Hand-rolled Decodable so index files written before a field
+/// existed (e.g. `icon`, added in v1.59) still load instead of
+/// dropping every imported module.
+extension FWDMeta: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, version, author, description, site, icon
+        case modules, searchFunction, searchParams, globalParams, hasDetail
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        version = try c.decodeIfPresent(String.self, forKey: .version) ?? ""
+        author = try c.decodeIfPresent(String.self, forKey: .author) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        site = try c.decodeIfPresent(String.self, forKey: .site) ?? ""
+        icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        modules = try c.decodeIfPresent([FWDModuleEntry].self, forKey: .modules) ?? []
+        searchFunction = try c.decodeIfPresent(String.self, forKey: .searchFunction)
+        searchParams = try c.decodeIfPresent([FWDParam].self, forKey: .searchParams) ?? []
+        globalParams = try c.decodeIfPresent([FWDParam].self, forKey: .globalParams) ?? []
+        hasDetail = try c.decodeIfPresent(Bool.self, forKey: .hasDetail) ?? false
     }
 }
 
@@ -374,6 +401,9 @@ final class FWDRuntime {
         meta.author = str(raw, "author")
         meta.description = str(raw, "description")
         meta.site = str(raw, "site")
+        meta.icon = str(raw, "iconurl").isEmpty
+            ? (str(raw, "icon").isEmpty ? str(raw, "iconUrl") : str(raw, "icon"))
+            : str(raw, "iconurl")
         meta.hasDetail = hasDetail
         meta.globalParams = params(raw["globalParams"] as? [Any])
         meta.modules = (raw["modules"] as? [[String: Any]] ?? []).map { m in
@@ -444,6 +474,11 @@ final class FWDRuntime {
             FWDRuntime.httpResponse(method: method, urlString: url, body: body, optionsJSON: optionsJSON)
         }
         ctx.setObject(httpBlock, forKeyedSubscript: "__fwdHttp" as NSString)
+
+        let tmdbBlock: @convention(block) (String, String) -> String = { path, paramsJSON in
+            FWDRuntime.tmdbResponse(path: path, paramsJSON: paramsJSON)
+        }
+        ctx.setObject(tmdbBlock, forKeyedSubscript: "__fwdTmdbGet" as NSString)
 
         let widgetID = self.widgetID
         let storageGet: @convention(block) (String) -> JSValue? = { key in
@@ -519,6 +554,11 @@ final class FWDRuntime {
                         return httpReq('POST', url, b, options);
                     }
                 },
+                tmdb: {
+                    get: function(path, params) {
+                        return JSON.parse(__fwdTmdbGet(String(path), JSON.stringify(params || {})));
+                    }
+                },
                 html: {
                     load: function(html) { return cheerio.load(String(html == null ? '' : html)); }
                 },
@@ -565,6 +605,43 @@ final class FWDRuntime {
         var dict = (UserDefaults.standard.dictionary(forKey: store) as? [String: String]) ?? [:]
         if let value { dict[key] = value } else { dict.removeValue(forKey: key) }
         UserDefaults.standard.set(dict, forKey: store)
+    }
+
+    /// Widget.tmdb.get: TMDB API through the user's own key
+    /// (Settings → TMDB). Returns the raw JSON body, or a
+    /// TMDB-shaped error object when no key is configured.
+    private static func tmdbResponse(path: String, paramsJSON: String) -> String {
+        let key = (UserDefaults.standard.string(forKey: "tmdb.key") ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            return "{\"success\":false,\"status_code\":7,\"status_message\":\"未配置 TMDB 密钥（设置 → TMDB）\"}"
+        }
+        var params: [String: Any] = [:]
+        if let data = paramsJSON.data(using: .utf8),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            params = parsed
+        }
+        var comps = URLComponents()
+        comps.scheme = "https"
+        comps.host = "api.themoviedb.org"
+        comps.path = path.hasPrefix("/3/") ? path
+            : ("/3" + (path.hasPrefix("/") ? path : "/" + path))
+        var query: [URLQueryItem] = [URLQueryItem(name: "api_key", value: key),
+                                     URLQueryItem(name: "language", value: "zh-CN")]
+        for (k, v) in params where k != "api_key" && k != "language" {
+            query.append(URLQueryItem(name: k, value: String(describing: v)))
+        }
+        comps.queryItems = query
+        guard let url = comps.url else {
+            return "{\"success\":false,\"status_message\":\"TMDB 路径无效\"}"
+        }
+        let result = JSRuntime.syncFetch(urlString: url.absoluteString, obj: ["method": "GET"])
+        let content = (result["content"] as? String) ?? ""
+        if let data = content.data(using: .utf8),
+           (try? JSONSerialization.jsonObject(with: data)) != nil {
+            return content
+        }
+        return "{\"success\":false,\"status_message\":\"TMDB 无响应\"}"
     }
 
     /// One synchronous HTTP round trip shaped for Widget.http:
@@ -659,6 +736,27 @@ struct ModulesView: View {
                     .buttonStyle(.plain)
                     if importing { ProgressView().tint(Theme.text) }
                 }
+                Button {
+                    importing = true
+                    Task {
+                        defer { importing = false }
+                        var count = 0
+                        for url in ["https://assets.rexnow.tv/scripts/rex-tmdb.js",
+                                    "https://assets.rexnow.tv/scripts/bangumi.js"] {
+                            if (try? await FWDStore.importRemote(url)) != nil { count += 1 }
+                        }
+                        note = count > 0 ? "已导入 Rex 官方模块 \(count) 个"
+                                         : "Rex 官方模块导入失败，检查网络后重试"
+                        records = FWDStore.records()
+                    }
+                } label: {
+                    Label("导入 Rex 官方模块", systemImage: "star.square.on.square")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                }
+                .buttonStyle(.plain)
                 if let note {
                     Text(note).font(.footnote).foregroundStyle(Theme.textDim)
                 }
@@ -680,8 +778,14 @@ struct ModulesView: View {
                         FWDWidgetView(record: record)
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "puzzlepiece.extension")
-                                .foregroundStyle(Theme.accent)
+                            if !record.meta.icon.isEmpty {
+                                PosterImage(urlString: record.meta.icon)
+                                    .frame(width: 38, height: 38)
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                            } else {
+                                Image(systemName: "puzzlepiece.extension")
+                                    .foregroundStyle(Theme.accent)
+                            }
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(record.meta.title.isEmpty ? record.id : record.meta.title)
                                     .font(.subheadline.weight(.semibold))

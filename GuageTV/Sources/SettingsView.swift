@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.58 · 模块系统与发现优化"
+    static let buildLabel = "v1.59 · Rex模块与TMDB接口"
 
     var body: some View {
         NavigationStack {
