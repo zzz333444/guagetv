@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.60 · HLS去广告与语音搜索"
+    static let buildLabel = "v1.61 · 模块弹幕接入播放器"
 
     var body: some View {
         NavigationStack {

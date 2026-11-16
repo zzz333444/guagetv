@@ -699,6 +699,150 @@ final class FWDRuntime {
     }
 }
 
+// MARK: - Danmu modules (v1.61)
+
+/// Forward danmu modules, per the public ForwardWidgets spec
+/// (InchStudio/ForwardWidgets, "弹幕分片加载流程"):
+///   searchDanmu(params) → search matches ({animes:[{bangumiId…}]})
+///   getCommentsById(params) → the episode's danmu array
+///     (params carry commentId / animeId from the search hit,
+///     plus tmdbId / type / title / seriesName / episodeName /
+///     season / episode / link / videoUrl / segmentTime)
+///   getDanmuWithSegmentTime(params) → one time segment's danmu
+///     (segmentTime + the tmdbId-keyed cache getCommentsById fills)
+/// Accepted danmu shapes (all feed DanmakuStore.load, which also
+/// parses bilibili XML / JSON): [{p:"time,mode,size,color,…",
+/// m:"text"}] and [[time, mode, color, "", text]].
+enum FWDDanmu {
+    static func entries(for meta: FWDMeta) -> [FWDModuleEntry] {
+        meta.modules.filter {
+            $0.type == "danmu"
+            || $0.id == "searchDanmu" || $0.id == "getComments"
+            || $0.id == "getDanmuWithSegmentTime"
+        }
+    }
+
+    static func hasDanmu(_ meta: FWDMeta) -> Bool { !entries(for: meta).isEmpty }
+
+    /// Fetch one episode's danmaku from the SAME package's danmu
+    /// modules, following the spec flow. Returns raw JSON data
+    /// for DanmakuStore.load, or nil when the package has no
+    /// danmu modules / nothing matched.
+    static func fetch(record: FWDRecord, item: FWDItem, episodeIndex: Int) async -> Data? {
+        guard let source = FWDStore.source(for: record) else { return nil }
+        let meta = record.meta
+        let entries = entries(for: meta)
+        guard !entries.isEmpty else { return nil }
+        let runtime = FWDRuntime(widgetID: record.id)
+        let epNo = item.episode ?? (episodeIndex + 1)
+        var params: [String: Any] = [
+            "title": item.title,
+            "seriesName": item.title,
+            "episodeName": item.title,
+            "episode": epNo,
+            "type": item.mediaType.isEmpty
+                ? (item.episodeItems.isEmpty && item.childItems.isEmpty ? "movie" : "tv")
+                : item.mediaType,
+            "link": item.link,
+            "videoUrl": item.videoUrl,
+        ]
+        if item.type == "tmdb" { params["tmdbId"] = item.id }
+        if !item.releaseDate.isEmpty { params["airDate"] = item.releaseDate }
+        if !item.durationText.isEmpty { params["runtime"] = item.durationText }
+        for p in meta.globalParams where !p.value.isEmpty { params[p.name] = p.value }
+
+        func entry(id: String, fn: String) -> FWDModuleEntry? {
+            entries.first { $0.id == id } ?? entries.first { $0.functionName == fn }
+        }
+        // 1. searchDanmu: match the title to a danmu-side id.
+        // Some modules answer with danmu directly — take it.
+        var matchID: String?
+        if let search = entry(id: "searchDanmu", fn: "searchDanmu") {
+            if let result = try? await runtime.call(function: search.functionName,
+                                                    params: params, source: source) {
+                if let data = danmuData(from: result) { return data }
+                matchID = matchID(from: result)
+            }
+        }
+        // 2. getCommentsById: the episode's comments.
+        if let comments = entry(id: "getComments", fn: "getCommentsById") {
+            var p2 = params
+            if let matchID { p2["commentId"] = matchID; p2["animeId"] = matchID }
+            p2["segmentTime"] = 0
+            if let result = try? await runtime.call(function: comments.functionName,
+                                                    params: p2, source: source),
+               let data = danmuData(from: result) { return data }
+        }
+        // 3. Segment fetch (optional): reads the tmdbId-keyed
+        // cache getCommentsById fills; one probe at 0 is enough
+        // to tell whether the cache landed.
+        if let segment = entry(id: "getDanmuWithSegmentTime", fn: "getDanmuWithSegmentTime") {
+            var p3 = params
+            if let matchID { p3["commentId"] = matchID; p3["animeId"] = matchID }
+            p3["segmentTime"] = 0
+            if let result = try? await runtime.call(function: segment.functionName,
+                                                    params: p3, source: source),
+               let data = danmuData(from: result) { return data }
+        }
+        return nil
+    }
+
+    /// Serialize a danmu-shaped module result to JSON data, or
+    /// nil when it is a search match list / metadata instead.
+    private static func danmuData(from result: Any?) -> Data? {
+        if let text = result as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return Data(text.utf8)
+        }
+        if let array = result as? [[String: Any]], let first = array.first,
+           isDanmuDict(first) {
+            return try? JSONSerialization.data(withJSONObject: array)
+        }
+        if let array = result as? [[Any]], let first = array.first,
+           first.count >= 5, first[0] is NSNumber || first[0] is String {
+            return try? JSONSerialization.data(withJSONObject: array)
+        }
+        if let dict = result as? [String: Any] {
+            for key in ["comments", "danmu", "data", "danmuku"] {
+                if let nested = dict[key], let data = danmuData(from: nested) { return data }
+            }
+        }
+        return nil
+    }
+
+    private static func isDanmuDict(_ obj: [String: Any]) -> Bool {
+        if obj["p"] is String, obj["m"] is String { return true }
+        let hasTime = obj["time"] != nil || obj["t"] != nil
+        let hasText = obj["text"] is String || obj["content"] is String || obj["m"] is String
+        return hasTime && hasText
+    }
+
+    /// Pull the danmu-side id out of a searchDanmu result:
+    /// {animes:[{bangumiId…}]} / {data:[…]} / a bare array.
+    private static func matchID(from result: Any?) -> String? {
+        func id(of obj: [String: Any]) -> String? {
+            for key in ["bangumiId", "animeId", "commentId", "id"] {
+                if let s = obj[key] as? String, !s.isEmpty { return s }
+                if let n = obj[key] as? NSNumber { return n.stringValue }
+            }
+            return nil
+        }
+        if let array = result as? [[String: Any]], let first = array.first {
+            return id(of: first)
+        }
+        if let dict = result as? [String: Any] {
+            for key in ["animes", "data", "results", "list", "items"] {
+                if let array = dict[key] as? [[String: Any]], let first = array.first {
+                    return id(of: first)
+                }
+            }
+            return id(of: dict)
+        }
+        return nil
+    }
+}
+
 // MARK: - Modules home
 
 struct ModulesView: View {
@@ -810,7 +954,7 @@ struct ModulesView: View {
                         }
                     }
                 }
-                Text("支持 Forward 规范的 JS 模块（WidgetMetadata）。加密模块（FWENC1）暂不支持；弹幕类模块会在后续版本接入播放器。")
+                Text("支持 Forward 规范的 JS 模块（WidgetMetadata）。加密模块（FWENC1）暂不支持；同包的弹幕模块会在播放时自动匹配弹幕。")
                     .font(.caption2).foregroundStyle(Theme.textDim)
             }
             .padding(.horizontal, 18)
@@ -1129,6 +1273,11 @@ struct FWDDetailView: View {
         var index: Int
         var initial: (url: String, header: [String: String])?
         var resolver: PlayerView.Resolver?
+        /// v1.61: module danmaku for this title (same package's
+        /// danmu entries), fed to the player's danmaku layer per
+        /// episode; forced on when the package has danmu modules.
+        var danmakuLoader: ((Int) async -> Data?)?
+        var danmakuForced: Bool = false
         var id: String { episodes[index].url + "#\(index)" }
     }
 
@@ -1254,7 +1403,9 @@ struct FWDDetailView: View {
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
                        header: [:], title: full.title,
                        initialResolved: sel.initial,
-                       resolver: sel.resolver)
+                       resolver: sel.resolver,
+                       danmakuLoader: sel.danmakuLoader,
+                       danmakuForced: sel.danmakuForced)
         }
         .task { await enrich() }
     }
@@ -1332,7 +1483,11 @@ struct FWDDetailView: View {
         case .ok(let url, let header):
             playSelection = FWDPlaySelection(
                 episodes: [PlayerView.EpisodeRef(name: full.title, url: url)],
-                index: 0, initial: (url, header), resolver: nil)
+                index: 0, initial: (url, header), resolver: nil,
+                danmakuLoader: { _ in
+                    await FWDDanmu.fetch(record: record, item: full, episodeIndex: 0)
+                },
+                danmakuForced: FWDDanmu.hasDanmu(meta))
         case .failed(let reason):
             resolvingNote = reason
         }
@@ -1354,7 +1509,12 @@ struct FWDDetailView: View {
                 resolver: { _, i in
                     guard list.indices.contains(i) else { return .failed("集数越界") }
                     return await resolve(list[i])
-                })
+                },
+                danmakuLoader: { i in
+                    guard list.indices.contains(i) else { return nil }
+                    return await FWDDanmu.fetch(record: record, item: list[i], episodeIndex: i)
+                },
+                danmakuForced: FWDDanmu.hasDanmu(meta))
         case .failed(let reason):
             resolvingNote = reason
         }

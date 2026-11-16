@@ -68,6 +68,10 @@ final class DanmakuStore: ObservableObject {
     // JSON: [{"time":1.2,"text":"…","color":"#ffffff","mode":1}]
     // or the array-of-arrays shape some APIs return:
     // [[time, mode, colorInt, author, text], …]
+    // or Forward format 1: [{"p":"time,mode,size,color,…","m":"text"}]
+    // or Forward format 2: [[time, "0", "#fff", "", "text"], …]
+    // Numbers may arrive as strings (JS round trip); colors as
+    // "#fff" / "#ffffff" or ints.
     private static func parseJSON(_ text: String) -> [DanmakuItem] {
         guard let data = text.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) else { return [] }
@@ -77,35 +81,67 @@ final class DanmakuStore: ObservableObject {
             out.append(DanmakuItem(id: out.count, time: time, text: text,
                                    color: color, mode: mode))
         }
-        if let array = root as? [[String: Any]] {
-            for obj in array {
-                let time = (obj["time"] as? NSNumber)?.doubleValue
-                    ?? (obj["t"] as? NSNumber)?.doubleValue ?? -1
-                let body = obj["text"] as? String ?? obj["content"] as? String ?? ""
-                let mode = (obj["mode"] as? NSNumber)?.intValue ?? 1
-                var color = Color.white
-                if let hex = obj["color"] as? String {
-                    color = colorFromHex(hex) ?? .white
+        func addDict(_ obj: [String: Any]) {
+            // Forward format 1: p = "time,mode,size,color,…", m = text.
+            if let p = obj["p"] as? String, let body = obj["m"] as? String {
+                let fields = p.split(separator: ",")
+                if fields.count >= 4,
+                   let time = Double(fields[0]),
+                   let mode = Int(fields[1]),
+                   let colorInt = Int(fields[3]) {
+                    add(time: time, text: body, color: colorFromInt(colorInt), mode: mode)
                 }
-                add(time: time, text: body, color: color, mode: mode)
+                return
             }
+            guard let time = anyDouble(obj["time"] ?? obj["t"]) else { return }
+            let body = obj["text"] as? String ?? obj["content"] as? String
+                ?? obj["m"] as? String ?? ""
+            let mode = anyInt(obj["mode"]) ?? 1
+            var color = Color.white
+            if let hex = obj["color"] as? String {
+                color = colorFromHex(hex) ?? .white
+            } else if let n = obj["color"] as? NSNumber {
+                color = colorFromInt(n.intValue)
+            }
+            add(time: time, text: body, color: color, mode: mode)
+        }
+        if let array = root as? [[String: Any]] {
+            for obj in array { addDict(obj) }
         } else if let array = root as? [[Any]] {
             for row in array where row.count >= 5 {
-                let time = (row[0] as? NSNumber)?.doubleValue ?? -1
-                let mode = (row[1] as? NSNumber)?.intValue ?? 1
-                let colorInt = (row[2] as? NSNumber)?.intValue ?? 0xFFFFFF
+                guard let time = anyDouble(row[0]) else { continue }
+                // Forward format 2 position "0" = scrolling.
+                let mode = (anyInt(row[1]) ?? 1) == 0 ? 1 : (anyInt(row[1]) ?? 1)
                 let body = row[4] as? String ?? ""
-                add(time: time, text: body, color: colorFromInt(colorInt), mode: mode)
+                add(time: time, text: body, color: anyColor(row[2]), mode: mode)
             }
         } else if let obj = root as? [String: Any],
-                  let list = (obj["data"] as? [[String: Any]]) ?? (obj["danmuku"] as? [[String: Any]]) {
-            for entry in list {
-                let time = (entry["time"] as? NSNumber)?.doubleValue ?? -1
-                let body = entry["text"] as? String ?? ""
-                add(time: time, text: body, color: .white, mode: 1)
-            }
+                  let list = (obj["data"] as? [[String: Any]])
+                    ?? (obj["danmuku"] as? [[String: Any]])
+                    ?? (obj["danmu"] as? [[String: Any]])
+                    ?? (obj["comments"] as? [[String: Any]]) {
+            for entry in list { addDict(entry) }
         }
         return out
+    }
+
+    /// NSNumber or a numeric string (JS values round-trip either way).
+    private static func anyDouble(_ v: Any?) -> Double? {
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let s = v as? String { return Double(s) }
+        return nil
+    }
+
+    private static func anyInt(_ v: Any?) -> Int? {
+        if let n = v as? NSNumber { return n.intValue }
+        if let s = v as? String { return Int(s) }
+        return nil
+    }
+
+    private static func anyColor(_ v: Any?) -> Color {
+        if let n = v as? NSNumber { return colorFromInt(n.intValue) }
+        if let s = v as? String, let c = colorFromHex(s) { return c }
+        return .white
     }
 
     static func colorFromInt(_ value: Int) -> Color {
@@ -117,7 +153,9 @@ final class DanmakuStore: ObservableObject {
     static func colorFromHex(_ hex: String) -> Color? {
         var s = hex.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }
-        guard let value = Int(s, radix: 16) else { return nil }
+        // 3-digit shorthand ("#fff" → "ffffff").
+        if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
+        guard s.count == 6, let value = Int(s, radix: 16) else { return nil }
         return colorFromInt(value)
     }
 }

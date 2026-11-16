@@ -51,6 +51,23 @@ struct PlayerView: View {
     /// (line, episode, resolvedURL, header) — DetailView refreshes
     /// the history entry when playback moves to another episode.
     let onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)?
+    /// Module danmaku (v1.61): when set, each episode's comments
+    /// come from this loader (Forward danmu modules of the same
+    /// package) instead of the API template. danmakuForced shows
+    /// them even when the global "弹幕" switch is off; turning the
+    /// in-player toggle off clears it for this session.
+    let danmakuLoader: ((Int) async -> Data?)?
+    @State private var danmakuForced: Bool = false
+    /// Toggle binding for the in-player settings sheet: on =
+    /// global switch or this session's forced module danmaku;
+    /// off clears both.
+    private var danmakuToggle: Binding<Bool> {
+        Binding(get: { danmakuEnabled || danmakuForced },
+                set: { value in
+                    danmakuEnabled = value
+                    if !value { danmakuForced = false }
+                })
+    }
     @State private var activeLine: Int
     @State private var resolved: [Int: (url: String, header: [String: String])]
     @State private var resolvingEpisode = false
@@ -128,6 +145,8 @@ struct PlayerView: View {
         self.lineEpisodes = []
         self.episodeResolver = nil
         self.onEpisodeChange = nil
+        self.danmakuLoader = nil
+        _danmakuForced = State(initialValue: false)
         self.initialLine = 0
         self.initialIndex = 0
         _activeLine = State(initialValue: 0)
@@ -141,6 +160,8 @@ struct PlayerView: View {
          initialResolved: (url: String, header: [String: String])? = nil,
          resolver: Resolver? = nil,
          onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)? = nil,
+         danmakuLoader: ((Int) async -> Data?)? = nil,
+         danmakuForced: Bool = false,
          isLive: Bool = false) {
         let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
         _episodes = State(initialValue: episodes)
@@ -154,6 +175,8 @@ struct PlayerView: View {
         self.lineEpisodes = lineEpisodes
         self.episodeResolver = resolver
         self.onEpisodeChange = onEpisodeChange
+        self.danmakuLoader = danmakuLoader
+        _danmakuForced = State(initialValue: danmakuForced)
         self.initialLine = lineIndex
         self.initialIndex = start
         _activeLine = State(initialValue: lineIndex)
@@ -264,7 +287,7 @@ struct PlayerView: View {
                 } else if hudVisible {
                     hud
                 }
-                if danmakuEnabled, !danmakuStore.items.isEmpty {
+                if danmakuEnabled || danmakuForced, !danmakuStore.items.isEmpty {
                     DanmakuView(store: danmakuStore, mpv: mpv, native: native, isMPV: isMPV)
                         .allowsHitTesting(false)
                 }
@@ -1216,8 +1239,8 @@ struct PlayerView: View {
                     }
                 }
                 Section("弹幕") {
-                    Toggle("弹幕", isOn: $danmakuEnabled)
-                    if danmakuEnabled {
+                    Toggle("弹幕", isOn: danmakuToggle)
+                    if danmakuEnabled || danmakuForced {
                         Button {
                             showPlayerSettings = false
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showDanmakuPicker = true }
@@ -1231,6 +1254,10 @@ struct PlayerView: View {
                             } label: {
                                 Label("清除弹幕（当前 \(danmakuStore.items.count) 条）", systemImage: "trash")
                             }
+                        }
+                        if danmakuLoader != nil {
+                            Text("模块弹幕已接通：同包弹幕模块自动匹配，关掉上方开关可隐藏。")
+                                .font(.caption).foregroundStyle(Theme.textDim)
                         }
                         Text(danmakuAPITemplate.isEmpty
                              ? "在线弹幕：在「设置 → 播放」里填弹幕接口模板（含 {title} 和 {ep} 占位符）后自动匹配。"
@@ -1526,11 +1553,33 @@ struct PlayerView: View {
         }
     }
 
-    /// Auto-fetch danmaku for the current episode when the user
-    /// configured an API template ({title} / {ep} placeholders,
-    /// bilibili-style XML or JSON array responses both parse).
+    /// Auto-fetch danmaku for the current episode. A module
+    /// danmaku loader (v1.61, Forward danmu modules) wins when it
+    /// returns data; otherwise fall back to the user's API
+    /// template ({title} / {ep} placeholders, bilibili-style XML
+    /// or JSON array responses both parse).
     private func loadDanmakuForCurrentEpisode() {
-        guard danmakuEnabled, !danmakuAPITemplate.isEmpty else {
+        guard danmakuEnabled || danmakuForced else {
+            danmakuStore.clear()
+            return
+        }
+        if let loader = danmakuLoader {
+            let idx = index
+            let store = danmakuStore
+            Task {
+                if let data = await loader(idx), !data.isEmpty {
+                    await MainActor.run { store.load(data: data) }
+                } else {
+                    loadDanmakuFromTemplate()
+                }
+            }
+            return
+        }
+        loadDanmakuFromTemplate()
+    }
+
+    private func loadDanmakuFromTemplate() {
+        guard !danmakuAPITemplate.isEmpty else {
             danmakuStore.clear()
             return
         }
