@@ -85,6 +85,12 @@ struct TVBoxConfig: Decodable {
         var groups: String?
         var channels: [Channel]?
 
+        /// Stable list identity: live names repeat across sources,
+        /// so name alone is not a ForEach id (duplicate ids collapse
+        /// rows and mis-route taps). Name + URL distinguishes rows
+        /// from different sources carrying the same name.
+        var liveID: String { name + "#" + url }
+
         struct Channel: Decodable {
             var name: String
             var urls: [String]

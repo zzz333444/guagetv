@@ -15,7 +15,12 @@ struct LibraryView: View {
     @State private var kindSummary: [String: String] = [:]
     /// Line cards precomputed at refresh time: the grid renders
     /// these models only and never re-derives card content in body.
-    @State private var cardSections: [(title: String, models: [LineCardModel])] = []
+    /// Sections carry a stable id (group UUID / "loose"): the
+    /// section TITLE is not an identity — it flips between
+    /// "我的线路" and "未分组" as groups appear, and two groups may
+    /// share a name, so keying ForEach on title collapsed or
+    /// rebuilt whole sections on rename/group changes.
+    @State private var cardSections: [(id: String, title: String, models: [LineCardModel])] = []
     /// The automatic Python-file group, collapsed into ONE entry
     /// card (v1.58, user request): tapping it opens a picker page
     /// listing the py sites instead of one card per file.
@@ -80,7 +85,7 @@ struct LibraryView: View {
                     .buttonStyle(.plain)
                 }
 
-                ForEach(cardSections, id: \.title) { section in
+                ForEach(cardSections, id: \.id) { section in
                     Text(section.title).font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(section.models) { model in
@@ -141,7 +146,9 @@ struct LibraryView: View {
                 if let lives = config?.lives, !lives.isEmpty {
                     Text("直播源").font(.headline).foregroundStyle(Theme.section)
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(lives, id: \.name) { live in
+                        // Live names repeat across sources, so the
+                        // row id is name + URL, not name alone.
+                        ForEach(lives, id: \.liveID) { live in
                             NavigationLink {
                                 LiveView(live: live)
                             } label: {
@@ -299,10 +306,10 @@ struct LibraryView: View {
                                  roleText: role,
                                  kindText: kindSummary[entry.id] ?? "\(entry.siteCount) 个站点")
         }
-        var sections: [(title: String, models: [LineCardModel])] = []
+        var sections: [(id: String, title: String, models: [LineCardModel])] = []
         for group in groups {
             let items = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == group.id }
-            if !items.isEmpty { sections.append((group.name, items.map(model))) }
+            if !items.isEmpty { sections.append((group.id, group.name, items.map(model))) }
         }
         // Python files no longer render as a card grid: they
         // collapse into the single group entry above the sections.
@@ -311,9 +318,42 @@ struct LibraryView: View {
         }
         let loose = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == nil }
         if !loose.isEmpty {
-            sections.append((sections.isEmpty && pyGroupEntries.isEmpty ? "我的线路" : "未分组", loose.map(model)))
+            sections.append(("loose", sections.isEmpty && pyGroupEntries.isEmpty ? "我的线路" : "未分组", loose.map(model)))
         }
         cardSections = sections
+        prefetchEmbyPosters()
+    }
+
+    /// F1: the library page itself shows no posters, but its
+    /// MediaHubSection leads straight into Emby home, whose
+    /// 继续观看 / 我的收藏 / 最近加入 rows are all poster grids.
+    /// Warm those posters while the user is still on this page, so
+    /// Emby home opens with art already in PosterCache instead of
+    /// flashing in row by row. Throttled to once per 10 minutes and
+    /// fully silent on failure — a prefetch must never surface an
+    /// error or block the library. Line cards and source cards have
+    /// no poster URL (icon letter only), so there is nothing else
+    /// on this page to warm.
+    private static let embyPrefetchTimestampKey = "libraryEmbyPrefetch.ts"
+
+    private func prefetchEmbyPosters() {
+        guard EmbyClient.configured else { return }
+        let last = UserDefaults.standard.double(forKey: Self.embyPrefetchTimestampKey)
+        guard Date().timeIntervalSince1970 - last > 600 else { return }
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: Self.embyPrefetchTimestampKey)
+        Task.detached(priority: .utility) {
+            let resume = (try? await EmbyClient.resume()) ?? []
+            let favorites = (try? await EmbyClient.favorites()) ?? []
+            let latest = (try? await EmbyClient.latest()) ?? []
+            let urls = Array(Set(
+                (Array(resume.prefix(5)) + Array(favorites.prefix(5)) + Array(latest.prefix(5)))
+                    .map { EmbyClient.imageURL(itemID: $0.id) }
+            )).prefix(14)
+            for url in urls {
+                _ = await PosterCache.shared.load(url)
+            }
+        }
     }
 
     /// Card tap (from LineCardView): single-file lines (py / JS
