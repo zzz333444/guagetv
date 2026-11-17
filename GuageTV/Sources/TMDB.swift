@@ -42,7 +42,7 @@ enum TMDBClient {
             return CastMember(
                 id: pid, name: name,
                 character: (person["character"] as? String) ?? "",
-                profile: path.isEmpty ? "" : "https://image.tmdb.org/t/p/w185" + path)
+                profile: imageURL(path, size: "w185"))
         }
     }
 
@@ -62,6 +62,23 @@ enum TMDBClient {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return raw.isEmpty ? "https://api.themoviedb.org" : raw
+    }
+
+    /// Image host matching the configured API base (v1.75):
+    /// an official base keeps image.tmdb.org; a custom base
+    /// ending in /tmdb (the user's JarProxy forward) maps to its
+    /// sibling /tmdbimg forward, so posters work on the same
+    /// no-ladder route as the data.
+    static var imageBase: String {
+        let b = base
+        if b.hasSuffix("/tmdb") {
+            return String(b.dropLast(5)) + "/tmdbimg/t/p"
+        }
+        return "https://image.tmdb.org/t/p"
+    }
+
+    static func imageURL(_ path: String, size: String) -> String {
+        path.isEmpty ? "" : "\(imageBase)/\(size)" + path
     }
 
     private static var apiKey: String {
@@ -104,7 +121,7 @@ enum TMDBClient {
         let backdropPath = picked["backdrop_path"] as? String ?? ""
         let vote = picked["vote_average"] as? Double ?? 0
         let info = Info(
-            backdrop: backdropPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w780" + backdropPath,
+            backdrop: imageURL(backdropPath, size: "w780"),
             overview: picked["overview"] as? String ?? "",
             score: vote > 0 ? String(format: "%.1f", vote) : "",
             tmdbID: (picked["id"] as? NSNumber)?.intValue ?? 0,
@@ -173,8 +190,8 @@ enum TMDBClient {
                 .compactMap { ($0 as? NSNumber)?.intValue }
             return TMDBTitle(
                 id: tmdbID, mediaType: type, title: title,
-                poster: posterPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w500" + posterPath,
-                backdrop: backdropPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w780" + backdropPath,
+                poster: imageURL(posterPath, size: "w500"),
+                backdrop: imageURL(backdropPath, size: "w780"),
                 score: vote > 0 ? String(format: "%.1f", vote) : "",
                 year: String(date.prefix(4)),
                 overview: r["overview"] as? String ?? "",
@@ -224,7 +241,7 @@ enum TMDBClient {
                 ?? logos.first { ($0["iso_639_1"] as? String) == "en" }
                 ?? logos[0]
             if let path = picked["file_path"] as? String, !path.isEmpty {
-                found = "https://image.tmdb.org/t/p/w500" + path
+                found = imageURL(path, size: "w500")
             }
         }
         logoLock.lock()

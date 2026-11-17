@@ -90,6 +90,8 @@ struct PlayerView: View {
     @State private var showChrome = true
     @State private var chromeGeneration = 0
     @State private var showEpisodes = false
+    @State private var episodeSegment = 0
+    @State private var episodeReversed = false
     @State private var showPlayerSettings = false
     @State private var showDLNA = false
     /// Screen brightness captured when the player's own
@@ -1045,23 +1047,63 @@ struct PlayerView: View {
         return String(format: "%.1f MB/s", kb / 1024)
     }
 
+    /// Episode picker, Rex-aligned (v1.75): glass sheet with
+    /// 30-per-segment tabs, a 正序/倒序 switch and episode tiles —
+    /// the playing one filled white like the reference's selected
+    /// card border. (Line episodes carry no stills, so the cards
+    /// are text tiles rather than 16:9 thumbnails.)
     private var episodeSheet: some View {
-        NavigationStack {
-            List {
-                ForEach(episodes.indices, id: \.self) { i in
-                    Button {
-                        showEpisodes = false
-                        goToEpisode(i)
-                    } label: {
-                        HStack {
-                            Text(guageEpisodeDisplayName(episodes[i].name, index: i))
+        let display = episodeReversed ? Array(episodes.indices.reversed())
+                                      : Array(episodes.indices)
+        let segCount = max(1, (display.count + 29) / 30)
+        let seg = min(episodeSegment, segCount - 1)
+        let visible = Array(display.dropFirst(seg * 30).prefix(30))
+        return NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 8) {
+                        if segCount > 1 {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(0..<segCount, id: \.self) { s in
+                                        Text("\(s * 30 + 1)–\(min((s + 1) * 30, episodes.count))")
+                                            .font(.caption.weight(s == seg ? .semibold : .regular))
+                                            .padding(.horizontal, 11).padding(.vertical, 6)
+                                            .background(s == seg ? Color.white : Theme.glass, in: Capsule())
+                                            .foregroundStyle(s == seg ? .black : Theme.text.opacity(0.85))
+                                            .onTapGesture {
+                                                episodeSegment = s
+                                                Haptics.selection()
+                                            }
+                                    }
+                                }
+                            }
+                        }
+                        Spacer()
+                        Button {
+                            episodeReversed.toggle()
+                            episodeSegment = 0
+                            Haptics.selection()
+                        } label: {
+                            Label(episodeReversed ? "倒序" : "正序",
+                                  systemImage: "arrow.up.arrow.down")
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.text)
-                            Spacer()
-                            if i == index { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
+                                .padding(.horizontal, 11).padding(.vertical, 6)
+                                .background(Theme.glass, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                              spacing: 10) {
+                        ForEach(visible, id: \.self) { i in
+                            episodeTile(i)
                         }
                     }
                 }
+                .padding(16)
             }
+            .background(AmbientBackground(imageURL: nil))
             .navigationTitle("选集")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1069,9 +1111,39 @@ struct PlayerView: View {
                     Button("关闭") { showEpisodes = false }
                 }
             }
+            .onAppear { episodeSegment = index / 30 }
         }
         .presentationDetents([.medium, .large])
         .preferredColorScheme(.dark)
+    }
+
+    private func episodeTile(_ i: Int) -> some View {
+        let current = i == index
+        let displayName = guageEpisodeDisplayName(episodes[i].name, index: i)
+        return Button {
+            showEpisodes = false
+            goToEpisode(i)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(current ? Color.black : Theme.text)
+                    .lineLimit(1)
+                if episodes[i].name != displayName {
+                    Text(episodes[i].name)
+                        .font(.caption2)
+                        .foregroundStyle(current ? Color.black.opacity(0.6) : Theme.textDim)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(current ? Color.white : Theme.glass,
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(current ? Color.white : Theme.glassStroke, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     /// One track picker section （音轨 / 字幕）: hidden entirely

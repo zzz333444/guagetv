@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.74 · 发现页 Rex 化与模块修复"
+    static let buildLabel = "v1.75 · 模块导入修复与 TMDB 转发"
 
     var body: some View {
         NavigationStack {
@@ -670,7 +670,20 @@ struct TMDBSettingsView: View {
                             Text(tmdbTestNote).font(.footnote).foregroundStyle(Theme.textDim)
                         }
                     }
-                    Text("开启后，首页大图会用 TMDB 的高清剧照、剧情简介和 TMDB 评分来增强（按片名+年份匹配，结果缓存在本机）。密钥只保存在本机。")
+                    Button {
+                        Haptics.tap()
+                        tmdbBase = "https://jarproxy.onrender.com/tmdb"
+                        tmdbEnabled = true
+                        Task { tmdbTestNote = await TMDBClient.testConnection() }
+                    } label: {
+                        Label("一键用 JarProxy 转发（免梯子）", systemImage: "arrow.triangle.swap")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Theme.glass, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    Text("开启后，首页大图会用 TMDB 的高清剧照、剧情简介和 TMDB 评分来增强（按片名+年份匹配，结果缓存在本机）。密钥只保存在本机。地址填 JarProxy 转发（…/tmdb）时，海报图片自动走同一台服务器的 /tmdbimg 转发，数据和图片都不用梯子。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }

@@ -1,6 +1,5 @@
 import SwiftUI
 import JavaScriptCore
-import UniformTypeIdentifiers
 
 /// Forward-format JS modules (v1.58) — the module system the user
 /// asked to enable. A module is ONE JavaScript file following the
@@ -24,12 +23,36 @@ import UniformTypeIdentifiers
 
 // MARK: - Metadata model
 
-struct FWDParam: Codable {
+struct FWDParam {
     var name: String
     var title: String = ""
     var type: String = "input"
     var value: String = ""
     var enumOptions: [FWDOption] = []
+    var desc: String = ""
+    /// Suggested values for input params (Forward spec
+    /// `placeholders: [{title, value}]`) — e.g. rex-tmdb's 片单
+    /// column carries a preset TMDB list URL here. v1.75.
+    var placeholders: [FWDOption] = []
+}
+
+/// Custom Decodable (same pattern as FWDMeta): fields added after
+/// an index file was written must not drop every stored module.
+extension FWDParam: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case name, title, type, value, enumOptions, desc, placeholders
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "input"
+        value = try c.decodeIfPresent(String.self, forKey: .value) ?? ""
+        enumOptions = try c.decodeIfPresent([FWDOption].self, forKey: .enumOptions) ?? []
+        desc = try c.decodeIfPresent(String.self, forKey: .desc) ?? ""
+        placeholders = try c.decodeIfPresent([FWDOption].self, forKey: .placeholders) ?? []
+    }
 }
 
 struct FWDOption: Codable {
@@ -147,9 +170,9 @@ struct FWDItem: Identifiable {
         // TMDB items carry raw image paths; expand them here so
         // every display slot downstream sees absolute URLs.
         if type == "tmdb" {
-            if poster.hasPrefix("/") { poster = "https://image.tmdb.org/t/p/w500" + poster }
-            if backdrop.hasPrefix("/") { backdrop = "https://image.tmdb.org/t/p/w780" + backdrop }
-            if cover.hasPrefix("/") { cover = "https://image.tmdb.org/t/p/w500" + cover }
+            if poster.hasPrefix("/") { poster = TMDBClient.imageURL(poster, size: "w500") }
+            if backdrop.hasPrefix("/") { backdrop = TMDBClient.imageURL(backdrop, size: "w780") }
+            if cover.hasPrefix("/") { cover = TMDBClient.imageURL(cover, size: "w500") }
         }
         releaseDate = str("releaseDate")
         rating = str("rating")
@@ -292,6 +315,52 @@ enum FWDStore {
         }
         return imported
     }
+
+    /// Local-file counterpart of importRemote: the picked file is
+    /// either a module .js (imported directly) or a .fwd / text
+    /// subscription (its links are fetched and imported).
+    static func importFileText(_ text: String, origin: String) async throws -> Int {
+        if text.contains("WidgetMetadata") || text.hasPrefix("FWENC1") {
+            _ = try importModule(source: text, origin: origin)
+            return 1
+        }
+        var links: [String] = []
+        if let data = text.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["widgets", "modules", "urls", "list"] {
+                if let arr = json[key] as? [Any] {
+                    for entry in arr {
+                        if let s = entry as? String { links.append(s) }
+                        if let o = entry as? [String: Any] {
+                            for k in ["url", "link", "src"] {
+                                if let s = o[k] as? String { links.append(s); break }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if links.isEmpty {
+            links = text.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { $0.hasPrefix("http") }
+        }
+        guard !links.isEmpty else {
+            throw StoreFailure(message: "文件里没找到模块或订阅链接")
+        }
+        var imported = 0
+        for link in links {
+            guard let u = URL(string: link),
+                  let (d, _) = try? await URLSession.shared.data(from: u),
+                  let js = String(data: d, encoding: .utf8),
+                  (try? importModule(source: js, origin: link)) != nil else { continue }
+            imported += 1
+        }
+        guard imported > 0 else {
+            throw StoreFailure(message: "订阅里的模块都没导入成功")
+        }
+        return imported
+    }
 }
 
 // MARK: - Runtime
@@ -390,12 +459,18 @@ final class FWDRuntime {
         }
         func params(_ list: [Any]?) -> [FWDParam] {
             (list as? [[String: Any]] ?? []).map { p in
-                FWDParam(name: str(p, "name"), title: str(p, "title"),
-                         type: str(p, "type").isEmpty ? "input" : str(p, "type"),
-                         value: str(p, "value"),
-                         enumOptions: (p["enumOptions"] as? [[String: Any]] ?? []).map {
-                             FWDOption(title: str($0, "title"), value: str($0, "value"))
-                         })
+                var desc = str(p, "description")
+                if desc.isEmpty { desc = str(p, "placeholder") }
+                return FWDParam(name: str(p, "name"), title: str(p, "title"),
+                                type: str(p, "type").isEmpty ? "input" : str(p, "type"),
+                                value: str(p, "value"),
+                                enumOptions: (p["enumOptions"] as? [[String: Any]] ?? []).map {
+                                    FWDOption(title: str($0, "title"), value: str($0, "value"))
+                                },
+                                desc: desc,
+                                placeholders: (p["placeholders"] as? [[String: Any]] ?? []).map {
+                                    FWDOption(title: str($0, "title"), value: str($0, "value"))
+                                })
             }
         }
         var meta = FWDMeta()
@@ -659,11 +734,18 @@ final class FWDRuntime {
         if let inner = params["params"] as? [String: Any] {
             params = inner
         }
-        var comps = URLComponents()
-        comps.scheme = "https"
-        comps.host = "api.themoviedb.org"
-        comps.path = path.hasPrefix("/3/") ? path
+        // Honor the user's configured API base (Settings → TMDB)
+        // so module TMDB calls take the same route as the app —
+        // official host or the JarProxy forward (v1.75).
+        let baseRaw = (UserDefaults.standard.string(forKey: "tmdb.base") ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let apiBase = baseRaw.isEmpty ? "https://api.themoviedb.org" : baseRaw
+        let fullPath = path.hasPrefix("/3/") ? path
             : ("/3" + (path.hasPrefix("/") ? path : "/" + path))
+        guard var comps = URLComponents(string: apiBase + fullPath) else {
+            return "{\"success\":false,\"status_message\":\"TMDB 地址无效\"}"
+        }
         var query: [URLQueryItem] = [URLQueryItem(name: "api_key", value: key),
                                      URLQueryItem(name: "language", value: "zh-CN")]
         for (k, v) in params where k != "api_key" && k != "language" {
@@ -998,26 +1080,42 @@ struct ModulesView: View {
         .navigationTitle("模块")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { records = FWDStore.records() }
-        .fileImporter(isPresented: $showFileImporter,
-                      allowedContentTypes: [.javaScript, .plainText, .data]) { result in
-            guard case .success(let url) = result else { return }
-            importing = true
-            Task {
-                defer { importing = false }
-                do {
-                    let accessed = url.startAccessingSecurityScopedResource()
-                    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                    let data = try Data(contentsOf: url)
-                    guard let text = String(data: data, encoding: .utf8) else {
-                        throw FWDStore.StoreFailure(message: "文件无法读取")
+        // v1.75: SwiftUI's fileImporter silently never presented
+        // on device for this page (reported: tapping 导入文件 did
+        // nothing). Use the app's proven DocumentPicker sheet —
+        // the same one config / py / js imports use — with
+        // multi-select, importing modules and .fwd files alike.
+        .sheet(isPresented: $showFileImporter) {
+            DocumentPicker(
+                onPick: { urls in
+                    importing = true
+                    Task {
+                        defer { importing = false }
+                        var okCount = 0
+                        var failures: [String] = []
+                        for url in urls {
+                            do {
+                                let data = try Data(contentsOf: url)
+                                guard let text = String(data: data, encoding: .utf8) else {
+                                    throw FWDStore.StoreFailure(message: "文件无法读取")
+                                }
+                                okCount += try await FWDStore.importFileText(
+                                    text, origin: url.lastPathComponent)
+                            } catch {
+                                failures.append("\(url.lastPathComponent)：\(error.localizedDescription)")
+                            }
+                        }
+                        records = FWDStore.records()
+                        var parts: [String] = []
+                        if okCount > 0 { parts.append("已导入 \(okCount) 个模块") }
+                        if !failures.isEmpty { parts.append("失败：" + failures.joined(separator: "；")) }
+                        note = parts.joined(separator: " · ")
+                        if okCount > 0 { Haptics.success() }
+                        else if !failures.isEmpty { Haptics.error() }
                     }
-                    let record = try FWDStore.importModule(source: text, origin: url.lastPathComponent)
-                    note = "已导入「\(record.meta.title.isEmpty ? record.id : record.meta.title)」"
-                    records = FWDStore.records()
-                } catch {
-                    note = "导入失败：\(error.localizedDescription)"
-                }
-            }
+                },
+                onCancel: { })
+                .ignoresSafeArea()
         }
         .alert("导入链接", isPresented: $showURLImporter) {
             TextField("模块 .js 或 .fwd 订阅链接", text: $importURL)
@@ -1141,6 +1239,10 @@ struct FWDWidgetView: View {
                             Task { await load(reset: true) }
                         }
                     }
+                    ForEach(module.params.filter { $0.type == "input" },
+                            id: \.name) { param in
+                        inputRow(param)
+                    }
                 }
                 if items.isEmpty {
                     EmptyStateView(icon: "square.stack.3d.up.slash",
@@ -1173,6 +1275,50 @@ struct FWDWidgetView: View {
             .padding(.horizontal, 18)
             .padding(.top, 12)
             .padding(.bottom, 110)
+        }
+    }
+
+    /// One input-param row (v1.75): a text field whose return key
+    /// (or the 加载 button) reloads with the typed value, plus the
+    /// metadata's placeholder suggestions as tappable chips.
+    @ViewBuilder
+    private func inputRow(_ param: FWDParam) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                TextField(param.desc.isEmpty
+                            ? (param.title.isEmpty ? param.name : param.title)
+                            : param.desc,
+                          text: Binding(
+                            get: { selections[param.name] ?? param.value },
+                            set: { selections[param.name] = $0 }))
+                    .font(.subheadline)
+                    .padding(10)
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onSubmit {
+                        page = 1
+                        Task { await load(reset: true) }
+                    }
+                Button("加载") {
+                    Haptics.tap()
+                    page = 1
+                    Task { await load(reset: true) }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+            }
+            if !param.placeholders.isEmpty {
+                chipRow(param.placeholders.map(\.title),
+                        selected: param.placeholders.firstIndex {
+                            $0.value == (selections[param.name]
+                                ?? param.placeholders.first?.value ?? "")
+                        } ?? 0) { idx in
+                    selections[param.name] = param.placeholders[idx].value
+                    page = 1
+                    Task { await load(reset: true) }
+                }
+            }
         }
     }
 
@@ -1256,6 +1402,14 @@ struct FWDWidgetView: View {
                 let fallback = p.value.isEmpty
                     ? (p.enumOptions.first?.value ?? "") : p.value
                 params[p.name] = selections[p.name] ?? fallback
+            } else if p.type == "input" {
+                // Input params must always reach the handler —
+                // rex-tmdb's 片单 does params.url.includes(...) and
+                // dies on undefined. Fall back to the first
+                // placeholder suggestion when nothing was typed,
+                // so the column opens with content (v1.75).
+                params[p.name] = selections[p.name] ?? (p.value.isEmpty
+                    ? (p.placeholders.first?.value ?? "") : p.value)
             } else if !p.value.isEmpty {
                 params[p.name] = selections[p.name] ?? p.value
             }
