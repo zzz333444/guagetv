@@ -207,9 +207,10 @@ extension FWDItem: Hashable {
 // MARK: - Store
 
 enum FWDStore {
-    struct StoreFailure: Error, CustomStringConvertible {
+    struct StoreFailure: Error, CustomStringConvertible, LocalizedError {
         let message: String
         var description: String { message }
+        var errorDescription: String? { message }
     }
 
     static var dir: URL {
@@ -366,9 +367,14 @@ enum FWDStore {
 // MARK: - Runtime
 
 final class FWDRuntime {
-    struct FWDfailure: Error, CustomStringConvertible {
+    struct FWDfailure: Error, CustomStringConvertible, LocalizedError {
         let message: String
         var description: String { message }
+        // Without LocalizedError, localizedDescription degrades
+        // to "(GuageTV.FWDRuntime.FWDfailure error 1.)" and the
+        // real cause never reaches the screen (device report,
+        // v1.76): the message IS the diagnosis, surface it.
+        var errorDescription: String? { message }
     }
 
     private let queue = DispatchQueue(label: "guage.fwd")
@@ -539,7 +545,10 @@ final class FWDRuntime {
         // evaluations (microtask checkpoint at unwind) and run-loop
         // turns (the VM's job queue is also serviced there), plus
         // the prelude's timer drain for modules using setTimeout.
-        let deadline = Date().addingTimeInterval(30)
+        // 60 s since v1.77: drive-aggregation modules fan out to
+        // many sources with sequential fetches and legitimately
+        // need more room than catalogue modules do.
+        let deadline = Date().addingTimeInterval(60)
         while !settled && Date() < deadline {
             ctx.evaluateScript("0")
             ctx.evaluateScript("if (typeof __drainTimers === 'function') { __drainTimers(); }")
@@ -561,7 +570,7 @@ final class FWDRuntime {
             })
             """)?.toString() ?? "?"
             let extra = lastException.map { "；最近异常：\($0)" } ?? ""
-            throw FWDfailure(message: "模块调用超时（30 秒）[\(probe)]\(extra)")
+            throw FWDfailure(message: "模块调用超时（60 秒）[\(probe)]\(extra)")
         }
         if jsonText == "null" { return nil }
         return try JSONSerialization.jsonObject(with: data)
@@ -1118,6 +1127,14 @@ struct ModulesView: View {
         .navigationTitle("模块")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { records = FWDStore.records() }
+        // The import Task's records assignment can be swallowed
+        // when the picker sheet tears down (device report: the
+        // module only appeared after an app restart). Reload from
+        // the live view tree whenever the picker closes — this
+        // hook always fires.
+        .onChange(of: showFileImporter) { _, presented in
+            if !presented { records = FWDStore.records() }
+        }
         // v1.75: SwiftUI's fileImporter silently never presented
         // on device for this page (reported: tapping 导入文件 did
         // nothing). Use the app's proven DocumentPicker sheet —

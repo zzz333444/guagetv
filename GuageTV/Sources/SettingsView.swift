@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.76 · 详情页 Rex 化收尾"
+    static let buildLabel = "v1.77 · 模块报错可读与猫源网盘"
 
     var body: some View {
         NavigationStack {
@@ -599,6 +599,16 @@ struct DriveSettingsView: View {
     @AppStorage("drive.baidu") private var driveBaidu = ""
     @AppStorage("drive.bili_cookie") private var driveBiliCookie = ""
     @AppStorage("drive.xunlei") private var driveXunlei = ""
+    // 猫源 (CatPawOpen) drive credentials: a separate set so cat
+    // lines can use different accounts; empty fields fall back
+    // to the shared set above at injection time (v1.77).
+    @AppStorage("drive.cat.quark_cookie") private var catQuarkCookie = ""
+    @AppStorage("drive.cat.uc_cookie") private var catUcCookie = ""
+    @AppStorage("drive.cat.uc_token") private var catUcToken = ""
+    @AppStorage("drive.cat.aliyun") private var catAliyun = ""
+    @AppStorage("drive.cat.baidu") private var catBaidu = ""
+    @AppStorage("drive.cat.bili_cookie") private var catBiliCookie = ""
+    @AppStorage("drive.cat.xunlei") private var catXunlei = ""
 
     var body: some View {
         SettingsPage(title: "网盘配置") {
@@ -616,6 +626,32 @@ struct DriveSettingsView: View {
                     Button("清空全部网盘配置", role: .destructive) {
                         driveQuarkCookie = ""; driveUcCookie = ""; driveUcToken = ""
                         driveAliyun = ""; driveBaidu = ""; driveBiliCookie = ""; driveXunlei = ""
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+            }
+            SettingsGroup(title: "猫源网盘") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("猫源（CatPawOpen）线路专用的网盘凭证，加载猫源站时注入它的 JS 引擎。和上面同一套账号就点「复制上面的配置」；留空的项自动用上面的配置兜底。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                    driveField("夸克 Cookie", $catQuarkCookie)
+                    driveField("UC Cookie", $catUcCookie)
+                    driveField("UC Token", $catUcToken)
+                    driveField("阿里云盘 Refresh Token", $catAliyun)
+                    driveField("百度网盘 Cookie", $catBaidu)
+                    driveField("Bilibili Cookie", $catBiliCookie)
+                    driveField("迅雷 Token", $catXunlei)
+                    Button("复制上面的配置") {
+                        catQuarkCookie = driveQuarkCookie; catUcCookie = driveUcCookie
+                        catUcToken = driveUcToken; catAliyun = driveAliyun
+                        catBaidu = driveBaidu; catBiliCookie = driveBiliCookie
+                        catXunlei = driveXunlei
+                        Haptics.success()
+                    }
+                    .font(.footnote.weight(.semibold))
+                    Button("清空猫源网盘配置", role: .destructive) {
+                        catQuarkCookie = ""; catUcCookie = ""; catUcToken = ""
+                        catAliyun = ""; catBaidu = ""; catBiliCookie = ""; catXunlei = ""
                     }
                     .font(.footnote.weight(.semibold))
                 }

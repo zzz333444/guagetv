@@ -59,6 +59,7 @@ final class JSRuntime {
             self?.lastException = exception?.toString() ?? "unknown JS error"
         }
         installHost(ctx)
+        JSRuntime.seedDriveCredentials(into: ctx)
         for file in ["prelude.js", "cheerio.js", "parser.js", "drpy-core.js", "drpy2.js"] {
             guard let url = Bundle.main.url(forResource: file, withExtension: nil,
                                             subdirectory: "JSBundle"),
@@ -177,6 +178,38 @@ final class JSRuntime {
             delete: function (r, k) { __localDelete(r, k); }
         };
         """)
+    }
+
+    /// 猫源网盘凭证注入 (v1.77): cat/JS pan spiders read their
+    /// drive credentials from the host. Seed the standard local
+    /// scopes ("config" / "pan") and a __panConfig global from
+    /// Settings → 网盘配置 → 猫源网盘； a cat field left empty
+    /// falls back to the shared drive set.
+    private static func seedDriveCredentials(into ctx: JSContext) {
+        let d = UserDefaults.standard
+        func pick(_ name: String) -> String {
+            let cat = (d.string(forKey: "drive.cat." + name) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cat.isEmpty { return cat }
+            return (d.string(forKey: "drive." + name) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var values: [String: String] = [:]
+        for name in ["quark_cookie", "uc_cookie", "uc_token", "aliyun",
+                     "baidu", "bili_cookie", "xunlei"] {
+            let v = pick(name)
+            if !v.isEmpty { values[name] = v }
+        }
+        if let v = values["baidu"] { values["baidu_cookie"] = v }
+        if let v = values["xunlei"] { values["xunlei_token"] = v }
+        guard !values.isEmpty else { return }
+        for scope in ["config", "pan"] {
+            for (key, value) in values { localSet(scope, key, value) }
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: values),
+           let json = String(data: data, encoding: .utf8) {
+            ctx.evaluateScript("globalThis.__panConfig = \(json);")
+        }
     }
 
     // MARK: local storage (per-rule, persisted)
