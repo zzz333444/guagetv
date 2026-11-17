@@ -579,6 +579,7 @@ struct SearchView: View {
     /// All search entry points funnel here so the run is tracked
     /// and the 停止 button can actually cancel it.
     private func beginSearch() {
+        Haptics.tap()
         debounceTask?.cancel()
         debounceTask = nil
         searchTask?.cancel()

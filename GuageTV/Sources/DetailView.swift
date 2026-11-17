@@ -286,6 +286,7 @@ struct DetailView: View {
                 .buttonStyle(.plain)
             }
             Button {
+                Haptics.tap()
                 downloadMode.toggle()
                 if downloadMode { playNote = "下载模式：点任意一集就下载，再点一次退出" }
             } label: {
@@ -379,6 +380,7 @@ struct DetailView: View {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(tmdbSimilar) { title in
                         Button {
+                            Haptics.tap()
                             similarSeed = title.title
                             showSimilarSearch = true
                         } label: {
@@ -430,6 +432,7 @@ struct DetailView: View {
     @State private var isFav = false
 
     private func toggleFavourite() {
+        Haptics.tap()
         guard let seed = historySeed else { return }
         let target = !isFav
         let stub = HistoryStore.Entry(
@@ -480,7 +483,7 @@ struct DetailView: View {
                 Text("选集").font(.headline).foregroundStyle(Theme.text)
                 Spacer()
                 if episodes.count > 1 {
-                    Button { episodesReversed.toggle() } label: {
+                    Button { Haptics.tap(); episodesReversed.toggle() } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.up.arrow.down")
                                 .font(.caption2.weight(.bold))
@@ -498,6 +501,7 @@ struct DetailView: View {
                     Menu {
                         ForEach(detail.playFrom.indices, id: \.self) { i in
                             Button {
+                                Haptics.selection()
                                 lineIndex = i
                             } label: {
                                 if i == lineIndex {
@@ -534,7 +538,7 @@ struct DetailView: View {
                                 .padding(.horizontal, 11).padding(.vertical, 6)
                                 .background(episodeSegment == ci ? Color.white : Theme.glass, in: Capsule())
                                 .foregroundStyle(episodeSegment == ci ? .black : Theme.text.opacity(0.85))
-                                .onTapGesture { episodeSegment = ci }
+                                .onTapGesture { Haptics.selection(); episodeSegment = ci }
                         }
                     }
                 }
@@ -548,6 +552,7 @@ struct DetailView: View {
             }
             if episodes.count > 1 {
                 Button {
+                    Haptics.medium()
                     downloadWholeLine(episodes: episodes)
                 } label: {
                     Label("下载全集（当前线路 \(episodes.count) 集）", systemImage: "arrow.down.to.line")
@@ -629,6 +634,7 @@ struct DetailView: View {
     /// playback does (parse interface / spider resolver), then hands
     /// the final media URL to the DownloadManager.
     private func downloadEpisode(_ ep: VodDetail.Episode) {
+        Haptics.medium()
         let flag = detail.playFrom.indices.contains(lineIndex) ? detail.playFrom[lineIndex] : ""
         if let playerResolver {
             guard !resolving else { return }
@@ -795,6 +801,7 @@ struct DetailView: View {
     }
 
     private func tapEpisode(_ ep: VodDetail.Episode, in episodes: [VodDetail.Episode]) {
+        Haptics.selection()
         guard !resolving else { return }
         resolving = true
         let startLine = lineIndex

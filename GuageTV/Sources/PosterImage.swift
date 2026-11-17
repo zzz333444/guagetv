@@ -10,6 +10,9 @@ import UIKit
 /// (Caches/posters) so grids survive relaunches.
 struct PosterImage: View {
     let urlString: String
+    /// Fit instead of fill: for transparent title artwork (logos),
+    /// where cropping would cut the lettering.
+    var fit: Bool = false
     @State private var image: UIImage?
     @State private var appeared = false
 
@@ -18,7 +21,7 @@ struct PosterImage: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .modifier(FitOrFill(fit: fit))
                     .opacity(appeared ? 1 : 0)
                     .onAppear {
                         // A short fade reads far smoother than a
@@ -34,6 +37,17 @@ struct PosterImage: View {
         .onChange(of: urlString) { _ in appeared = false }
         .task(id: urlString) {
             image = await PosterCache.shared.load(urlString)
+        }
+    }
+}
+
+private struct FitOrFill: ViewModifier {
+    var fit: Bool
+    func body(content: Content) -> some View {
+        if fit {
+            content.scaledToFit()
+        } else {
+            content.scaledToFill()
         }
     }
 }

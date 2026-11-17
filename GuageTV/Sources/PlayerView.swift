@@ -1388,7 +1388,7 @@ struct PlayerView: View {
 
     private var currentRate: Double { isMPV ? mpv.speed : Double(native.rate) }
 
-    private func togglePlay() { isMPV ? mpv.togglePlay() : native.toggle() }
+    private func togglePlay() { Haptics.tap(); isMPV ? mpv.togglePlay() : native.toggle() }
 
     /// P4 音频中断恢复（来电 / 闹钟 / Siri 打断时系统暂停音频会话）：
     /// 中断开始记下当时是否在播；中断结束且系统建议恢复（shouldResume）
@@ -1414,7 +1414,7 @@ struct PlayerView: View {
     private func seek(to seconds: Double, tolerant: Bool = false) {
         if isMPV { mpv.seek(to: seconds) } else { native.seek(to: seconds, tolerant: tolerant) }
     }
-    private func seekBy(_ delta: Double) { isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
+    private func seekBy(_ delta: Double) { Haptics.tap(); isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
     /// P1 (v1.62): playback speed survives episode changes and
     /// player reopens — the chosen rate is stored in UserDefaults
     /// under this key. Both engines restore it when a fresh core /
@@ -1423,6 +1423,7 @@ struct PlayerView: View {
     static let savedRateKey = "player.rate"
 
     private func setRate(_ rate: Double, persist: Bool = true) {
+        Haptics.selection()
         if persist { UserDefaults.standard.set(rate, forKey: Self.savedRateKey) }
         if isMPV { mpv.setSpeed(rate) } else { native.setRate(Float(rate)) }
     }
@@ -1497,6 +1498,7 @@ struct PlayerView: View {
     /// Without a resolver the raw URL plays as-is (CMS behaviour,
     /// unchanged). A failed resolve keeps the current episode.
     private func goToEpisode(_ target: Int) {
+        Haptics.selection()
         guard episodes.indices.contains(target), target != index else { return }
         guard episodeResolver != nil, resolved[target] == nil else {
             index = target
@@ -1524,6 +1526,7 @@ struct PlayerView: View {
     /// same episode index is resolved on the new line first, then
     /// playback continues at the current position.
     private func switchLine(_ target: Int) {
+        Haptics.selection()
         guard lineEpisodes.indices.contains(target), target != activeLine else { return }
         let targetEpisodes = lineEpisodes[target]
         guard !targetEpisodes.isEmpty else { showToast("这条线路没有集数"); return }

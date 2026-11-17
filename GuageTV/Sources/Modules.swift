@@ -361,7 +361,11 @@ final class FWDRuntime {
                 throw FWDfailure(message: "引擎资源加载失败（\(file)）：\(lastException)")
             }
         }
+        lastException = nil
         installShim(ctx)
+        if let lastException {
+            throw FWDfailure(message: "宿主接口安装失败：\(lastException)")
+        }
         lastException = nil
         ctx.evaluateScript(source)
         if let lastException {
@@ -434,29 +438,55 @@ final class FWDRuntime {
                   let text = String(data: data, encoding: .utf8) else { return "\"\"" }
             return String(text.dropFirst().dropLast())
         }
+        lastException = nil
         ctx.evaluateScript("""
         (function() {
           var fn = globalThis[\(jsString(function))];
           if (typeof fn !== 'function') { __fwdSettle('模块缺少函数 ' + \(jsString(function)), null); return; }
           Promise.resolve().then(function() { return fn(\(argumentJSON)); }).then(
-            function(r) { __fwdSettle(null, JSON.stringify(r === undefined ? null : r)); },
+            function(r) {
+              try { __fwdSettle(null, JSON.stringify(r === undefined ? null : r)); }
+              catch (e) { __fwdSettle('模块结果序列化失败：' + String((e && e.message) || e), null); }
+            },
             function(e) { __fwdSettle(String((e && e.message) || e), null); });
         })();
         """)
+        // A synchronous throw in the wrapper (bad argument JSON,
+        // a poisoned context) reaches the exception handler, not
+        // the promise — fail fast with it instead of pumping the
+        // full 30 s into a misleading timeout.
+        if !settled, let lastException {
+            throw FWDfailure(message: lastException)
+        }
         // Handlers await Widget.http, which is a synchronous native
-        // value here, so every continuation is a microtask; pumping
-        // script evaluations drains the microtask queue until the
-        // promise settles.
+        // value here, so every continuation is a promise job. Drain
+        // BOTH ways JavaScriptCore schedules those jobs: script
+        // evaluations (microtask checkpoint at unwind) and run-loop
+        // turns (the VM's job queue is also serviced there), plus
+        // the prelude's timer drain for modules using setTimeout.
         let deadline = Date().addingTimeInterval(30)
         while !settled && Date() < deadline {
             ctx.evaluateScript("0")
-            Thread.sleep(forTimeInterval: 0.002)
+            ctx.evaluateScript("if (typeof __drainTimers === 'function') { __drainTimers(); }")
+            if !RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.005)) {
+                Thread.sleep(forTimeInterval: 0.002)
+            }
         }
         if let errorText {
             throw FWDfailure(message: errorText)
         }
         guard settled, let jsonText, let data = jsonText.data(using: .utf8) else {
-            throw FWDfailure(message: "模块调用超时（30 秒）")
+            // Self-diagnosing timeout: report what the context
+            // actually holds, so a dead runtime names its cause.
+            let probe = ctx.evaluateScript("""
+            JSON.stringify({
+              fn: typeof globalThis[\(jsString(function))],
+              widget: typeof globalThis.Widget,
+              meta: typeof globalThis.WidgetMetadata
+            })
+            """)?.toString() ?? "?"
+            let extra = lastException.map { "；最近异常：\($0)" } ?? ""
+            throw FWDfailure(message: "模块调用超时（30 秒）[\(probe)]\(extra)")
         }
         if jsonText == "null" { return nil }
         return try JSONSerialization.jsonObject(with: data)
@@ -620,6 +650,14 @@ final class FWDRuntime {
         if let data = paramsJSON.data(using: .utf8),
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             params = parsed
+        }
+        // Forward's own convention (and what Rex's official TMDB
+        // module passes) is Widget.tmdb.get(path, { params: {...} }):
+        // unwrap the inner params dict, or every real query value
+        // (page, with_genres, sort_by…) is lost and a junk
+        // "params=<dict dump>" item goes out instead.
+        if let inner = params["params"] as? [String: Any] {
+            params = inner
         }
         var comps = URLComponents()
         comps.scheme = "https"
@@ -858,6 +896,7 @@ struct ModulesView: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {
                     Button {
+                        Haptics.tap()
                         showFileImporter = true
                     } label: {
                         Label("导入文件", systemImage: "doc.badge.plus")
@@ -868,6 +907,7 @@ struct ModulesView: View {
                     }
                     .buttonStyle(.plain)
                     Button {
+                        Haptics.tap()
                         importURL = ""
                         showURLImporter = true
                     } label: {
@@ -881,6 +921,7 @@ struct ModulesView: View {
                     if importing { ProgressView().tint(Theme.text) }
                 }
                 Button {
+                    Haptics.tap()
                     importing = true
                     Task {
                         defer { importing = false }
@@ -1187,6 +1228,7 @@ struct FWDWidgetView: View {
     /// return) go to cross-line search by title, exactly like a
     /// Discover poster tap.
     private func open(_ item: FWDItem) {
+        Haptics.tap()
         if !item.link.isEmpty || !item.videoUrl.isEmpty || !item.episodeItems.isEmpty {
             detailItem = item
         } else {
@@ -1206,7 +1248,14 @@ struct FWDWidgetView: View {
             } else if p.type == "count" || p.type == "offset" {
                 params[p.name] = Int(selections[p.name] ?? p.value) ?? p.value
             } else if p.type == "enumeration" {
-                params[p.name] = selections[p.name] ?? p.value
+                // No explicit default in the metadata (Rex's
+                // official modules ship enumerations without a
+                // value): Forward hosts fall back to the FIRST
+                // option — sending "" produced paths like
+                // "trending/all/" and dead columns.
+                let fallback = p.value.isEmpty
+                    ? (p.enumOptions.first?.value ?? "") : p.value
+                params[p.name] = selections[p.name] ?? fallback
             } else if !p.value.isEmpty {
                 params[p.name] = selections[p.name] ?? p.value
             }

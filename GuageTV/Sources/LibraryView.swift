@@ -30,6 +30,15 @@ struct LibraryView: View {
     /// Direct-open route for single-file (py / JS) lines: tapping
     /// the card pushes its one site's browse page immediately.
     @State private var directRoute: FileSiteRoute?
+    /// Ambient glow source for the page background: the freshest
+    /// artwork the user actually has — a continue-watching poster,
+    /// else a favourite's. The library used to sit on a flat static
+    /// gradient while every other tab glowed (v1.74 glass pass).
+    @ObservedObject private var history = HistoryStore.shared
+
+    private var ambientPic: String? {
+        history.continueWatching.first?.pic ?? history.favourites.first?.pic
+    }
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -40,10 +49,10 @@ struct LibraryView: View {
                 HStack {
                     Text("资源库").font(.largeTitle.bold()).foregroundStyle(Theme.text)
                     Spacer()
-                    Button("编辑") { showGroupEditor = true }
+                    Button("编辑") { Haptics.tap(); showGroupEditor = true }
                         .font(.subheadline.weight(.medium))
                         .padding(.horizontal, 16).padding(.vertical, 7)
-                        .background(Theme.glass, in: Capsule())
+                        .glassCapsule()
                         .foregroundStyle(Theme.text)
                         .sheet(isPresented: $showGroupEditor, onDismiss: refreshLibrary) {
                             GroupEditorView()
@@ -160,7 +169,7 @@ struct LibraryView: View {
             .padding(.top, 8)
             .padding(.bottom, 110)
         }
-        .background(StaticPageBackground())
+        .background(AmbientBackground(imageURL: ambientPic))
         .onAppear { refreshLibrary() }
         .alert("线路备注名", isPresented: Binding(get: { renamingEntry != nil },
                                                 set: { if !$0 { renamingEntry = nil } })) {
@@ -609,7 +618,7 @@ struct PyGroupView: View {
             .padding(.top, 12)
             .padding(.bottom, 110)
         }
-        .background(StaticPageBackground())
+        .background(AmbientBackground(imageURL: nil))
         .navigationTitle("Python 站点")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
@@ -635,9 +644,13 @@ private struct FileSiteRoute: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// GlassCard's flat-glass sibling for long scrolling grids: a
-/// translucent fill + stroke instead of a live blur material per
-/// card (stacked .ultraThinMaterial was the scroll-stutter source).
+/// The library grid's glass card: the full Rex recipe — tint wash
+/// over a translucent fill, gradient rim light, soft shadow — minus
+/// the live blur material per card (stacked .ultraThinMaterial was
+/// the scroll-stutter source; over the page's ambient blurred
+/// backdrop the wash reads as frosted glass without it). Upgraded
+/// in v1.74: the old flat fill + hairline stroke read as plain
+/// grey blocks next to the other tabs' glass.
 private struct LightGlassCard<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
@@ -645,9 +658,13 @@ private struct LightGlassCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Color.white.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Theme.glass,
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Theme.glassStroke, lineWidth: 1))
+                .strokeBorder(Theme.glassEdge, lineWidth: 1))
+            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
     }
 }
 
@@ -766,16 +783,6 @@ private struct LineCardView: View, Equatable {
     }
 }
 
-/// The library grid scrolls many cards: a flat fill plus one
-/// static light gradient stands in for the ambient backdrop
-/// helper on this page (no artwork blur to composite per frame).
-private struct StaticPageBackground: View {
-    var body: some View {
-        ZStack {
-            Theme.bg
-            LinearGradient(colors: [Theme.accent.opacity(0.07), Color.clear],
-                           startPoint: .top, endPoint: .center)
-        }
-        .ignoresSafeArea()
-    }
-}
+/// (Removed in v1.74: the library's flat StaticPageBackground —
+/// both library pages now sit on the shared AmbientBackground
+/// like every other tab.)

@@ -203,7 +203,7 @@ struct HistoryView: View {
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
         .contentShape(Rectangle())
         .onTapGesture {
-            if !entry.episodeURL.isEmpty { playRoute = .history(entry) }
+            if !entry.episodeURL.isEmpty { Haptics.medium(); playRoute = .history(entry) }
         }
     }
 
@@ -271,8 +271,10 @@ struct HistoryView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if item.state == "done" {
+                Haptics.medium()
                 playRoute = .download(item)
             } else if item.state == "failed" || item.state == "paused" {
+                Haptics.tap()
                 DownloadManager.shared.retry(item)
             }
         }

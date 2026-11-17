@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.73 · 设置页对齐 Rex"
+    static let buildLabel = "v1.74 · 发现页 Rex 化与模块修复"
 
     var body: some View {
         NavigationStack {
@@ -268,6 +268,23 @@ struct TVBoxConfigSettingsView: View {
                             .background(Theme.glass, in: Capsule())
                             .foregroundStyle(Theme.text)
                     }
+                    Button {
+                        Haptics.tap()
+                        configURL = "https://raw.githubusercontent.com/qist/tvbox/master/jsm.json"
+                        Task { await load() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "bolt.fill")
+                            Text("一键导入推荐配置（qist jsm）")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .glassCapsule()
+                        .foregroundStyle(Theme.text)
+                    }
+                    .buttonStyle(.plain)
+                    Text("推荐配置已验活：162 个站点（Jar 113 · JS 25 · py 9 · CMS 15）+ 29 条解析 + 3 个直播源，点上面按钮直接走导入确认。")
+                        .font(.caption).foregroundStyle(Theme.textDim)
                     Text(status).font(.footnote).foregroundStyle(Theme.textDim)
                     if let config {
                         Text("已加载 \(config.sites.count) 个站点 · \(config.lives?.count ?? 0) 个直播源")

@@ -133,7 +133,21 @@ enum TMDBClient {
         var score: String
         var year: String
         var overview: String
+        var genres: [String] = []
     }
+
+    /// TMDB genre id → zh-CN name (the API's own wording), covering
+    /// the movie and TV tables. Static because the ids are stable
+    /// and a /genre/list round-trip per row would be pure latency.
+    private static let genreNames: [Int: String] = [
+        28: "动作", 12: "冒险", 16: "动画", 35: "喜剧", 80: "犯罪",
+        99: "纪录片", 18: "剧情", 10751: "家庭", 14: "奇幻", 36: "历史",
+        27: "恐怖", 10402: "音乐", 9648: "悬疑", 10749: "爱情",
+        878: "科幻", 10770: "电视电影", 53: "惊悚", 10752: "战争",
+        37: "西部", 10759: "动作冒险", 10762: "儿童", 10763: "新闻",
+        10764: "真人秀", 10765: "科幻与奇幻", 10766: "肥皂剧",
+        10767: "脱口秀", 10768: "战争与政治",
+    ]
 
     private static func fetchTitles(_ path: String, forcedType: String?) async -> [TMDBTitle] {
         guard isOn else { return [] }
@@ -155,18 +169,68 @@ enum TMDBClient {
             let posterPath = r["poster_path"] as? String ?? ""
             let backdropPath = r["backdrop_path"] as? String ?? ""
             let vote = (r["vote_average"] as? NSNumber)?.doubleValue ?? 0
+            let genreIDs = (r["genre_ids"] as? [Any] ?? [])
+                .compactMap { ($0 as? NSNumber)?.intValue }
             return TMDBTitle(
                 id: tmdbID, mediaType: type, title: title,
                 poster: posterPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w500" + posterPath,
                 backdrop: backdropPath.isEmpty ? "" : "https://image.tmdb.org/t/p/w780" + backdropPath,
                 score: vote > 0 ? String(format: "%.1f", vote) : "",
                 year: String(date.prefix(4)),
-                overview: r["overview"] as? String ?? "")
+                overview: r["overview"] as? String ?? "",
+                genres: genreIDs.prefix(3).compactMap { genreNames[$0] })
         }
     }
 
     static func trending() async -> [TMDBTitle] {
         await fetchTitles("/3/trending/all/day", forcedType: nil)
+    }
+
+    static func trendingWeek() async -> [TMDBTitle] {
+        await fetchTitles("/3/trending/all/week", forcedType: nil)
+    }
+
+    static func nowPlaying() async -> [TMDBTitle] {
+        await fetchTitles("/3/movie/now_playing", forcedType: "movie")
+    }
+
+    // MARK: Title artwork (hero logos)
+
+    private static var logoCache: [String: String] = [:]
+    private static let logoLock = NSLock()
+
+    /// The title's official logo artwork (transparent PNG) for the
+    /// Discover hero — Rex shows artwork, not typeset text, when a
+    /// title has one. Prefers a zh logo, then en, then any language.
+    /// Returns "" when the title has no logo at all.
+    static func logo(for item: TMDBTitle) async -> String {
+        let cacheKey = "\(item.mediaType)/\(item.id)"
+        logoLock.lock()
+        let hit = logoCache[cacheKey]
+        logoLock.unlock()
+        if let hit { return hit }
+        guard isOn else { return "" }
+        var comps = URLComponents(string: base + "/3/\(item.mediaType)/\(item.id)/images")
+        comps?.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "include_image_language", value: "zh,en,null"),
+        ]
+        var found = ""
+        if let url = comps?.url,
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let logos = root["logos"] as? [[String: Any]], !logos.isEmpty {
+            let picked = logos.first { ($0["iso_639_1"] as? String) == "zh" }
+                ?? logos.first { ($0["iso_639_1"] as? String) == "en" }
+                ?? logos[0]
+            if let path = picked["file_path"] as? String, !path.isEmpty {
+                found = "https://image.tmdb.org/t/p/w500" + path
+            }
+        }
+        logoLock.lock()
+        logoCache[cacheKey] = found
+        logoLock.unlock()
+        return found
     }
 
     static func popularMovies() async -> [TMDBTitle] {

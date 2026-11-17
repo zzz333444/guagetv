@@ -6,17 +6,86 @@ import SwiftUI
 /// and play through the normal PlayerView via direct-stream
 /// URLs. Credentials live only in local AppStorage.
 enum EmbyClient {
-    static var base: String {
-        UserDefaults.standard.string(forKey: "emby.url") ?? ""
+    /// One signed-in Emby server (multi-server since v1.74 — the
+    /// user asked to keep several servers logged in at once). Only
+    /// the access token is stored, never the password.
+    struct Server: Codable, Identifiable {
+        var id: String        // url + "|" + userID, one entry per account
+        var name: String      // account display name from the server
+        var url: String
+        var userID: String
+        var token: String
+        var userName: String
     }
-    static var token: String {
-        UserDefaults.standard.string(forKey: "emby.token") ?? ""
+
+    private static let serversKey = "emby.servers.v1"
+    private static let activeKey = "emby.activeServerID"
+
+    static var servers: [Server] {
+        if let data = UserDefaults.standard.data(forKey: serversKey),
+           let list = try? JSONDecoder().decode([Server].self, from: data) {
+            return list
+        }
+        // Pre-multi-server install: the legacy keys are one server.
+        let url = UserDefaults.standard.string(forKey: "emby.url") ?? ""
+        let token = UserDefaults.standard.string(forKey: "emby.token") ?? ""
+        let uid = UserDefaults.standard.string(forKey: "emby.userId") ?? ""
+        guard !url.isEmpty, !token.isEmpty, !uid.isEmpty else { return [] }
+        return [Server(id: url + "|" + uid, name: url, url: url,
+                       userID: uid, token: token,
+                       userName: UserDefaults.standard.string(forKey: "emby.user") ?? "")]
     }
-    static var userID: String {
-        UserDefaults.standard.string(forKey: "emby.userId") ?? ""
+
+    private static func saveServers(_ list: [Server]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: serversKey)
+        }
     }
-    static var configured: Bool {
-        !base.isEmpty && !token.isEmpty && !userID.isEmpty
+
+    static var activeServer: Server? {
+        let list = servers
+        guard !list.isEmpty else { return nil }
+        let wanted = UserDefaults.standard.string(forKey: activeKey) ?? ""
+        return list.first { $0.id == wanted } ?? list[0]
+    }
+
+    static var activeServerID: String { activeServer?.id ?? "" }
+    static var activeServerName: String { activeServer?.name ?? "" }
+
+    static var base: String { activeServer?.url ?? "" }
+    static var token: String { activeServer?.token ?? "" }
+    static var userID: String { activeServer?.userID ?? "" }
+    static var configured: Bool { activeServer != nil }
+
+    /// Keep the legacy single-server keys pointing at the active
+    /// server: Backup whitelists the whole emby. prefix, and any
+    /// reader of emby.url keeps seeing the current server.
+    private static func syncLegacy() {
+        let d = UserDefaults.standard
+        if let s = activeServer {
+            d.set(s.url, forKey: "emby.url")
+            d.set(s.token, forKey: "emby.token")
+            d.set(s.userID, forKey: "emby.userId")
+        } else {
+            d.removeObject(forKey: "emby.token")
+            d.removeObject(forKey: "emby.userId")
+        }
+    }
+
+    static func setActiveServer(_ id: String) {
+        UserDefaults.standard.set(id, forKey: activeKey)
+        syncLegacy()
+    }
+
+    static func removeServer(_ id: String) {
+        var list = servers
+        list.removeAll { $0.id == id }
+        saveServers(list)
+        let wanted = UserDefaults.standard.string(forKey: activeKey) ?? ""
+        if !list.contains(where: { $0.id == wanted }) {
+            UserDefaults.standard.set(list.first?.id ?? "", forKey: activeKey)
+        }
+        syncLegacy()
     }
 
     struct Item: Identifiable {
@@ -57,16 +126,29 @@ enum EmbyClient {
               let uid = userObj["Id"] as? String else {
             throw failure("服务器返回无法识别")
         }
-        UserDefaults.standard.set(root, forKey: "emby.url")
-        UserDefaults.standard.set(accessToken, forKey: "emby.token")
-        UserDefaults.standard.set(uid, forKey: "emby.userId")
-        return (userObj["Name"] as? String) ?? user
+        // Upsert into the multi-server list and make it active;
+        // signing in on another server no longer evicts the first.
+        let server = Server(id: root + "|" + uid,
+                            name: (userObj["Name"] as? String) ?? user,
+                            url: root, userID: uid,
+                            token: accessToken, userName: user)
+        var list = servers
+        if let idx = list.firstIndex(where: { $0.id == server.id }) {
+            list[idx] = server
+        } else {
+            list.append(server)
+        }
+        saveServers(list)
+        UserDefaults.standard.set(server.id, forKey: activeKey)
+        syncLegacy()
+        return server.name
     }
 
+    /// Sign out = drop the ACTIVE server from the list; any other
+    /// signed-in server becomes active in its place.
     static func signOut() {
-        for key in ["emby.token", "emby.userId"] {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
+        let id = activeServerID
+        if !id.isEmpty { removeServer(id) }
     }
 
     private static func failure(_ message: String) -> NSError {
@@ -266,6 +348,9 @@ struct EmbyHomeView: View {
     @State private var searching = false
     @State private var searchedKeyword = ""
     @State private var showUnfavoriteError = false
+    /// Multi-server: the page renders the ACTIVE server; switching
+    /// re-runs load() through .task(id:).
+    @State private var activeServerID = EmbyClient.activeServerID
 
     var body: some View {
         Group {
@@ -299,12 +384,51 @@ struct EmbyHomeView: View {
         } message: {
             Text("请检查网络后重试")
         }
-        .task { await load() }
+        .task(id: activeServerID) { await load() }
+    }
+
+    /// Server switcher, shown only when more than one server is
+    /// signed in: a glass row with a menu of servers.
+    @ViewBuilder
+    private var serverSwitcher: some View {
+        if EmbyClient.servers.count > 1 {
+            Menu {
+                ForEach(EmbyClient.servers) { server in
+                    Button {
+                        Haptics.tap()
+                        EmbyClient.setActiveServer(server.id)
+                        activeServerID = server.id
+                    } label: {
+                        if server.id == activeServerID {
+                            Label(server.name, systemImage: "checkmark")
+                        } else {
+                            Text(server.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "server.rack").foregroundStyle(Theme.accent)
+                    Text(EmbyClient.activeServerName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Text(EmbyClient.base)
+                        .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2).foregroundStyle(Theme.textDim)
+                }
+                .padding(12)
+                .glassPanel(cornerRadius: 16)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var content: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
+                serverSwitcher
                 HStack {
                     TextField("搜索服务器…", text: $searchText)
                         .font(.subheadline)

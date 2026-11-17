@@ -14,6 +14,8 @@ struct MediaServerSettingsView: View {
     @State private var embyPassword = ""
     @State private var embyStatus = EmbyClient.configured ? "已登录" : "未登录"
     @State private var loggingIn = false
+    /// All signed-in Emby servers (multi-server, v1.74).
+    @State private var serverList: [EmbyClient.Server] = EmbyClient.servers
 
     @AppStorage("webdav.servers") private var webdavJSON = "[]"
     @State private var davName = ""
@@ -38,6 +40,46 @@ struct MediaServerSettingsView: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Emby").font(.headline).foregroundStyle(Theme.text)
+                    if !serverList.isEmpty {
+                        ForEach(serverList) { server in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(server.name)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(Theme.text)
+                                        if server.id == EmbyClient.activeServerID {
+                                            Text("当前")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(Theme.ok, in: Capsule())
+                                        }
+                                    }
+                                    Text(server.url)
+                                        .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                                }
+                                Spacer()
+                                if server.id != EmbyClient.activeServerID {
+                                    Button("切换") {
+                                        Haptics.tap()
+                                        EmbyClient.setActiveServer(server.id)
+                                        embyStatus = "已登录：\(server.name)"
+                                    }
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(Theme.accent)
+                                }
+                                Button("删除") {
+                                    EmbyClient.removeServer(server.id)
+                                    refreshServers()
+                                }
+                                .font(.footnote)
+                                .foregroundStyle(.red.opacity(0.85))
+                            }
+                        }
+                        Text("已登录的服务器都在这里，点「切换」换当前服务器；下面的表单可以再登录一个新服务器。")
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                    }
                     field("服务器地址，如 http://192.168.1.10:8096", text: $embyURL)
                     field("用户名", text: $embyUser)
                     SecureField("密码", text: $embyPassword)
@@ -59,9 +101,9 @@ struct MediaServerSettingsView: View {
                         .buttonStyle(.plain)
                         .disabled(loggingIn)
                         if EmbyClient.configured {
-                            Button("退出登录") {
+                            Button("退出当前服务器") {
                                 EmbyClient.signOut()
-                                embyStatus = "未登录"
+                                refreshServers()
                             }
                             .font(.subheadline)
                             .foregroundStyle(Theme.textDim)
@@ -115,6 +157,7 @@ struct MediaServerSettingsView: View {
                 }
             }
         }
+        .onAppear { refreshServers() }
     }
 
     private func field(_ placeholder: String, text: Binding<String>) -> some View {
@@ -137,9 +180,18 @@ struct MediaServerSettingsView: View {
             UserDefaults.standard.set(embyUser, forKey: "emby.user")
             embyStatus = "已登录：\(name)"
             embyPassword = ""
+            Haptics.success()
+            refreshServers()
         } catch {
             embyStatus = error.localizedDescription
         }
+    }
+
+    /// Re-read the server list + status line after any change.
+    private func refreshServers() {
+        serverList = EmbyClient.servers
+        embyStatus = EmbyClient.configured
+            ? "已登录：\(EmbyClient.activeServerName)" : "未登录"
     }
 
     private func addDAV() {
@@ -428,7 +480,10 @@ struct MediaHubSection: View {
             Text("本地与网络").font(.headline).foregroundStyle(Theme.text)
             if EmbyClient.configured {
                 NavigationLink { EmbyHomeView() } label: {
-                    hubRow(icon: "play.rectangle.on.rectangle", title: "Emby 媒体库", value: EmbyClient.base)
+                    hubRow(icon: "play.rectangle.on.rectangle", title: "Emby 媒体库",
+                           value: EmbyClient.servers.count > 1
+                               ? "\(EmbyClient.activeServerName) · \(EmbyClient.base)"
+                               : EmbyClient.base)
                 }
                 .buttonStyle(.plain)
             }
@@ -464,6 +519,6 @@ struct MediaHubSection: View {
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textDim)
         }
         .padding(14)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+        .glassPanel(cornerRadius: 16)
     }
 }

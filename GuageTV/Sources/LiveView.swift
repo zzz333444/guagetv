@@ -143,7 +143,7 @@ struct LiveView: View {
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(selectedGroup == name ? Color.white : Theme.glass, in: Capsule())
             .foregroundStyle(selectedGroup == name ? .black : Theme.text.opacity(0.85))
-            .onTapGesture { selectedGroup = name }
+            .onTapGesture { Haptics.selection(); selectedGroup = name }
     }
 
     private var channelList: some View {
@@ -192,7 +192,7 @@ struct LiveView: View {
         .padding(12)
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
         .contentShape(Rectangle())
-        .onTapGesture { playChannel = channel }
+        .onTapGesture { Haptics.medium(); playChannel = channel }
         .contextMenu {
             Button {
                 toggleFavourite(channel)
