@@ -55,15 +55,17 @@ struct HistoryView: View {
                 if segment == 2 {
                     downloadsView
                 } else if shownEntries.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: segment == 0 ? "clock.arrow.circlepath" : "heart")
-                            .font(.largeTitle).foregroundStyle(Theme.textDim)
-                        Text(segment == 0 ? "还没有浏览记录" : "还没有收藏")
-                            .font(.headline).foregroundStyle(Theme.text)
-                        Text(segment == 0 ? "看过的剧会出现在这里，下次点开直接续播" : "在详情页点爱心，喜欢的剧会收进这里")
-                            .font(.subheadline).foregroundStyle(Theme.textDim)
+                    // R8 (v1.85): hand-rolled empty VStack → shared
+                    // EmptyStateView, same copy, one glass language.
+                    VStack {
+                        Spacer()
+                        EmptyStateView(
+                            icon: segment == 0 ? "clock.arrow.circlepath" : "heart",
+                            title: segment == 0 ? "还没有浏览记录" : "还没有收藏",
+                            message: segment == 0 ? "看过的剧会出现在这里，下次点开直接续播" : "在详情页点爱心，喜欢的剧会收进这里")
+                            .padding(.horizontal, 18)
+                        Spacer()
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
                         if segment == 1 {
@@ -223,16 +225,16 @@ struct HistoryView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 10)
             if downloads.items.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.largeTitle).foregroundStyle(Theme.textDim)
-                    Text("还没有下载")
-                        .font(.headline).foregroundStyle(Theme.text)
-                    Text("在详情页长按集数、或播放器里点下载钮，剧会存到这里离线看")
-                        .font(.subheadline).foregroundStyle(Theme.textDim)
-                        .multilineTextAlignment(.center).padding(.horizontal, 32)
+                // R8 (v1.85): same shared empty state as above.
+                VStack {
+                    Spacer()
+                    EmptyStateView(
+                        icon: "arrow.down.circle",
+                        title: "还没有下载",
+                        message: "在详情页长按集数、或播放器里点下载钮，剧会存到这里离线看")
+                        .padding(.horizontal, 18)
+                    Spacer()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(downloads.items) { item in

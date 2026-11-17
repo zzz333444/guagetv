@@ -68,7 +68,7 @@ struct HealthCheckView: View {
                         ForEach(rows) { row in
                             HStack(spacing: 10) {
                                 Circle()
-                                    .fill(row.ok == nil ? Color.gray : (row.ok! ? Color.green : Color.red))
+                                    .fill(row.ok == nil ? Color.gray : (row.ok == true ? Color.green : Color.red))
                                     .frame(width: 9, height: 9)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(row.siteName)

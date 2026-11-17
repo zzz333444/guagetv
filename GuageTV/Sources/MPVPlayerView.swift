@@ -661,12 +661,15 @@ final class MPVMetalLayer: CAMetalLayer {
 final class MPVMetalUIView: UIView {
     override class var layerClass: AnyClass { MPVMetalLayer.self }
 
-    var metalLayer: MPVMetalLayer { layer as! MPVMetalLayer }
+    /// R8 (v1.85): optional cast — layerClass guarantees the type,
+    /// but a forced cast here would crash the player if the class
+    /// ever changed; call sites tolerate nil instead.
+    var metalLayer: MPVMetalLayer? { layer as? MPVMetalLayer }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
-        metalLayer.wantsExtendedDynamicRangeContent = true
+        metalLayer?.wantsExtendedDynamicRangeContent = true
     }
 
     @available(*, unavailable)
@@ -675,8 +678,8 @@ final class MPVMetalUIView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let scale = window?.screen.scale ?? UIScreen.main.scale
-        metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale,
+        metalLayer?.contentsScale = scale
+        metalLayer?.drawableSize = CGSize(width: bounds.width * scale,
                                          height: bounds.height * scale)
     }
 }
@@ -686,7 +689,7 @@ private struct MPVMetalRepresentable: UIViewRepresentable {
 
     func makeUIView(context: Context) -> MPVMetalUIView {
         let v = MPVMetalUIView()
-        controller.attachMetalLayer(v.metalLayer)
+        if let layer = v.metalLayer { controller.attachMetalLayer(layer) }
         return v
     }
 

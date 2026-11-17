@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.84 · 下载页存储用量与清理缓存"
+    static let buildLabel = "v1.85 · 稳定扫荡与空状态补齐"
 
     var body: some View {
         NavigationStack {

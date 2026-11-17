@@ -264,7 +264,16 @@ struct SearchView: View {
     @ViewBuilder
     private var content: some View {
         if !hasSites {
-            hint("先在设置里导入一个配置，搜索才能开工")
+            // R8 (v1.85): bare hint text → shared empty state.
+            VStack {
+                Spacer()
+                EmptyStateView(
+                    icon: "square.stack.3d.up.slash",
+                    title: "还没有导入配置",
+                    message: "先在设置里导入一个配置，搜索才能开工")
+                    .padding(.horizontal, 18)
+                Spacer()
+            }
         } else if searching && results.isEmpty {
             Spacer()
             ProgressView().tint(Theme.text)
@@ -291,7 +300,24 @@ struct SearchView: View {
                 .padding(.vertical, 10)
             }
         } else if searched {
-            hint(failureNote.isEmpty ? "没有搜到结果" : "没有搜到结果\n\(failureNote)")
+            // R8 (v1.85): bare hint text → shared empty state with
+            // a clear-search action back to recents.
+            VStack {
+                Spacer()
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "没有搜到结果",
+                    message: failureNote.isEmpty ? "换个片名或换条线路试试" : failureNote,
+                    actionTitle: "清除搜索",
+                    action: {
+                        keyword = ""
+                        results = []
+                        failureNote = ""
+                        searched = false
+                    })
+                    .padding(.horizontal, 18)
+                Spacer()
+            }
         } else {
             recentsView
         }

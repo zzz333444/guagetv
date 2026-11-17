@@ -2483,7 +2483,10 @@ final class NativeController: NSObject, ObservableObject {
 
 private final class PlayerLayerUIView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    /// R8 (v1.85): optional cast — same reasoning as
+    /// MPVMetalUIView.metalLayer; a missing layer just means the
+    /// player never attaches instead of a crash.
+    var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }
 }
 
 private struct AVPlayerLayerView: UIViewRepresentable {
@@ -2501,15 +2504,19 @@ private struct AVPlayerLayerView: UIViewRepresentable {
     func makeUIView(context: Context) -> PlayerLayerUIView {
         let view = PlayerLayerUIView()
         view.backgroundColor = .black
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = Self.gravity
-        onLayer?(view.playerLayer)
+        if let layer = view.playerLayer {
+            layer.player = player
+            layer.videoGravity = Self.gravity
+            onLayer?(layer)
+        }
         return view
     }
 
     func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {
-        uiView.playerLayer.player = player
-        uiView.playerLayer.videoGravity = Self.gravity
+        if let layer = uiView.playerLayer {
+            layer.player = player
+            layer.videoGravity = Self.gravity
+        }
     }
 }
 

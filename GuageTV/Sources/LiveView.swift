@@ -85,9 +85,19 @@ struct LiveView: View {
                 ProgressView().tint(Theme.text)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let errorText {
-                Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim)
-                    .multilineTextAlignment(.center).padding(30)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // R8 (v1.85): bare error text → shared empty state
+                // with a retry action (load() is idempotent).
+                VStack {
+                    Spacer()
+                    EmptyStateView(
+                        icon: "tv.slash",
+                        title: "直播列表打不开",
+                        message: errorText,
+                        actionTitle: "重新加载",
+                        action: { Task { await load() } })
+                        .padding(.horizontal, 18)
+                    Spacer()
+                }
             } else {
                 VStack(spacing: 0) {
                     groupChips
@@ -225,12 +235,11 @@ struct LiveView: View {
 
     private func logo(_ channel: LiveListParser.Channel) -> some View {
         Group {
-            if !channel.logo.isEmpty, let url = URL(string: channel.logo) {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    Image(systemName: "tv").foregroundStyle(Theme.textDim)
-                }
+            if !channel.logo.isEmpty {
+                // R8 (v1.85): bare AsyncImage decoded channel logos
+                // at full resolution with no cache cap; PosterImage
+                // goes through the 80 MB / ≤900 px downsampled cache.
+                PosterImage(urlString: channel.logo, fit: true)
             } else {
                 Image(systemName: "tv").foregroundStyle(Theme.textDim)
             }
