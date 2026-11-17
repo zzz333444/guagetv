@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.85 · 稳定扫荡与空状态补齐"
+    static let buildLabel = "v1.86 · 更新日志与全量复查"
 
     var body: some View {
         NavigationStack {
@@ -94,7 +94,7 @@ struct SettingsView: View {
                             SecuritySettingsView()
                         }
                         rexDivider()
-                        linkRow(icon: "server.rack", title: "媒体服务器（Emby / WebDAV）") {
+                        linkRow(icon: "tv.and.hdd", title: "媒体服务器（Emby / WebDAV）") {
                             MediaServerSettingsView()
                         }
                         rexDivider()
@@ -108,6 +108,11 @@ struct SettingsView: View {
                     }
 
                     group(title: "应用") {
+                        linkRow(icon: "clock.arrow.circlepath", title: "更新日志",
+                                value: "v1.86") {
+                            ChangelogView()
+                        }
+                        rexDivider()
                         linkRow(icon: "info.circle", title: "关于呱壳") {
                             AboutView()
                         }
@@ -1029,6 +1034,87 @@ struct AppearanceSettingsView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Text("切换底部导航等操作时轻震一下；关掉后全局不再震动。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+}
+
+/// 更新日志 — 内置近几版改动清单（v1.86 新增）。只列已交付的
+/// 改动，不写计划与未上线内容；每条一行，当前版本置顶高亮。
+struct ChangelogView: View {
+    private struct Entry: Identifiable {
+        let version: String
+        let title: String
+        let lines: [String]
+        var id: String { version }
+    }
+
+    private static let entries: [Entry] = [
+        Entry(version: "v1.86", title: "更新日志与全量复查", lines: [
+            "设置页新增「更新日志」页，内置近几版改动清单",
+            "全量复查：各页空状态、图标与文案一致性（媒体服务器图标去重）",
+        ]),
+        Entry(version: "v1.85", title: "稳定扫荡与空状态补齐", lines: [
+            "全仓强制解包清零，播放器图层改可选链/guard",
+            "历史/下载/搜索/直播空状态统一共享 EmptyStateView",
+            "直播台标改走 PosterImage 限流缓存",
+        ]),
+        Entry(version: "v1.84", title: "下载页存储用量", lines: [
+            "存储用量卡：已下载总大小 + 海报缓存大小",
+            "一键清理缓存（只清海报与内存缓存，不动已下载视频）",
+        ]),
+        Entry(version: "v1.83", title: "模块角标与相关推荐", lines: [
+            "带弹幕模块的卡片加玻璃胶囊「弹幕」角标",
+            "详情页相关推荐卡补年份·★评分行",
+        ]),
+        Entry(version: "v1.82", title: "播放器画质与画面", lines: [
+            "右下角画质文本钮：显示当前分辨率，点开切 HLS 质量上限",
+            "「画面」文本钮：适应/填充一键切，点播与直播共用同一入口",
+        ]),
+        Entry(version: "v1.81", title: "资源库排序与站点数", lines: [
+            "配置排序切换：名称 / 站点数 / 最近使用",
+            "分组头显示站点数（「分组名 · N 站」）",
+        ]),
+        Entry(version: "v1.80", title: "搜索页热搜与历史", lines: [
+            "热搜 chips：TMDB 当日热门前 10，点即搜",
+            "搜索历史单条删除（清空按钮保留）",
+        ]),
+        Entry(version: "v1.79", title: "我的页观看热力格", lines: [
+            "近 12 周热力格按每日观看时长渲染（5 档强度）",
+            "本周/本月观看统计：总时长 + 看了几天",
+        ]),
+        Entry(version: "v1.78", title: "详情页收尾", lines: [
+            "底部「媒体信息」玻璃展开卡（来源站点/线路/集数/类型/年份等）",
+            "TMDB 评分改五星条可视化",
+        ]),
+    ]
+
+    var body: some View {
+        SettingsPage(title: "更新日志") {
+            Text("更新日志页内置近几版改动清单，只列已交付的内容。")
+                .font(.footnote).foregroundStyle(Theme.textDim)
+            ForEach(Self.entries) { entry in
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text(entry.version).font(.headline).foregroundStyle(Theme.text)
+                            Text(entry.title).font(.subheadline).foregroundStyle(Theme.textDim)
+                            Spacer()
+                            if entry.version == Self.entries.first?.version {
+                                Text("当前版本").font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(Theme.glass, in: Capsule())
+                                    .foregroundStyle(Theme.text)
+                            }
+                        }
+                        ForEach(entry.lines, id: \.self) { line in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text("·").foregroundStyle(Theme.textDim)
+                                Text(line).font(.footnote).foregroundStyle(Theme.text)
+                            }
+                        }
+                    }
                 }
             }
         }
