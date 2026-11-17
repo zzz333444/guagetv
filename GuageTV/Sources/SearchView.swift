@@ -102,6 +102,10 @@ struct SearchView: View {
                 keyword = initialKeyword
                 beginSearch()
             }
+            if !hotLoaded {
+                hotLoaded = true
+                Task { await loadHotTitles() }
+            }
         }
         .onChange(of: voice.partial) { _, text in
             if voice.listening { keyword = text }
@@ -169,6 +173,9 @@ struct SearchView: View {
     /// 最近搜索 — stored locally, newest first, capped at 10.
     @State private var recentsList: [String] =
         UserDefaults.standard.stringArray(forKey: "searchRecents.v1") ?? []
+    /// TMDB 热门标题（v1.80 热搜）：点即搜；未开 TMDB 时不显示。
+    @State private var hotTitles: [String] = []
+    @State private var hotLoaded = false
 
     private var recents: [String] { recentsList }
 
@@ -179,25 +186,52 @@ struct SearchView: View {
         UserDefaults.standard.set(recentsList, forKey: "searchRecents.v1")
     }
 
+    /// 单条删除一条搜索历史（v1.80）。
+    private func removeRecent(_ kw: String) {
+        recentsList.removeAll { $0 == kw }
+        UserDefaults.standard.set(recentsList, forKey: "searchRecents.v1")
+    }
+
+    /// TMDB 当日热门标题（v1.80 热搜）：只取标题，前 10 条。
+    private func loadHotTitles() async {
+        guard TMDBClient.isOn else { return }
+        let titles = await TMDBClient.trending()
+        hotTitles = Array(titles.map(\.title).filter { !$0.isEmpty }.prefix(10))
+    }
+
     @ViewBuilder
     private var recentsView: some View {
-        if recents.isEmpty {
+        if recents.isEmpty && hotTitles.isEmpty {
             hint("跨已导入的 CMS / py / JS 站点一起搜")
         } else {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("最近搜索").font(.headline).foregroundStyle(Theme.text)
-                        Spacer()
-                        Button("清空") {
-                            recentsList = []
-                            UserDefaults.standard.removeObject(forKey: "searchRecents.v1")
+                    if !hotTitles.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "flame.fill").foregroundStyle(Color.orange)
+                            Text("热搜").font(.headline).foregroundStyle(Theme.text)
                         }
-                        .font(.caption).foregroundStyle(Theme.textDim)
+                        FlowChips(words: hotTitles) { word in
+                            keyword = word
+                            beginSearch()
+                        }
                     }
-                    FlowChips(words: recents) { word in
-                        keyword = word
-                        beginSearch()
+                    if !recents.isEmpty {
+                        HStack {
+                            Text("最近搜索").font(.headline).foregroundStyle(Theme.text)
+                            Spacer()
+                            Button("清空") {
+                                recentsList = []
+                                UserDefaults.standard.removeObject(forKey: "searchRecents.v1")
+                            }
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                        }
+                        DeletableFlowChips(words: recents) { word in
+                            keyword = word
+                            beginSearch()
+                        } onDelete: { word in
+                            removeRecent(word)
+                        }
                     }
                 }
                 .padding(.horizontal, 18)
@@ -933,6 +967,37 @@ private struct FlowChips: View {
                     .background(Theme.glass, in: Capsule())
                     .foregroundStyle(Theme.text)
                     .onTapGesture { onTap(word) }
+            }
+        }
+    }
+}
+
+
+/// Recent-search chips with a per-chip delete button (v1.80):
+/// tap the word to search it, tap × to drop just that entry.
+private struct DeletableFlowChips: View {
+    let words: [String]
+    let onTap: (String) -> Void
+    let onDelete: (String) -> Void
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(words, id: \.self) { word in
+                HStack(spacing: 4) {
+                    Text(word)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .onTapGesture { onTap(word) }
+                    Button { onDelete(word) } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Theme.glass, in: Capsule())
+                .foregroundStyle(Theme.text)
             }
         }
     }

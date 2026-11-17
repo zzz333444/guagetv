@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.79 · 我的页观看热力格"
+    static let buildLabel = "v1.80 · 搜索热搜与历史管理"
 
     var body: some View {
         NavigationStack {
