@@ -96,7 +96,18 @@ final class HistoryStore: ObservableObject {
         return dir.appendingPathComponent("history.json")
     }()
 
-    init() { load() }
+    init() { load(); loadDaily() }
+
+    private func loadDaily() {
+        guard let data = try? Data(contentsOf: dailyFileURL),
+              let decoded = try? JSONDecoder().decode([String: Double].self, from: data) else { return }
+        dailyWatched = decoded
+    }
+
+    private func saveDaily() {
+        guard let data = try? JSONEncoder().encode(dailyWatched) else { return }
+        try? data.write(to: dailyFileURL, options: .atomic)
+    }
 
     func record(_ entry: Entry) {
         if let i = entries.firstIndex(where: { $0.id == entry.id }) {
@@ -120,7 +131,11 @@ final class HistoryStore: ObservableObject {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].positionSeconds = position
         if duration > 0 { entries[i].durationSeconds = duration }
-        if playing && accumulate { entries[i].watchedSeconds += 5 }
+        if playing && accumulate {
+            entries[i].watchedSeconds += 5
+            dailyWatched[Self.dayKey(Date()), default: 0] += 5
+            saveDaily()
+        }
         entries[i].updatedAt = Date()
         let entry = entries.remove(at: i)
         entries.insert(entry, at: 0)
@@ -206,10 +221,33 @@ final class HistoryStore: ObservableObject {
     }
 
     /// Total watched seconds whose last update falls on the given day.
+    /// v1.79: the daily ledger is the source of truth (real seconds
+    /// watched that day, accumulated by the player heartbeat). Days
+    /// before the ledger existed fall back to attributing each
+    /// entry's lifetime total to its last-touch day.
     func watchedSeconds(on day: Date) -> Double {
+        let key = Self.dayKey(day)
+        if let seconds = dailyWatched[key] { return seconds }
         let cal = Calendar.current
         return entries.filter { cal.isDate($0.updatedAt, inSameDayAs: day) }
             .reduce(0) { $0 + $1.watchedSeconds }
+    }
+
+    /// Daily watch-time ledger (v1.79): "yyyy-MM-dd" → seconds actually
+    /// watched that day. Drives the Profile heatmap and the
+    /// week/month stats; kept in its own file so old history.json
+    /// entries keep loading untouched.
+    private(set) var dailyWatched: [String: Double] = [:]
+
+    private let dailyFileURL: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("daily-watch.json")
+    }()
+
+    private static func dayKey(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     private func load() {

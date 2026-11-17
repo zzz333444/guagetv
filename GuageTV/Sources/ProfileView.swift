@@ -94,34 +94,98 @@ struct ProfileView: View {
         }
     }
 
-    /// Real heat: last 18 weeks × 7 days, intensity = how many
-    /// titles were touched that day.
+    /// Real heat: last 12 weeks × 7 days, intensity = seconds actually
+    /// watched that day (HistoryStore daily ledger). Below the grid,
+    /// this week / this month totals with days watched.
     private var heatmapCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("历史观看").font(.subheadline).foregroundStyle(Theme.textDim)
-                let cols = Array(repeating: GridItem(.fixed(14), spacing: 4), count: 18)
-                LazyVGrid(columns: cols, spacing: 4) {
-                    ForEach(0..<(18 * 7), id: \.self) { i in
-                        let count = heatCount(cellIndex: i)
+                HStack {
+                    Text("观看热力").font(.subheadline).foregroundStyle(Theme.textDim)
+                    Spacer()
+                    Text("近 12 周").font(.caption).foregroundStyle(Theme.textDim)
+                }
+                let cols = Array(repeating: GridItem(.fixed(20), spacing: 5), count: 12)
+                LazyVGrid(columns: cols, spacing: 5) {
+                    ForEach(0..<(12 * 7), id: \.self) { i in
+                        let level = heatLevel(cellIndex: i)
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(count == 0
+                            .fill(level == 0
                                   ? Color.white.opacity(0.07)
-                                  : Theme.accent.opacity(0.35 + 0.2 * Double(min(count, 3))))
-                            .frame(width: 14, height: 14)
+                                  : Theme.accent.opacity(0.30 + 0.17 * Double(level)))
+                            .frame(width: 20, height: 20)
                     }
+                }
+                HStack(spacing: 4) {
+                    Text("少").font(.caption2).foregroundStyle(Theme.textDim)
+                    ForEach(0...4, id: \.self) { level in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(level == 0
+                                  ? Color.white.opacity(0.07)
+                                  : Theme.accent.opacity(0.30 + 0.17 * Double(level)))
+                            .frame(width: 12, height: 12)
+                    }
+                    Text("多").font(.caption2).foregroundStyle(Theme.textDim)
+                }
+                Divider().background(Color.white.opacity(0.08))
+                HStack(spacing: 12) {
+                    periodStat(title: "本周", component: .weekOfYear)
+                    periodStat(title: "本月", component: .month)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func heatCount(cellIndex: Int) -> Int {
-        // Cell 0 = 125 days ago, cells flow day by day to today.
+    /// 0 = 没看；1 = <30 分钟；2 = <1 小时；3 = <2 小时；4 = ≥2 小时。
+    private func heatLevel(cellIndex: Int) -> Int {
+        // Cell 0 = 83 days ago, cells flow day by day to today.
         let cal = Calendar.current
-        guard let day = cal.date(byAdding: .day, value: -(18 * 7 - 1) + cellIndex,
+        guard let day = cal.date(byAdding: .day, value: -(12 * 7 - 1) + cellIndex,
                                  to: cal.startOfDay(for: Date())) else { return 0 }
-        return store.entries.filter { cal.isDate($0.updatedAt, inSameDayAs: day) }.count
+        let seconds = store.watchedSeconds(on: day)
+        switch seconds {
+        case 0: return 0
+        case ..<1800: return 1
+        case ..<3600: return 2
+        case ..<7200: return 3
+        default: return 4
+        }
+    }
+
+    private func periodStat(title: String, component: Calendar.Component) -> some View {
+        let stats = watchedStats(for: component)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(Theme.textDim)
+            Text(durationText(stats.seconds)).font(.headline).foregroundStyle(Theme.text)
+            Text("看了 \(stats.days) 天").font(.caption2).foregroundStyle(Theme.textDim)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Total seconds watched inside the current week / month, plus
+    /// how many days in that span had any viewing.
+    private func watchedStats(for component: Calendar.Component) -> (seconds: Double, days: Int) {
+        let cal = Calendar.current
+        guard let interval = cal.dateInterval(of: component, for: Date()) else { return (0, 0) }
+        var seconds = 0.0
+        var days = 0
+        var day = interval.start
+        while day < interval.end {
+            let s = store.watchedSeconds(on: day)
+            seconds += s
+            if s > 0 { days += 1 }
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return (seconds, days)
+    }
+
+    private func durationText(_ seconds: Double) -> String {
+        let minutes = Int(seconds / 60)
+        if minutes < 1 { return "0分钟" }
+        if minutes < 60 { return "\(minutes)分钟" }
+        return "\(minutes / 60)小时\(minutes % 60)分钟"
     }
 
     private var counters: some View {

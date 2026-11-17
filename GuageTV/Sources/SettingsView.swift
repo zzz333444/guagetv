@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.78 · 详情页媒体信息与评分星条"
+    static let buildLabel = "v1.79 · 我的页观看热力格"
 
     var body: some View {
         NavigationStack {
