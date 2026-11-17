@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.82 · 播放器画质与画面"
+    static let buildLabel = "v1.83 · 模块推荐与弹幕角标"
 
     var body: some View {
         NavigationStack {

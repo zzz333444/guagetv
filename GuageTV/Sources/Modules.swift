@@ -155,6 +155,12 @@ struct FWDItem: Identifiable {
         [backdrop, cover, poster].first { !$0.isEmpty } ?? ""
     }
 
+    /// One-line "year · ★rating" caption for recommendation cards.
+    var shortMetaLine: String {
+        [String(releaseDate.prefix(4)), rating.isEmpty ? "" : "★\(rating)"]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     init(_ d: [String: Any]) {
         func str(_ key: String) -> String {
             if let s = d[key] as? String { return s }
@@ -1093,9 +1099,21 @@ struct ModulesView: View {
                                     .foregroundStyle(Theme.accent)
                             }
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(record.meta.title.isEmpty ? record.id : record.meta.title)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(Theme.text).lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text(record.meta.title.isEmpty ? record.id : record.meta.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Theme.text).lineLimit(1)
+                                    // v1.83: badge packages that carry a danmu module —
+                                    // their titles play with live danmaku (FWDDanmu.fetch).
+                                    if FWDDanmu.hasDanmu(record.meta) {
+                                        Text("弹幕")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(Theme.accent)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Theme.glass, in: Capsule())
+                                    }
+                                }
                                 Text(moduleSubtitle(record))
                                     .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                             }
@@ -1732,6 +1750,13 @@ struct FWDDetailView: View {
                                             .foregroundStyle(Theme.text)
                                             .lineLimit(1)
                                             .frame(width: 92, alignment: .leading)
+                                        if !rel.shortMetaLine.isEmpty {
+                                            Text(rel.shortMetaLine)
+                                                .font(.caption2)
+                                                .foregroundStyle(Theme.textDim)
+                                                .lineLimit(1)
+                                                .frame(width: 92, alignment: .leading)
+                                        }
                                     }
                                 }
                                 .buttonStyle(.plain)
