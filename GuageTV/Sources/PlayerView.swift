@@ -93,6 +93,7 @@ struct PlayerView: View {
     @State private var episodeSegment = 0
     @State private var episodeReversed = false
     @State private var showPlayerSettings = false
+    @State private var showQualitySheet = false
     @State private var showDLNA = false
     /// Screen brightness captured when the player's own
     /// brightness setting （设置 → 音画 → 单独调整播放亮度） takes
@@ -240,6 +241,9 @@ struct PlayerView: View {
     @AppStorage("player.showGravity") private var showGravityButton = true
     @AppStorage("player.showRate") private var showRateButton = true
     @AppStorage("player.showEpisodeSwitch") private var showEpisodeSwitch = true
+    /// R5 (v1.82): bottom-right quality text button — shows the
+    /// current resolution (e.g. 1080P), opens the HLS cap sheet.
+    @AppStorage("player.showQuality") private var showQualityButton = true
     /// v1.40 additions: HLS quality cap, stats overlay, gesture
     /// tuning, portrait swipe-to-switch, danmaku and subtitles.
     @AppStorage("player.hlsQuality") private var hlsQuality = "auto"
@@ -415,6 +419,7 @@ struct PlayerView: View {
         }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showPlayerSettings) { playerSettingsSheet }
+        .sheet(isPresented: $showQualitySheet) { qualitySheet }
         .sheet(isPresented: $showDLNA) {
             DLNACastView(mediaURL: current.url, title: title) { message in
                 showToast(message)
@@ -764,6 +769,96 @@ struct PlayerView: View {
         mpv.applyHLSBitrate(hlsQuality)
     }
 
+    /// R5 (v1.82): bottom-right quality button label — the
+    /// current height from specText ("1920×1080 · H.264" →
+    /// "1080P"); "画质" while the resolution is still unknown
+    /// (live start / non-video / spec not sampled yet).
+    private var qualityButtonLabel: String {
+        let height = currentResolutionHeight
+        return height.map { "\($0)P" } ?? "画质"
+    }
+
+    /// Height parsed out of specText ("W×H" or "W×H · codec"),
+    /// nil when no size has been sampled yet.
+    private var currentResolutionHeight: Int? {
+        let parts = specText.split(separator: "×", maxSplits: 1)
+        guard parts.count == 2 else { return nil }
+        let digits = parts[1].prefix(while: { $0.isNumber })
+        guard let height = Int(digits), height > 0 else { return nil }
+        return height
+    }
+
+    /// R5 (v1.82): HLS quality cap sheet — same four caps as
+    /// the settings sheet's "画质（HLS 多码率）" section, plus
+    /// the live resolution on top. Glass list styling matches
+    /// playerSettingsSheet; switching applies immediately to
+    /// the running item (native preferredMaximumResolution /
+    /// mpv hls-bitrate) and persists via player.hlsQuality.
+    private var qualitySheet: some View {
+        NavigationStack {
+            List {
+                if let height = currentResolutionHeight {
+                    Section {
+                        HStack {
+                            Text("当前分辨率").foregroundStyle(Theme.text)
+                            Spacer()
+                            Text(specText).foregroundStyle(Theme.textDim)
+                        }
+                    } header: {
+                        Text("正在播放")
+                    } footer: {
+                        Text("当前为 \(height)P。切换上限后正在播的流即时重选码率。")
+                    }
+                }
+                Section("画质上限（HLS 多码率）") {
+                    ForEach([("auto", "自动"), ("1080", "最高 1080p"), ("720", "最高 720p"), ("480", "最高 480p")], id: \.0) { option in
+                        Button {
+                            hlsQuality = option.0
+                            applyHLSQuality()
+                            showToast(option.0 == "auto" ? "画质：自动" : "画质上限：\(option.1)")
+                        } label: {
+                            HStack {
+                                Text(option.1).foregroundStyle(Theme.text)
+                                Spacer()
+                                if hlsQuality == option.0 {
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                }
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("仅对 HLS 多码率流生效；单码率 / MP4 不受影响。")
+                }
+                Section("画面") {
+                    Button {
+                        toggleGravity()
+                    } label: {
+                        HStack {
+                            Label(videoGravity == "fill" ? "填充屏幕" : "适应屏幕",
+                                  systemImage: "aspectratio")
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                        }
+                    }
+                } footer: {
+                    Text("点播与直播共用同一入口，点按即切换。")
+                }
+            }
+            .navigationTitle("画质")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { showQualitySheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .preferredColorScheme(.dark)
+    }
+
     /// F3: stats sampling follows the overlay toggle; the speed
     /// pill keeps the native access-log sampler alive on its own.
     /// Opening the overlay refreshes once immediately so it is
@@ -978,6 +1073,38 @@ struct PlayerView: View {
                 if showRateButton {
                     Button { cycleRate(); pokeChrome() } label: {
                         Text(currentRate == 1 ? "倍速" : "倍速 \(String(format: "%.2g", currentRate))")
+                            .font(.system(size: compact ? 14 : 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                // R5 (v1.82): bottom-right quality text button —
+                // current resolution (e.g. 1080P) when known, else
+                // "画质"; tap opens the HLS cap sheet. Shown for
+                // VOD and live alike (no isLive/episode gating).
+                if showQualityButton {
+                    Button { showQualitySheet = true; pokeChrome() } label: {
+                        Text(qualityButtonLabel)
+                            .font(.system(size: compact ? 14 : 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                // R5 (v1.82): fill mode as a bottom-row text
+                // button — the same entry for VOD and live
+                // (previously only the top-right icon + the
+                // settings Picker; the icon can be hidden and
+                // competes for space in portrait). Shares the
+                // "画面适配按钮" toggle with the top icon.
+                if showGravityButton {
+                    Button { toggleGravity(); pokeChrome() } label: {
+                        Text(videoGravity == "fill" ? "填充" : "适应")
                             .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -1440,6 +1567,7 @@ struct PlayerView: View {
                     Toggle("当前时间显示", isOn: $showClock)
                     Toggle("截图按钮", isOn: $showScreenshotButton)
                     Toggle("画面适配按钮", isOn: $showGravityButton)
+                    Toggle("画质按钮", isOn: $showQualityButton)
                     Toggle("倍速按钮", isOn: $showRateButton)
                     Toggle("切集按钮", isOn: $showEpisodeSwitch)
                 }
