@@ -356,6 +356,7 @@ enum ConfigLibrary {
 
     static func setActive(id: String) {
         UserDefaults.standard.set(id, forKey: activeKey)
+        markUsed(id: id)
         if let entry = entries().first(where: { $0.id == id }) {
             // PySiteBrowseView resolves relative spider paths against
             // this key; it must always name the ACTIVE line's source.
@@ -407,6 +408,22 @@ enum ConfigLibrary {
     /// one is set, else the imported name.
     static func shownName(_ entry: Entry) -> String {
         alias(for: entry.id) ?? entry.name
+    }
+
+    // MARK: 最近使用（资源库「最近使用」排序，v1.81）
+
+    /// entryID → 上次激活时间戳。单独存 UserDefaults，不动 Entry
+    /// 结构，旧数据天然兼容（无记录时回退 addedAt）。
+    private static let lastUsedKey = "configLineLastUsed.v1"
+
+    static func lastUsedAt(for id: String) -> TimeInterval? {
+        (UserDefaults.standard.dictionary(forKey: lastUsedKey) as? [String: TimeInterval])?[id]
+    }
+
+    static func markUsed(id: String) {
+        var map = (UserDefaults.standard.dictionary(forKey: lastUsedKey) as? [String: TimeInterval]) ?? [:]
+        map[id] = Date().timeIntervalSince1970
+        UserDefaults.standard.set(map, forKey: lastUsedKey)
     }
 
     // MARK: groups （资源库分组）

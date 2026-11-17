@@ -27,6 +27,20 @@ struct LibraryView: View {
     @State private var pyGroupEntries: [ConfigLibrary.Entry] = []
     @State private var renamingEntry: ConfigLibrary.Entry?
     @State private var renameText = ""
+    /// 资源库配置排序（v1.81）：名称 / 站点数 / 最近使用。
+    /// 排序只作用于分组内的线路卡片顺序，分组本身的创建顺序不动。
+    private enum LibrarySort: String, CaseIterable {
+        case name, siteCount, recent
+        var label: String {
+            switch self {
+            case .name: return "名称"
+            case .siteCount: return "站点数"
+            case .recent: return "最近使用"
+            }
+        }
+    }
+    private static let sortKey = "librarySort.v1"
+    @State private var sortMode: LibrarySort = LibrarySort(rawValue: UserDefaults.standard.string(forKey: sortKey) ?? "") ?? .name
     /// Direct-open route for single-file (py / JS) lines: tapping
     /// the card pushes its one site's browse page immediately.
     @State private var directRoute: FileSiteRoute?
@@ -49,6 +63,27 @@ struct LibraryView: View {
                 HStack {
                     Text("资源库").font(.largeTitle.bold()).foregroundStyle(Theme.text)
                     Spacer()
+                    Menu {
+                        Picker("排序", selection: $sortMode) {
+                            ForEach(LibrarySort.allCases, id: \.self) { mode in
+                                Text(mode.label).tag(mode)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.arrow.down")
+                            Text("排序：\(sortMode.label)")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .glassCapsule()
+                        .foregroundStyle(Theme.text)
+                    }
+                    .onChange(of: sortMode) { _, newMode in
+                        UserDefaults.standard.set(newMode.rawValue, forKey: Self.sortKey)
+                        Haptics.tap()
+                        rebuildCardModels()
+                    }
                     Button("编辑") { Haptics.tap(); showGroupEditor = true }
                         .font(.subheadline.weight(.medium))
                         .padding(.horizontal, 16).padding(.vertical, 7)
@@ -62,7 +97,7 @@ struct LibraryView: View {
                 MediaHubSection()
 
                 if !pyGroupEntries.isEmpty {
-                    Text("Python 站点").font(.headline).foregroundStyle(Theme.section)
+                    Text("Python 站点 · \(pyGroupEntries.count) 个源").font(.headline).foregroundStyle(Theme.section)
                     NavigationLink {
                         PyGroupView(config: $config,
                                     onPick: { entry in
@@ -306,20 +341,50 @@ struct LibraryView: View {
         }
         var sections: [(id: String, title: String, models: [LineCardModel])] = []
         for group in groups {
-            let items = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == group.id }
-            if !items.isEmpty { sections.append((group.id, group.name, items.map(model))) }
+            let items = sortedEntries(entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == group.id })
+            if !items.isEmpty { sections.append((group.id, sectionTitle(group.name, items), items.map(model))) }
         }
         // Python files no longer render as a card grid: they
         // collapse into the single group entry above the sections.
-        pyGroupEntries = entries.filter {
+        pyGroupEntries = sortedEntries(entries.filter {
             ConfigLibrary.effectiveGroupID(for: $0) == ConfigLibrary.pyAutoGroupID
-        }
-        let loose = entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == nil }
+        })
+        let loose = sortedEntries(entries.filter { ConfigLibrary.effectiveGroupID(for: $0) == nil })
         if !loose.isEmpty {
-            sections.append(("loose", sections.isEmpty && pyGroupEntries.isEmpty ? "我的线路" : "未分组", loose.map(model)))
+            sections.append(("loose", sectionTitle(sections.isEmpty && pyGroupEntries.isEmpty ? "我的线路" : "未分组", loose), loose.map(model)))
         }
         cardSections = sections
         prefetchEmbyPosters()
+    }
+
+    /// 分组头带站点数（v1.81）："分组名 · N 站"，N 为组内各线路
+    /// siteCount 之和；无站点记录的线路按 0 计。
+    private func sectionTitle(_ name: String, _ items: [ConfigLibrary.Entry]) -> String {
+        let total = items.reduce(0) { $0 + $1.siteCount }
+        return "\(name) · \(total) 站"
+    }
+
+    /// 按当前排序模式排一组线路。名称用本地化比较；站点数降序；
+    /// 最近使用按上次激活时间降序，无记录回退导入时间。
+    private func sortedEntries(_ list: [ConfigLibrary.Entry]) -> [ConfigLibrary.Entry] {
+        switch sortMode {
+        case .name:
+            return list.sorted {
+                ConfigLibrary.shownName($0).localizedStandardCompare(ConfigLibrary.shownName($1)) == .orderedAscending
+            }
+        case .siteCount:
+            return list.sorted {
+                if $0.siteCount != $1.siteCount { return $0.siteCount > $1.siteCount }
+                return ConfigLibrary.shownName($0).localizedStandardCompare(ConfigLibrary.shownName($1)) == .orderedAscending
+            }
+        case .recent:
+            return list.sorted {
+                let a = ConfigLibrary.lastUsedAt(for: $0.id) ?? $0.addedAt
+                let b = ConfigLibrary.lastUsedAt(for: $1.id) ?? $1.addedAt
+                if a != b { return a > b }
+                return ConfigLibrary.shownName($0).localizedStandardCompare(ConfigLibrary.shownName($1)) == .orderedAscending
+            }
+        }
     }
 
     /// F1: the library page itself shows no posters, but its
