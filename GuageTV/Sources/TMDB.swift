@@ -32,8 +32,7 @@ enum TMDBClient {
             URLQueryItem(name: "language", value: "zh-CN"),
         ]
         guard let url = comps?.url,
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let root = await getJSON(url),
               let cast = root["cast"] as? [[String: Any]] else { return [] }
         return cast.prefix(15).compactMap { person in
             guard let pid = (person["id"] as? NSNumber)?.intValue,
@@ -81,6 +80,30 @@ enum TMDBClient {
         path.isEmpty ? "" : "\(imageBase)/\(size)" + path
     }
 
+    /// The user's own JarProxy TMDB forward — the no-ladder
+    /// route behind the settings preset, also used as an
+    /// automatic fallback when the configured route does not
+    /// answer (v1.76).
+    static let forwardBase = "https://jarproxy.onrender.com/tmdb"
+
+    /// GET a JSON object through the configured base; when that
+    /// route does not answer and is not already the forward,
+    /// retry once through the forward.
+    static func getJSON(_ url: URL) async -> [String: Any]? {
+        if let (data, _) = try? await URLSession.shared.data(from: url),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return root
+        }
+        let text = url.absoluteString
+        if !text.hasPrefix(forwardBase), text.hasPrefix(base),
+           let altURL = URL(string: forwardBase + text.dropFirst(base.count)),
+           let (data, _) = try? await URLSession.shared.data(from: altURL),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return root
+        }
+        return nil
+    }
+
     private static var apiKey: String {
         (UserDefaults.standard.string(forKey: "tmdb.key") ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,8 +129,7 @@ enum TMDBClient {
             URLQueryItem(name: "query", value: name),
         ]
         guard let url = comps?.url,
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let root = await getJSON(url),
               let results = root["results"] as? [[String: Any]] else { return nil }
         let candidates = results.filter {
             ["movie", "tv"].contains($0["media_type"] as? String ?? "")
@@ -174,8 +196,7 @@ enum TMDBClient {
             URLQueryItem(name: "language", value: "zh-CN"),
         ]
         guard let url = comps?.url,
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let root = await getJSON(url),
               let results = root["results"] as? [[String: Any]] else { return [] }
         return results.compactMap { r in
             let type = forcedType ?? (r["media_type"] as? String ?? "")
@@ -234,8 +255,7 @@ enum TMDBClient {
         ]
         var found = ""
         if let url = comps?.url,
-           let (data, _) = try? await URLSession.shared.data(from: url),
-           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let root = await getJSON(url),
            let logos = root["logos"] as? [[String: Any]], !logos.isEmpty {
             let picked = logos.first { ($0["iso_639_1"] as? String) == "zh" }
                 ?? logos.first { ($0["iso_639_1"] as? String) == "en" }

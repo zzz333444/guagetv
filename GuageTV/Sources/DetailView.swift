@@ -253,52 +253,90 @@ struct DetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// White capsule primary action (plays / resumes through the
-    /// same tapEpisode path as the grid) + glass round buttons for
-    /// favourite (bookmark) and download mode.
+    /// The episode the white button will play (resume target or
+    /// the line's first), as a Rex-style sub-line: 第N集 · 原名.
+    private var primarySubline: String {
+        let episodes = detail.playGroups.indices.contains(lineIndex)
+            ? detail.playGroups[lineIndex] : []
+        guard !episodes.isEmpty else { return "" }
+        let idx = episodes.firstIndex { historyEntry?.episodeID == $0.url } ?? 0
+        let ep = episodes[idx]
+        let display = guageEpisodeDisplayName(ep.name, index: idx)
+        return ep.name == display ? display : "\(display) · \(ep.name)"
+    }
+
+    /// White capsule primary action (two lines, Rex-style: 播放 /
+    /// 第N集） + ONE glass capsule holding the three labeled
+    /// actions 收藏 / 追剧 / 下载. In this app 收藏 and 追剧 are
+    /// the same list — a favourite lands on the 追剧 page and
+    /// gets update checks — so both buttons reflect and toggle
+    /// the same state.
     private var actionRow: some View {
         HStack(spacing: 12) {
             Button {
                 Haptics.tap()
                 primaryPlay()
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                    Text(hasResume ? "继续播放" : "播放")
+                VStack(spacing: 1) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                        Text(hasResume ? "继续播放" : "播放")
+                    }
+                    .font(.headline)
+                    if !primarySubline.isEmpty {
+                        Text(primarySubline)
+                            .font(.caption.weight(.medium))
+                            .opacity(0.65)
+                            .lineLimit(1)
+                    }
                 }
-                .font(.headline)
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
+                .padding(.vertical, 10)
                 .background(.white, in: Capsule())
                 .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
-            if historySeed != nil {
-                Button { toggleFavourite() } label: {
-                    Image(systemName: isFav ? "bookmark.fill" : "bookmark")
-                        .font(.title3)
-                        .foregroundStyle(isFav ? Theme.accent : Theme.text)
-                        .frame(width: 48, height: 48)
-                        .background(Theme.glass, in: Circle())
-                        .overlay(Circle().strokeBorder(Theme.glassStroke, lineWidth: 1))
+            HStack(spacing: 2) {
+                if historySeed != nil {
+                    actionCapsuleItem(
+                        icon: isFav ? "bookmark.fill" : "bookmark",
+                        label: "收藏", active: isFav) { toggleFavourite() }
+                    actionCapsuleItem(
+                        icon: isFav ? "bell.fill" : "bell",
+                        label: "追剧", active: isFav) {
+                        let turningOn = !isFav
+                        toggleFavourite()
+                        if turningOn { playNote = "已加入追剧，更新会在追剧页提醒" }
+                    }
                 }
-                .buttonStyle(.plain)
+                actionCapsuleItem(
+                    icon: downloadMode ? "arrow.down.circle.fill" : "arrow.down.circle",
+                    label: "下载", active: downloadMode) {
+                    Haptics.tap()
+                    downloadMode.toggle()
+                    if downloadMode { playNote = "下载模式：点任意一集就下载，再点一次退出" }
+                }
             }
-            Button {
-                Haptics.tap()
-                downloadMode.toggle()
-                if downloadMode { playNote = "下载模式：点任意一集就下载，再点一次退出" }
-            } label: {
-                Image(systemName: downloadMode ? "arrow.down.circle.fill" : "arrow.down.circle")
-                    .font(.title3)
-                    .foregroundStyle(downloadMode ? Theme.accent : Theme.text)
-                    .frame(width: 48, height: 48)
-                    .background(Theme.glass, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.glassStroke, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(Theme.glass, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
         }
+    }
+
+    /// One labeled mini-action inside the glass capsule.
+    private func actionCapsuleItem(icon: String, label: String, active: Bool,
+                                   action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 17))
+                Text(label).font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(active ? Theme.accent : Theme.text)
+            .frame(width: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Director / cast, kept from the old header as quiet lines.
@@ -479,6 +517,19 @@ struct DetailView: View {
         let visible = chunks.indices.contains(episodeSegment)
             ? chunks[episodeSegment] : (chunks.first ?? [])
         return VStack(alignment: .leading, spacing: 12) {
+            if detail.playFrom.count > 1 {
+                // 播放资源 (v1.76, Rex-style): lines as two-column
+                // resource cards instead of a dropdown menu; the
+                // active line gets the lighter border + green check.
+                Text("播放资源").font(.headline).foregroundStyle(Theme.text)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                    GridItem(.flexible(), spacing: 10)],
+                          spacing: 10) {
+                    ForEach(detail.playFrom.indices, id: \.self) { i in
+                        lineCard(i)
+                    }
+                }
+            }
             HStack {
                 Text("选集").font(.headline).foregroundStyle(Theme.text)
                 Spacer()
@@ -497,35 +548,6 @@ struct DetailView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                if detail.playFrom.count > 1 {
-                    Menu {
-                        ForEach(detail.playFrom.indices, id: \.self) { i in
-                            Button {
-                                Haptics.selection()
-                                lineIndex = i
-                            } label: {
-                                if i == lineIndex {
-                                    Label(detail.playFrom[i], systemImage: "checkmark")
-                                } else {
-                                    Text(detail.playFrom[i])
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(detail.playFrom.indices.contains(lineIndex)
-                                 ? detail.playFrom[lineIndex] : "线路")
-                                .lineLimit(1)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2.weight(.bold))
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(Theme.glass, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
-                    }
-                }
             }
             if chunks.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -543,11 +565,11 @@ struct DetailView: View {
                     }
                 }
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                GridItem(.flexible(), spacing: 10)],
-                      spacing: 10) {
-                ForEach(visible, id: \.element.id) { pair in
-                    episodeCard(pair.element, origIndex: pair.offset, in: episodes)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(visible, id: \.element.id) { pair in
+                        episodeRailCard(pair.element, origIndex: pair.offset, in: episodes)
+                    }
                 }
             }
             if episodes.count > 1 {
@@ -570,43 +592,83 @@ struct DetailView: View {
         .onChange(of: lineIndex) { _, _ in episodeSegment = 0 }
     }
 
-    /// One episode: poster thumbnail + name on a glass card; the
-    /// episode the history entry sits on (with real progress)
-    /// carries the white watched-check badge.
-    private func episodeCard(_ ep: VodDetail.Episode, origIndex: Int, in episodes: [VodDetail.Episode]) -> some View {
-        HStack(spacing: 10) {
+    /// One 播放资源 line card (v1.76): name + episode count; the
+    /// active line gets the lighter border and green check (Rex).
+    private func lineCard(_ i: Int) -> some View {
+        let active = i == lineIndex
+        let count = detail.playGroups.indices.contains(i) ? detail.playGroups[i].count : 0
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(detail.playFrom[i])
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Text(count > 0 ? "共 \(count) 集" : "暂无集数")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textDim)
+            }
+            Spacer(minLength: 0)
+            if active {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.green)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(active ? Color.white.opacity(0.45) : Color.white.opacity(0.12),
+                          lineWidth: active ? 1.5 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Haptics.selection()
+            lineIndex = i
+        }
+    }
+
+    /// One episode on the horizontal rail (v1.76, Rex-style): a
+    /// 16:9 still card — the show's TMDB backdrop when known,
+    /// else its poster (line feeds carry no per-episode stills) —
+    /// with 第N集 and the raw name under it. The episode the
+    /// history entry sits on keeps its white watched-check badge.
+    private func episodeRailCard(_ ep: VodDetail.Episode, origIndex: Int,
+                                 in episodes: [VodDetail.Episode]) -> some View {
+        let still = [tmdbInfo?.backdrop ?? "", detail.pic].first { !$0.isEmpty } ?? ""
+        let displayName = guageEpisodeDisplayName(ep.name, index: origIndex)
+        return VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
-                if !detail.pic.isEmpty {
-                    PosterImage(urlString: detail.pic)
-                        .frame(width: 58, height: 38)
+                if !still.isEmpty {
+                    PosterImage(urlString: still)
+                        .frame(width: 176, height: 99)
                         .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 } else {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.white.opacity(0.08))
-                        .frame(width: 58, height: 38)
+                        .frame(width: 176, height: 99)
                 }
                 if isWatched(ep) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 8, weight: .black))
+                        .font(.system(size: 9, weight: .black))
                         .foregroundStyle(.black)
-                        .frame(width: 15, height: 15)
+                        .frame(width: 17, height: 17)
                         .background(.white, in: Circle())
                         .overlay(Circle().strokeBorder(.black.opacity(0.15), lineWidth: 0.5))
-                        .offset(x: 4, y: -4)
+                        .offset(x: 5, y: -5)
                 }
             }
-            Text(guageEpisodeDisplayName(ep.name, index: origIndex))
-                .font(.subheadline)
+            Text(displayName)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.text)
-                .lineLimit(2)
-            Spacer(minLength: 0)
+                .lineLimit(1)
+            if ep.name != displayName {
+                Text(ep.name)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textDim)
+                    .lineLimit(1)
+            }
         }
-        .padding(10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .frame(width: 176, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
             Haptics.tap()

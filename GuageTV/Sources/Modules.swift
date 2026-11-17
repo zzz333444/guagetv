@@ -755,11 +755,23 @@ final class FWDRuntime {
         guard let url = comps.url else {
             return "{\"success\":false,\"status_message\":\"TMDB 路径无效\"}"
         }
-        let result = JSRuntime.syncFetch(urlString: url.absoluteString, obj: ["method": "GET"])
-        let content = (result["content"] as? String) ?? ""
-        if let data = content.data(using: .utf8),
-           (try? JSONSerialization.jsonObject(with: data)) != nil {
-            return content
+        func fetchJSON(_ u: URL) -> String? {
+            let r = JSRuntime.syncFetch(urlString: u.absoluteString,
+                                        obj: ["method": "GET", "timeout": 12000])
+            let c = (r["content"] as? String) ?? ""
+            guard let d = c.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: d)) != nil else { return nil }
+            return c
+        }
+        if let content = fetchJSON(url) { return content }
+        // The configured route did not answer (themoviedb.org is
+        // unreachable on many networks): one retry through the
+        // user's own JarProxy forward, so module TMDB columns
+        // work with zero setup (v1.76).
+        if apiBase != TMDBClient.forwardBase,
+           var alt = URLComponents(string: TMDBClient.forwardBase + fullPath) {
+            alt.queryItems = query
+            if let u = alt.url, let content = fetchJSON(u) { return content }
         }
         return "{\"success\":false,\"status_message\":\"TMDB 无响应\"}"
     }
@@ -972,6 +984,8 @@ struct ModulesView: View {
     @State private var importURL = ""
     @State private var note: String?
     @State private var importing = false
+    @State private var checking = false
+    @State private var checkLines: [String] = []
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1002,28 +1016,52 @@ struct ModulesView: View {
                     .buttonStyle(.plain)
                     if importing { ProgressView().tint(Theme.text) }
                 }
-                Button {
-                    Haptics.tap()
-                    importing = true
-                    Task {
-                        defer { importing = false }
-                        var count = 0
-                        for url in ["https://assets.rexnow.tv/scripts/rex-tmdb.js",
-                                    "https://assets.rexnow.tv/scripts/bangumi.js"] {
-                            if (try? await FWDStore.importRemote(url)) != nil { count += 1 }
+                HStack(spacing: 10) {
+                    Button {
+                        Haptics.tap()
+                        importing = true
+                        Task {
+                            defer { importing = false }
+                            var count = 0
+                            for url in ["https://assets.rexnow.tv/scripts/rex-tmdb.js",
+                                        "https://assets.rexnow.tv/scripts/bangumi.js"] {
+                                if (try? await FWDStore.importRemote(url)) != nil { count += 1 }
+                            }
+                            note = count > 0 ? "已导入 Rex 官方模块 \(count) 个"
+                                             : "Rex 官方模块导入失败，检查网络后重试"
+                            records = FWDStore.records()
                         }
-                        note = count > 0 ? "已导入 Rex 官方模块 \(count) 个"
-                                         : "Rex 官方模块导入失败，检查网络后重试"
-                        records = FWDStore.records()
+                    } label: {
+                        Label("导入 Rex 官方模块", systemImage: "star.square.on.square")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Theme.glass, in: Capsule())
                     }
-                } label: {
-                    Label("导入 Rex 官方模块", systemImage: "star.square.on.square")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(Theme.glass, in: Capsule())
+                    .buttonStyle(.plain)
+                    Button {
+                        Haptics.tap()
+                        Task { await runSelfCheck() }
+                    } label: {
+                        Label(checking ? "自检中…" : "模块自检", systemImage: "stethoscope")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Theme.glass, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(checking)
                 }
-                .buttonStyle(.plain)
+                if !checkLines.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(checkLines, id: \.self) { line in
+                            Text(line).font(.footnote).foregroundStyle(Theme.textDim)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                }
                 if let note {
                     Text(note).font(.footnote).foregroundStyle(Theme.textDim)
                 }
@@ -1137,6 +1175,62 @@ struct ModulesView: View {
         }
     }
 
+    /// In-app module self-check (v1.76): TMDB key presence, both
+    /// TMDB routes, and every imported module's first list column
+    /// with real calls — the same checks support would run, in
+    /// the user's own network, reported in plain language.
+    private func runSelfCheck() async {
+        checking = true
+        checkLines = []
+        defer { checking = false }
+        let key = (UserDefaults.standard.string(forKey: "tmdb.key") ?? "")
+        checkLines.append(key.isEmpty ? "✗ TMDB 密钥未填（去设置 → TMDB 填入）"
+                                      : "✓ TMDB 密钥已填")
+        let baseRaw = (UserDefaults.standard.string(forKey: "tmdb.base") ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let configured = baseRaw.isEmpty ? "https://api.themoviedb.org" : baseRaw
+        checkLines.append(await tmdbPing(configured)
+            ? "✓ TMDB 线路（当前设置）可达"
+            : "✗ TMDB 线路（当前设置）不通")
+        if configured != TMDBClient.forwardBase {
+            checkLines.append(await tmdbPing(TMDBClient.forwardBase)
+                ? "✓ TMDB 转发线路可达（直连不通时自动走它）"
+                : "✗ TMDB 转发线路不通")
+        }
+        if records.isEmpty {
+            checkLines.append("（还没有导入任何模块）")
+        }
+        for record in records {
+            guard let module = record.meta.listModules.first,
+                  let source = FWDStore.source(for: record) else { continue }
+            let title = record.meta.title.isEmpty ? record.id : record.meta.title
+            do {
+                let result = try await FWDRuntime(widgetID: record.id)
+                    .call(function: module.functionName,
+                          params: fwdDefaultParams(meta: record.meta, module: module),
+                          source: source)
+                let n = (result as? [[String: Any]])?.count ?? 0
+                checkLines.append(n > 0
+                    ? "✓ \(title)：「\(module.title)」出 \(n) 条"
+                    : "△ \(title)：「\(module.title)」返回 0 条")
+            } catch {
+                checkLines.append("✗ \(title)：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Any JSON back — even a TMDB 401 error body — proves the
+    /// route itself answers.
+    private func tmdbPing(_ base: String) async -> Bool {
+        let key = (UserDefaults.standard.string(forKey: "tmdb.key") ?? "")
+        guard let url = URL(string: base + "/3/configuration?api_key=\(key)") else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 12
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
     private func moduleSubtitle(_ record: FWDRecord) -> String {
         var parts: [String] = []
         if !record.meta.author.isEmpty { parts.append(record.meta.author) }
@@ -1145,6 +1239,29 @@ struct ModulesView: View {
         if let host = URL(string: record.source)?.host { parts.append(host) }
         return parts.joined(separator: " · ")
     }
+}
+
+/// Default params for a module's first run (self-check): the
+/// same fallback rules as FWDWidgetView.buildParams with no
+/// user selections — enumerations take their first option,
+/// inputs take their first placeholder suggestion.
+func fwdDefaultParams(meta: FWDMeta, module: FWDModuleEntry) -> [String: Any] {
+    var params: [String: Any] = [:]
+    for p in meta.globalParams where !p.value.isEmpty { params[p.name] = p.value }
+    for p in module.params {
+        if p.type == "page" || p.name == "page" {
+            params[p.name] = 1
+        } else if p.type == "count" || p.type == "offset" {
+            params[p.name] = Int(p.value) ?? p.value
+        } else if p.type == "enumeration" {
+            params[p.name] = p.value.isEmpty ? (p.enumOptions.first?.value ?? "") : p.value
+        } else if p.type == "input" {
+            params[p.name] = p.value.isEmpty ? (p.placeholders.first?.value ?? "") : p.value
+        } else if !p.value.isEmpty {
+            params[p.name] = p.value
+        }
+    }
+    return params
 }
 
 // MARK: - Widget browse
@@ -1226,6 +1343,12 @@ struct FWDWidgetView: View {
                         page = 1
                         Task { await load(reset: true) }
                     }
+                }
+                if (UserDefaults.standard.string(forKey: "tmdb.key") ?? "").isEmpty,
+                   record.meta.id.lowercased().contains("tmdb") {
+                    Text("提示：TMDB 密钥还没填，这个模块的栏目不出数据。去「设置 → TMDB」填入 v3 密钥即可；线路不通时会自动走 JarProxy 转发，不用梯子。")
+                        .font(.caption).foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let module = currentModule {
                     ForEach(module.params.filter { $0.type == "enumeration" && !$0.enumOptions.isEmpty },
