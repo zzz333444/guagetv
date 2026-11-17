@@ -810,7 +810,7 @@ struct PlayerView: View {
                         Text("当前为 \(height)P。切换上限后正在播的流即时重选码率。")
                     }
                 }
-                Section("画质上限（HLS 多码率）") {
+                Section {
                     ForEach([("auto", "自动"), ("1080", "最高 1080p"), ("720", "最高 720p"), ("480", "最高 480p")], id: \.0) { option in
                         Button {
                             hlsQuality = option.0
@@ -826,10 +826,12 @@ struct PlayerView: View {
                             }
                         }
                     }
+                } header: {
+                    Text("画质上限（HLS 多码率）")
                 } footer: {
                     Text("仅对 HLS 多码率流生效；单码率 / MP4 不受影响。")
                 }
-                Section("画面") {
+                Section {
                     Button {
                         toggleGravity()
                     } label: {
@@ -843,6 +845,8 @@ struct PlayerView: View {
                                 .foregroundStyle(Theme.textDim)
                         }
                     }
+                } header: {
+                    Text("画面")
                 } footer: {
                     Text("点播与直播共用同一入口，点按即切换。")
                 }
