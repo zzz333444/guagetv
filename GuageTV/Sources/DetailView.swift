@@ -68,6 +68,9 @@ struct DetailView: View {
     @State private var playNote: String?
     @State private var downloadMode = false
     @State private var synopsisExpanded = false
+    /// Bottom 媒体信息 expandable (v1.78): source site / line /
+    /// type / remarks — only fields the detail already carries.
+    @State private var mediaInfoExpanded = false
     /// TMDB enrichment for this title （设置里开启并填了密钥才有）:
     /// backdrop for the hero, a synopsis when the feed has none,
     /// and the TMDB score chip under the title.
@@ -90,6 +93,7 @@ struct DetailView: View {
                     if !tmdbCast.isEmpty { castBlock }
                     if !tmdbSimilar.isEmpty { similarBlock }
                     episodeSection
+                    mediaInfoSection
                 }
                 .padding(.horizontal, 18)
                 // Pulled UP over the hero's melt zone: the title
@@ -240,17 +244,40 @@ struct DetailView: View {
                     .foregroundStyle(Theme.accent)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let score = tmdbInfo?.score, !score.isEmpty {
-                HStack(spacing: 5) {
-                    Image(systemName: "star.fill").font(.caption2)
-                    Text("TMDB \(score)").font(.caption.weight(.bold))
+            if let score = tmdbInfo?.score, !score.isEmpty, let value = Double(score) {
+                // TMDB score as a 5-star bar (v1.78): 10-point score
+                // mapped to 5 stars, partial fill on the last star.
+                HStack(spacing: 6) {
+                    starBar(value: value)
+                    Text(score).font(.subheadline.weight(.bold))
+                    Text("TMDB").font(.caption).foregroundStyle(Theme.textDim)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
+                .foregroundStyle(Theme.text)
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Five stars for a 0–10 score: each star fills by
+    /// clamp(score/2 − index, 0, 1), so 8.4 shows 4 full stars
+    /// plus a fifth one-fifth full.
+    private func starBar(value: Double) -> some View {
+        HStack(spacing: 2) {
+            ForEach(0..<5) { i in
+                let fill = min(max(value / 2 - Double(i), 0), 1)
+                ZStack {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(Color.white.opacity(0.25))
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(Color(red: 1, green: 0.8, blue: 0.2))
+                        .mask(alignment: .leading) {
+                            Rectangle().frame(width: 13 * fill, height: 13)
+                        }
+                }
+                .font(.system(size: 13))
+                .frame(width: 13, height: 13)
+            }
+        }
     }
 
     /// The episode the white button will play (resume target or
@@ -443,6 +470,76 @@ struct DetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Bottom 媒体信息 (v1.78): a glass card listing only what
+    /// the detail already carries — source site, current line,
+    /// type, year, area, update status, episode counts. Empty
+    /// fields are dropped, never invented; when nothing survives
+    /// the whole section stays hidden.
+    private var mediaInfoRows: [(label: String, value: String)] {
+        let episodes = detail.playGroups.indices.contains(lineIndex)
+            ? detail.playGroups[lineIndex] : []
+        let line = detail.playFrom.indices.contains(lineIndex)
+            ? detail.playFrom[lineIndex] : ""
+        let lineValue = line.isEmpty ? "" : (episodes.isEmpty ? line : "\(line)（共 \(episodes.count) 集）")
+        return [
+            ("来源站点", historySeed?.siteName ?? ""),
+            ("当前线路", lineValue),
+            ("播放线路", detail.playFrom.count > 1 ? "\(detail.playFrom.count) 条" : ""),
+            ("类型", detail.typeName),
+            ("年份", detail.year),
+            ("地区", detail.area),
+            ("更新状态", detail.remarks),
+        ].filter { !$0.value.isEmpty }
+    }
+
+    @ViewBuilder
+    private var mediaInfoSection: some View {
+        if !mediaInfoRows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    Haptics.selection()
+                    withAnimation(.easeInOut(duration: 0.2)) { mediaInfoExpanded.toggle() }
+                } label: {
+                    HStack {
+                        Text("媒体信息").font(.headline).foregroundStyle(Theme.text)
+                        Spacer()
+                        Image(systemName: mediaInfoExpanded ? "chevron.up" : "chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if mediaInfoExpanded {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(mediaInfoRows, id: \.label) { row in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(row.label)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.textDim)
+                                    .frame(width: 64, alignment: .leading)
+                                Text(row.value)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.text.opacity(0.88))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 7)
+                            if row.label != mediaInfoRows.last?.label {
+                                Divider().background(Theme.glassStroke)
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.glassStroke, lineWidth: 1))
         }
     }
 
