@@ -60,6 +60,31 @@ enum CacheManager {
         for area in Area.allCases { await clear(area) }
     }
 
+    /// Poster disk cache: Caches/posters (see PosterStore). Kept
+    /// separate from the generic areas so the downloads page can
+    /// report and clear just the posters without touching the rest.
+    static var posterCacheDirectory: URL {
+        FileManager.default
+            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("posters", isDirectory: true)
+    }
+
+    static func posterCacheSize() async -> Int64 {
+        await detachedSize(of: posterCacheDirectory)
+    }
+
+    /// Clears the poster disk cache and the in-memory poster cache.
+    /// Downloaded videos are never touched.
+    static func clearPosterCache() async {
+        await detachedClearContents(of: posterCacheDirectory)
+        await MainActor.run { PosterCache.shared.clearMemory() }
+    }
+
+    /// Size of an arbitrary directory, off the main thread.
+    static func sizeOfDirectory(_ dir: URL) async -> Int64 {
+        await detachedSize(of: dir)
+    }
+
     static func format(_ bytes: Int64) -> String {
         if bytes <= 0 { return "0 KB" }
         let mb = Double(bytes) / 1_048_576

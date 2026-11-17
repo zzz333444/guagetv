@@ -25,6 +25,13 @@ struct HistoryView: View {
 
     @State private var segment = 0
 
+    /// Downloads storage accounting (R7): refreshed when the
+    /// downloads segment appears and when the item list changes.
+    @State private var downloadedBytes: Int64 = 0
+    @State private var posterBytes: Int64 = 0
+    @State private var storageLoaded = false
+    @State private var clearingCache = false
+
     /// History shows only entries that were actually played (they
     /// carry an episode URL); favourites include detail-page stubs
     /// filed before the first play.
@@ -211,32 +218,101 @@ struct HistoryView: View {
 
     @ViewBuilder
     private var downloadsView: some View {
-        if downloads.items.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.largeTitle).foregroundStyle(Theme.textDim)
-                Text("还没有下载")
-                    .font(.headline).foregroundStyle(Theme.text)
-                Text("在详情页长按集数、或播放器里点下载钮，剧会存到这里离线看")
-                    .font(.subheadline).foregroundStyle(Theme.textDim)
-                    .multilineTextAlignment(.center).padding(.horizontal, 32)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List {
-                ForEach(downloads.items) { item in
-                    downloadRow(item)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+        VStack(spacing: 0) {
+            storageCard
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+            if downloads.items.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.largeTitle).foregroundStyle(Theme.textDim)
+                    Text("还没有下载")
+                        .font(.headline).foregroundStyle(Theme.text)
+                    Text("在详情页长按集数、或播放器里点下载钮，剧会存到这里离线看")
+                        .font(.subheadline).foregroundStyle(Theme.textDim)
+                        .multilineTextAlignment(.center).padding(.horizontal, 32)
                 }
-                .onDelete { offsets in
-                    offsets.map { downloads.items[$0] }.forEach { DownloadManager.shared.remove($0) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(downloads.items) { item in
+                        downloadRow(item)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+                    }
+                    .onDelete { offsets in
+                        offsets.map { downloads.items[$0] }.forEach { DownloadManager.shared.remove($0) }
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
         }
+    }
+
+    /// Storage usage card: downloaded videos on disk + poster
+    /// cache, with one-tap poster-cache cleanup. Clearing never
+    /// touches downloaded videos.
+    private var storageCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "internaldrive").foregroundStyle(Theme.textDim)
+                Text("存储用量").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                Spacer()
+                Button(clearingCache ? "清理中…" : "清理缓存") {
+                    Task { await clearPosterCache() }
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Theme.glass, in: Capsule())
+                .foregroundStyle(Theme.text)
+                .disabled(clearingCache || !storageLoaded || posterBytes == 0)
+            }
+            HStack {
+                Text("已下载").foregroundStyle(Theme.textDim)
+                Spacer()
+                Text(storageLoaded ? storageText(downloadedBytes) : "计算中…")
+                    .foregroundStyle(Theme.text).monospacedDigit()
+            }
+            .font(.subheadline)
+            HStack {
+                Text("海报缓存").foregroundStyle(Theme.textDim)
+                Spacer()
+                Text(storageLoaded ? storageText(posterBytes) : "计算中…")
+                    .foregroundStyle(Theme.text).monospacedDigit()
+            }
+            .font(.subheadline)
+            Text("清理缓存只清海报图片与内存缓存，已下载的视频不受影响。")
+                .font(.caption).foregroundStyle(Theme.textDim)
+        }
+        .padding(14)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+        .task { await refreshStorage() }
+        .onChange(of: downloads.items.count) { _ in Task { await refreshStorage() } }
+    }
+
+    private func refreshStorage() async {
+        async let dl = DownloadManager.shared.downloadedSize()
+        async let posters = CacheManager.posterCacheSize()
+        downloadedBytes = await dl
+        posterBytes = await posters
+        storageLoaded = true
+    }
+
+    private func clearPosterCache() async {
+        clearingCache = true
+        await CacheManager.clearPosterCache()
+        await refreshStorage()
+        clearingCache = false
+    }
+
+    private func storageText(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0 MB" }
+        let mb = Double(bytes) / 1_048_576
+        if mb >= 1024 { return String(format: "%.1f GB", mb / 1024) }
+        if mb >= 1 { return String(format: "%.1f MB", mb) }
+        return String(format: "%.0f KB", Double(bytes) / 1_024)
     }
 
     private func downloadRow(_ item: DownloadManager.Item) -> some View {

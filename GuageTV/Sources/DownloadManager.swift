@@ -228,6 +228,11 @@ final class DownloadManager: NSObject, ObservableObject {
 
     var activeCount: Int { items.filter { $0.state == "downloading" }.count }
 
+    /// Actual on-disk size of the downloaded-media directory.
+    func downloadedSize() async -> Int64 {
+        await CacheManager.sizeOfDirectory(mediaDir)
+    }
+
     // MARK: engines
 
     private func startFile(_ item: Item) {

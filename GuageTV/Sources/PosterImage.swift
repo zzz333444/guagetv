@@ -87,6 +87,9 @@ final class PosterCache {
         return img
     }
 
+    /// Drop decoded posters from memory (disk level untouched).
+    func clearMemory() { memory.removeAllObjects() }
+
     /// Approx resident bytes of a decoded image, so totalCostLimit
     /// actually binds: width × height × scale² × 4 bytes per pixel.
     private static func cost(of img: UIImage) -> Int {
