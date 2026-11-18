@@ -68,7 +68,11 @@ final class MPVController: ObservableObject {
     /// Current frame as an image (for the screenshot button). The
     /// software path renders a frame directly; the Metal path asks
     /// mpv to write one out (the GPU owns the pixels there).
-    func snapshot() -> CGImage? {
+    /// R11 (v1.98): async — the old poll loop slept the calling
+    /// thread 80 ms a try, and saveSnapshot runs on the main
+    /// thread, so a slow screenshot froze the UI up to ~0.5 s.
+    /// Task.sleep suspends instead of blocking.
+    func snapshot() async -> CGImage? {
         if metalActive {
             let path = NSTemporaryDirectory() + "guage-snapshot.jpg"
             try? FileManager.default.removeItem(atPath: path)
@@ -77,7 +81,7 @@ final class MPVController: ObservableObject {
                 if let img = UIImage(contentsOfFile: path), let cg = img.cgImage {
                     return cg
                 }
-                Thread.sleep(forTimeInterval: 0.08)
+                try? await Task.sleep(nanoseconds: 80_000_000)
             }
             return nil
         }

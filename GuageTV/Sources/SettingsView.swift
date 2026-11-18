@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.97 · 选集卡集标题副行"
+    static let buildLabel = "v1.98 · 稳定扫荡"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.98", title: "稳定扫荡", lines: [
+            "全仓复查：强制解包与 try!/as! 已清零（仅剩 WKWebView 协议签名的隐式解包），主线程阻塞点逐项核过",
+            "截图不再卡界面：mpv Metal 截图等文件时改异步等待，点截图后播放器操作不再卡住约半秒",
+            "各页空状态与中文文案已统一走共享空状态，英文提示已清查",
+        ]),
         Entry(version: "v1.97", title: "选集卡集标题副行", lines: [
             "播放器选集面板集卡：主行只显示集数，原始集名里的标题部分（如「第1集 归来」里的「归来」）显示为小字副行",
             "无标题数据的线路（纯数字/EP 编号）只显示集名，不再把原始编号当副行",

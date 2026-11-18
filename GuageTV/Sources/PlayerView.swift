@@ -1906,13 +1906,21 @@ struct PlayerView: View {
         pokeChrome()
     }
 
+    /// R11 (v1.98): the mpv Metal screenshot polls for the file
+    /// mpv writes; awaiting it (instead of blocking the main
+    /// thread in the old sync snapshot) keeps the player chrome
+    /// responsive while the file lands.
     private func saveSnapshot() {
-        let image: UIImage?
         if isMPV {
-            image = mpv.snapshot().map { UIImage(cgImage: $0) }
+            Task { @MainActor in
+                finishSnapshot(await mpv.snapshot().map { UIImage(cgImage: $0) })
+            }
         } else {
-            image = native.snapshot()
+            finishSnapshot(native.snapshot())
         }
+    }
+
+    private func finishSnapshot(_ image: UIImage?) {
         if let image {
             UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
             showToast("截图已存相册")
