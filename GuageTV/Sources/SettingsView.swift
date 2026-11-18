@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.98 · 稳定扫荡"
+    static let buildLabel = "v1.99 · 更新日志与全量复查"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.99", title: "更新日志与全量复查", lines: [
+            "更新日志补齐本轮全部版本条目（v1.90–v1.99），当前版本置顶高亮",
+            "全量复查：底部胶囊四入口与设置页各行入口均有目标页；全仓无占位文案，面向用户英文仅剩专有名词",
+        ]),
         Entry(version: "v1.98", title: "稳定扫荡", lines: [
             "全仓复查：强制解包与 try!/as! 已清零（仅剩 WKWebView 协议签名的隐式解包），主线程阻塞点逐项核过",
             "截图不再卡界面：mpv Metal 截图等文件时改异步等待，点截图后播放器操作不再卡住约半秒",
