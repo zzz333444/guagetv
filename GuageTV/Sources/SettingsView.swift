@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.95 · 下载按剧分组"
+    static let buildLabel = "v1.96 · 搜索无结果折叠"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.96", title: "搜索无结果折叠", lines: [
+            "搜索左侧栏新增「无结果」折叠区：有响应但 0 结果的站点收在这里，默认折叠只露一行计数，点按展开看站名",
+            "每站结果数橙色徽标与「全部」进度计数不变；超时/失败的站不进无结果区，仍只计入底部汇总",
+        ]),
         Entry(version: "v1.95", title: "下载按剧分组", lines: [
             "下载页同剧多集收进一组（剧名 · 共 N 集 · 已下载 M 集），点按展开/折叠",
             "单集的剧仍是原来一条；组内集数按创建时间排序，左滑删除单集不变",

@@ -41,6 +41,13 @@ struct SearchView: View {
     /// rail lists every site that produced results, tapping one
     /// narrows the poster grid to just that site.
     @State private var selectedSiteKey: String?
+    /// Sites that answered this search with zero results (v1.96):
+    /// they never reach `results` (only non-empty groups do), so
+    /// they used to vanish silently. They now collect in a folded
+    /// "无结果" section at the foot of the site rail instead —
+    /// folded by default, tap the header to expand.
+    @State private var emptySites: [TVBoxConfig.Site] = []
+    @State private var showEmptySites = false
     /// Title aggregation (v1.42): same-title hits from many
     /// sites collapse into one card ("N 条线"), tapping opens
     /// the per-site list. On by default; the toggle lives above
@@ -478,6 +485,45 @@ struct SearchView: View {
                         selectedSiteKey = group.site.key
                     }
                 }
+                // 无结果站点自动折叠（v1.96）：有响应但 0 结果的站
+                // 收进这一区，默认折叠只露一行计数，点按展开看站名。
+                // 超时/失败的站不进这里，仍只计入底部汇总。
+                if !emptySites.isEmpty {
+                    Divider().background(Theme.textDim.opacity(0.3))
+                        .padding(.vertical, 4)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { showEmptySites.toggle() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("无结果")
+                                .font(.caption.weight(showEmptySites ? .semibold : .regular))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text("\(emptySites.count)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.gray, in: Capsule())
+                            Image(systemName: showEmptySites ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        .foregroundStyle(Theme.text.opacity(0.85))
+                        .padding(.horizontal, 8).padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if showEmptySites {
+                        ForEach(emptySites) { site in
+                            Text(site.name)
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
@@ -670,6 +716,8 @@ struct SearchView: View {
         finalNote = ""
         probedKinds = [:]
         selectedSiteKey = nil
+        emptySites = []
+        showEmptySites = false
         searchDoneCount = 0
         searchTotalCount = 0
         // Searchable py/JS pools: the active line's spider sites PLUS
@@ -738,6 +786,10 @@ struct SearchView: View {
         var done = 0
         var responded = 0
         var out: [(site: TVBoxConfig.Site, items: [VodItem])] = []
+        /// Sites that answered with zero results (v1.96): streamed
+        /// into `emptySites` as they answer, so the rail's folded
+        /// 无结果 section grows live instead of only at the end.
+        var empty: [TVBoxConfig.Site] = []
         // Per-category tallies: a whole category failing must be
         // sayable in the final note, not hidden in the global count.
         var catTried: [String: Int] = [:]
@@ -777,6 +829,9 @@ struct SearchView: View {
                     if !items.isEmpty {
                         out.append((site, items))
                         results = out
+                    } else {
+                        empty.append(site)
+                        emptySites = empty
                     }
                 case .failure(let error):
                     if errorSamples.count < 3 {
@@ -836,6 +891,7 @@ struct SearchView: View {
                 responded += 1
                 catResponded["py", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
+                else { empty.append(site); emptySites = empty }
             } else {
                 pyMisses += 1
             }
@@ -857,6 +913,7 @@ struct SearchView: View {
                 responded += 1
                 catResponded["JS", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
+                else { empty.append(site); emptySites = empty }
             } else {
                 jsMisses += 1
             }
@@ -874,6 +931,7 @@ struct SearchView: View {
                 responded += 1
                 catResponded["Jar", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
+                else { empty.append(site); emptySites = empty }
             }
             tick()
         }
@@ -895,6 +953,9 @@ struct SearchView: View {
             + "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
         if !catNotes.isEmpty {
             finalNote += "（" + catNotes.joined(separator: "；") + "）"
+        }
+        if !empty.isEmpty {
+            finalNote += " · \(empty.count) 个站无结果"
         }
         searchDoneCount = done
         searched = true
