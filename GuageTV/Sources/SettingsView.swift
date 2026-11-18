@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.91 · Emby 服务器计数"
+    static let buildLabel = "v1.92 · 直播节目进度条"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.92", title: "直播节目进度条", lines: [
+            "直播频道行底部加当前节目细进度条（按 EPG 起止算已播比例，60 秒一拍推进）",
+            "无当前节目时不显示进度条",
+        ]),
         Entry(version: "v1.91", title: "Emby 服务器计数", lines: [
             "资源库「Emby 媒体库」卡片新增「电影：x · 剧集：y」计数行（Emby /Items/Counts 取数）",
             "服务器取不到数时对应位置显示 —",

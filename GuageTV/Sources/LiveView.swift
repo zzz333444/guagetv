@@ -158,46 +158,55 @@ struct LiveView: View {
 
     private var channelList: some View {
         ScrollView(showsIndicators: false) {
-            LazyVStack(spacing: 10) {
-                ForEach(currentChannels) { channel in
-                    channelRow(channel)
+            // R5 (v1.92): 60 秒一拍重绘，EPG 进度条随时间推进。
+            TimelineView(.periodic(from: .now, by: 60)) { _ in
+                LazyVStack(spacing: 10) {
+                    ForEach(currentChannels) { channel in
+                        channelRow(channel)
+                    }
                 }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 110)
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 110)
         }
     }
 
     private func channelRow(_ channel: LiveListParser.Channel) -> some View {
         let programmes = programmes(for: channel)
         let now = programmes.first { $0.contains(Date()) }
-        return HStack(spacing: 12) {
-            logo(channel)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(channel.name).font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.text).lineLimit(1)
-                if let now {
-                    Text("正在播 \(timeText(now.start))–\(timeText(now.end)) \(now.title)")
-                        .font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
-                } else if !programmes.isEmpty {
-                    Text("今日 \(programmes.count) 个节目").font(.caption).foregroundStyle(Theme.textDim)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                logo(channel)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(channel.name).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text).lineLimit(1)
+                    if let now {
+                        Text("正在播 \(timeText(now.start))–\(timeText(now.end)) \(now.title)")
+                            .font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
+                    } else if !programmes.isEmpty {
+                        Text("今日 \(programmes.count) 个节目").font(.caption).foregroundStyle(Theme.textDim)
+                    }
                 }
-            }
-            Spacer()
-            if !programmes.isEmpty {
-                Button {
-                    sheetProgrammes = ProgrammeSheetItem(channel: channel.name, list: programmes)
-                } label: {
-                    Text("节目单").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Theme.glass, in: Capsule())
+                Spacer()
+                if !programmes.isEmpty {
+                    Button {
+                        sheetProgrammes = ProgrammeSheetItem(channel: channel.name, list: programmes)
+                    } label: {
+                        Text("节目单").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Theme.glass, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                if favouriteKeys.contains(channelKey(channel)) {
+                    Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
+                }
+                Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(Theme.text.opacity(0.9))
             }
-            if favouriteKeys.contains(channelKey(channel)) {
-                Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
+            // R5 (v1.92): 当前节目细进度条 — 按 EPG now 起止算已播比例。
+            if let now {
+                epgProgressBar(now)
             }
-            Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(Theme.text.opacity(0.9))
         }
         .padding(12)
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
@@ -245,6 +254,22 @@ struct LiveView: View {
             }
         }
         .frame(width: 44, height: 30)
+    }
+
+    /// R5 (v1.92): 当前节目细进度条 — 已播时长 / 节目总时长，
+    /// 轨道淡白、填充用主题强调色，3pt 高贴在频道行底部。
+    private func epgProgressBar(_ programme: EPGProgramme) -> some View {
+        let total = programme.end.timeIntervalSince(programme.start)
+        let elapsed = Date().timeIntervalSince(programme.start)
+        let fraction = total > 0 ? min(1, max(0, elapsed / total)) : 0
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.text.opacity(0.16))
+                Capsule().fill(Theme.accent)
+                    .frame(width: geo.size.width * fraction)
+            }
+        }
+        .frame(height: 3)
     }
 
     private func programmeSheet(_ entry: ProgrammeSheetItem) -> some View {
