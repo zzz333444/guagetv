@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// 我的 (Profile) — Rex's stats dashboard: week calendar strip, today's
-/// watch time, history heatmap, 待看 / 收藏 / 在看 counters. Numbers bind to
+/// watch time, history heatmap, watch streak + last-7-days bars (v1.93),
+/// 待看 / 收藏 / 在看 counters. Numbers bind to
 /// the history store in stage 3; the module layout matches Rex now.
 struct ProfileView: View {
     @ObservedObject private var store = HistoryStore.shared
@@ -29,6 +30,7 @@ struct ProfileView: View {
                 calendarStrip
                 todayCard
                 heatmapCard
+                streakCard
                 counters
             }
             .padding(.horizontal, 18)
@@ -215,6 +217,90 @@ struct ProfileView: View {
         if minutes < 1 { return "0分钟" }
         if minutes < 60 { return "\(minutes)分钟" }
         return "\(minutes / 60)小时\(minutes % 60)分钟"
+    }
+
+    /// R6 (v1.93): 连续观看天数 + 近 7 天柱状图。数据走同一份
+    /// daily-watch 台账（watchedSeconds 是 Double），与热力格同口径。
+    private var streakCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "flame.fill").foregroundStyle(Theme.accent)
+                    Text("连续观看").font(.subheadline).foregroundStyle(Theme.textDim)
+                    Spacer()
+                    Text("\(watchStreakDays) 天").font(.title3.bold()).foregroundStyle(Theme.text)
+                }
+                Text(streakHint).font(.caption).foregroundStyle(Theme.textDim)
+                weekBars
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 从今天（今天没看就从昨天）往回数，每天 watchedSeconds > 0
+    /// 才算连续；断一天即停。
+    private var watchStreakDays: Int {
+        let cal = Calendar.current
+        var day = cal.startOfDay(for: Date())
+        if store.watchedSeconds(on: day) <= 0 {
+            guard let prev = cal.date(byAdding: .day, value: -1, to: day) else { return 0 }
+            day = prev
+        }
+        var count = 0
+        while store.watchedSeconds(on: day) > 0 {
+            count += 1
+            guard let prev = cal.date(byAdding: .day, value: -1, to: day) else { break }
+            day = prev
+        }
+        return count
+    }
+
+    private var streakHint: String {
+        let cal = Calendar.current
+        let todaySeconds = store.watchedSeconds(on: cal.startOfDay(for: Date()))
+        if todaySeconds > 0 { return "今天已看，继续保持不断档" }
+        if watchStreakDays > 0 { return "今天还没看，晚上看一会不断档" }
+        return "今天看一会就开始计数"
+    }
+
+    /// 近 7 天（左旧右新），每柱=当天观看时长。
+    private var last7Days: [(date: Date, seconds: Double)] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        return (0..<7).map { offset in
+            let day = cal.date(byAdding: .day, value: -(6 - offset), to: today) ?? today
+            return (date: day, seconds: store.watchedSeconds(on: day))
+        }
+    }
+
+    private var weekBars: some View {
+        let days = last7Days
+        let maxSeconds = days.map(\.seconds).max() ?? 0
+        return HStack(alignment: .bottom, spacing: 8) {
+            ForEach(days.indices, id: \.self) { i in
+                weekBar(day: days[i], maxSeconds: maxSeconds)
+            }
+        }
+        .frame(height: 110)
+    }
+
+    private func weekBar(day: (date: Date, seconds: Double), maxSeconds: Double) -> some View {
+        let minutes = Int(day.seconds / 60)
+        let ratio = maxSeconds > 0 ? day.seconds / maxSeconds : 0
+        let height: CGFloat = day.seconds > 0 ? 10 + 62 * CGFloat(ratio) : 3
+        let isToday = Calendar.current.isDateInToday(day.date)
+        let weekday = Calendar.current.component(.weekday, from: day.date)
+        let label = ["日", "一", "二", "三", "四", "五", "六"][weekday - 1]
+        return VStack(spacing: 5) {
+            Text(minutes > 0 ? "\(minutes)分" : " ")
+                .font(.caption2).foregroundStyle(Theme.textDim)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isToday ? Theme.accent : Theme.accent.opacity(0.55))
+                .frame(height: height)
+            Text(isToday ? "今" : label)
+                .font(.caption2).foregroundStyle(isToday ? Theme.text : Theme.textDim)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var counters: some View {

@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.92 · 直播节目进度条"
+    static let buildLabel = "v1.93 · 观看统计加强"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.93", title: "观看统计加强", lines: [
+            "我的页新增连续观看天数（按每日观看台账往回数，今天没看从昨天起算）",
+            "近 7 天观看时长柱状图（今天高亮，分钟数标在柱顶）",
+        ]),
         Entry(version: "v1.92", title: "直播节目进度条", lines: [
             "直播频道行底部加当前节目细进度条（按 EPG 起止算已播比例，60 秒一拍推进）",
             "无当前节目时不显示进度条",
