@@ -407,29 +407,38 @@ struct DetailView: View {
     }
 
     /// TMDB cast row (v1.41): round profile photos + name/role.
+    /// v1.90: tapping a person cross-searches their name on the
+    /// user's own lines (same sheet as similar titles).
     private var castBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("演职员").font(.headline).foregroundStyle(Theme.text)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(tmdbCast) { person in
-                        VStack(spacing: 5) {
-                            PosterImage(urlString: person.profile)
-                                .frame(width: 58, height: 58)
-                                .clipShape(Circle())
-                                .background(Circle().fill(Theme.glass))
-                            Text(person.name)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Theme.text)
-                                .lineLimit(1)
-                            if !person.character.isEmpty {
-                                Text(person.character)
-                                    .font(.caption2)
-                                    .foregroundStyle(Theme.textDim)
+                        Button {
+                            Haptics.tap()
+                            similarSeed = person.name
+                            showSimilarSearch = true
+                        } label: {
+                            VStack(spacing: 5) {
+                                PosterImage(urlString: person.profile)
+                                    .frame(width: 58, height: 58)
+                                    .clipShape(Circle())
+                                    .background(Circle().fill(Theme.glass))
+                                Text(person.name)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Theme.text)
                                     .lineLimit(1)
+                                if !person.character.isEmpty {
+                                    Text(person.character)
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textDim)
+                                        .lineLimit(1)
+                                }
                             }
+                            .frame(width: 64)
                         }
-                        .frame(width: 64)
+                        .buttonStyle(.plain)
                     }
                 }
             }

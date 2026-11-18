@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.87 · 线路长按更新"
+    static let buildLabel = "v1.90 · 演职员跨线搜索"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.90", title: "演职员跨线搜索", lines: [
+            "详情页点演职员头像/名字 → 在自有线路上跨线搜索该演员",
+            "与「相似推荐」点按共用同一搜索弹窗",
+        ]),
         Entry(version: "v1.87", title: "线路长按更新", lines: [
             "资源库长按线路卡 →「更新线路」：立即拉取远程配置并给出结果提示",
             "资源库右上角 ↻ 一键更新全部远程线路，汇总已更新/已是最新/失败条数",
