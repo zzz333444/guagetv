@@ -111,22 +111,13 @@ struct ProfileView: View {
                 LazyVGrid(columns: cols, spacing: 5) {
                     ForEach(0..<(12 * 7), id: \.self) { i in
                         let level = heatLevel(cellIndex: i)
+                        let fill: Color = level == 0
+                            ? Color.white.opacity(0.07)
+                            : Theme.accent.opacity(0.30 + 0.17 * Double(level))
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(level == 0
-                                  ? Color.white.opacity(0.07)
-                                  : Theme.accent.opacity(0.30 + 0.17 * Double(level)))
+                            .fill(fill)
                             .frame(width: 20, height: 20)
-                            .onTapGesture {
-                                Haptics.selection()
-                                let day = heatDate(cellIndex: i)
-                                let seconds = store.watchedSeconds(on: day)
-                                let f = DateFormatter()
-                                f.locale = Locale(identifier: "zh_CN")
-                                f.dateFormat = "M月d日"
-                                heatDayInfo = seconds > 0
-                                    ? "\(f.string(from: day)) · 观看 \(heatDurationText(seconds))"
-                                    : "\(f.string(from: day)) · 没看"
-                            }
+                            .onTapGesture { heatCellTapped(i) }
                     }
                 }
                 HStack(spacing: 4) {
@@ -159,6 +150,18 @@ struct ProfileView: View {
         let cal = Calendar.current
         return cal.date(byAdding: .day, value: -(12 * 7 - 1) + cellIndex,
                         to: cal.startOfDay(for: Date())) ?? Date()
+    }
+
+    private func heatCellTapped(_ index: Int) {
+        Haptics.selection()
+        let day = heatDate(cellIndex: index)
+        let seconds = store.watchedSeconds(on: day)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日"
+        heatDayInfo = seconds > 0
+            ? "\(f.string(from: day)) · 观看 \(heatDurationText(seconds))"
+            : "\(f.string(from: day)) · 没看"
     }
 
     private func heatDurationText(_ seconds: Int) -> String {
