@@ -267,6 +267,45 @@ enum FWDStore {
     static func delete(_ record: FWDRecord) {
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(record.fileName))
         save(records().filter { $0.id != record.id })
+        clearCheckResult(for: record.id)
+    }
+
+    /// v1.94: per-module self-check result, kept on the card
+    /// (last check time + conclusion). Stored in UserDefaults
+    /// so it survives restarts; cleared when the module is deleted.
+    struct CheckResult: Codable {
+        var time: Date
+        var ok: Bool
+        var summary: String
+    }
+
+    private static let checkResultsKey = "fwd.checkResults.v1"
+
+    static func checkResult(for recordID: String) -> CheckResult? {
+        guard let data = UserDefaults.standard.data(forKey: checkResultsKey),
+              let all = try? JSONDecoder().decode([String: CheckResult].self, from: data) else { return nil }
+        return all[recordID]
+    }
+
+    static func saveCheckResult(_ result: CheckResult, for recordID: String) {
+        var all: [String: CheckResult] = [:]
+        if let data = UserDefaults.standard.data(forKey: checkResultsKey),
+           let decoded = try? JSONDecoder().decode([String: CheckResult].self, from: data) {
+            all = decoded
+        }
+        all[recordID] = result
+        if let data = try? JSONEncoder().encode(all) {
+            UserDefaults.standard.set(data, forKey: checkResultsKey)
+        }
+    }
+
+    static func clearCheckResult(for recordID: String) {
+        guard let data = UserDefaults.standard.data(forKey: checkResultsKey),
+              var all = try? JSONDecoder().decode([String: CheckResult].self, from: data) else { return }
+        all.removeValue(forKey: recordID)
+        if let data = try? JSONEncoder().encode(all) {
+            UserDefaults.standard.set(data, forKey: checkResultsKey)
+        }
     }
 
     /// Import from a URL: a bare .js module, or a .fwd subscription
@@ -1001,6 +1040,7 @@ struct ModulesView: View {
     @State private var importing = false
     @State private var checking = false
     @State private var checkLines: [String] = []
+    @State private var checkVersion = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1116,6 +1156,12 @@ struct ModulesView: View {
                                 }
                                 Text(moduleSubtitle(record))
                                     .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                                // v1.94: last self-check stays on the
+                                // card (time + conclusion); the tick
+                                // forces a refresh once runSelfCheck
+                                // saves new results.
+                                Text(checkLine(record, tick: checkVersion))
+                                    .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -1249,10 +1295,21 @@ struct ModulesView: View {
                 checkLines.append(n > 0
                     ? "✓ \(title)：「\(module.title)」出 \(n) 条"
                     : "△ \(title)：「\(module.title)」返回 0 条")
+                // v1.94: leave the conclusion on the card.
+                FWDStore.saveCheckResult(
+                    FWDStore.CheckResult(time: Date(), ok: n > 0,
+                                         summary: n > 0 ? "「\(module.title)」出 \(n) 条"
+                                                        : "「\(module.title)」返回 0 条"),
+                    for: record.id)
             } catch {
                 checkLines.append("✗ \(title)：\(error.localizedDescription)")
+                FWDStore.saveCheckResult(
+                    FWDStore.CheckResult(time: Date(), ok: false,
+                                         summary: error.localizedDescription),
+                    for: record.id)
             }
         }
+        checkVersion += 1
     }
 
     /// Any JSON back — even a TMDB 401 error body — proves the
@@ -1265,6 +1322,21 @@ struct ModulesView: View {
         guard let (data, _) = try? await URLSession.shared.data(for: req) else { return false }
         return (try? JSONSerialization.jsonObject(with: data)) != nil
     }
+
+    private func checkLine(_ record: FWDRecord, tick: Int) -> String {
+        let _ = tick
+        guard let result = FWDStore.checkResult(for: record.id) else {
+            return "尚未自检"
+        }
+        let stamp = Self.checkDateFormatter.string(from: result.time)
+        return "\(result.ok ? "✓" : "✗") 自检 \(stamp) · \(result.summary)"
+    }
+
+    private static let checkDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
 
     private func moduleSubtitle(_ record: FWDRecord) -> String {
         var parts: [String] = []

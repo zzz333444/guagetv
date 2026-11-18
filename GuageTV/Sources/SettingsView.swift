@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.93 · 观看统计加强"
+    static let buildLabel = "v1.94 · 模块卡自检结果"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.94", title: "模块卡自检结果", lines: [
+            "模块卡副行已有作者 · 版本 · 栏目数；自检结果现留在卡上（上次自检时间 + 结论）",
+            "自检结果按模块持久化，重启仍在；删除模块时一并清除",
+        ]),
         Entry(version: "v1.93", title: "观看统计加强", lines: [
             "我的页新增连续观看天数（按每日观看台账往回数，今天没看从昨天起算）",
             "近 7 天观看时长柱状图（今天高亮，分钟数标在柱顶）",
