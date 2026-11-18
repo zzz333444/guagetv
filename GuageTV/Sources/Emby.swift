@@ -239,6 +239,19 @@ enum EmbyClient {
         return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
     }
 
+    /// Movie / Series totals for the Library card (v1.91).
+    /// GET /Items/Counts answers {"MovieCount": n, "SeriesCount": n, …};
+    /// a nil on either side means the server didn't answer — the
+    /// caller shows — for that side.
+    static func libraryCounts() async -> (movies: Int?, series: Int?) {
+        guard let json = try? await get("/Items/Counts", query: ["UserId": userID]) else {
+            return (nil, nil)
+        }
+        let movies = (json["MovieCount"] as? NSNumber)?.intValue
+        let series = (json["SeriesCount"] as? NSNumber)?.intValue
+        return (movies, series)
+    }
+
     /// Star / unstar an item (POST adds, DELETE removes).
     /// Emby's FavoriteItems endpoint, same auth as the rest.
     static func setFavorite(itemID: String, favorite: Bool) async throws {

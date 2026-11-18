@@ -474,6 +474,9 @@ struct LocalFilesView: View {
 /// files. Added from LibraryView.
 struct MediaHubSection: View {
     @AppStorage("webdav.servers") private var webdavJSON = "[]"
+    /// Emby movie/series totals for the Library card (v1.91);
+    /// nil = not loaded yet, (nil, nil) = server didn't answer.
+    @State private var embyCounts: (movies: Int?, series: Int?)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -483,7 +486,8 @@ struct MediaHubSection: View {
                     hubRow(icon: "play.rectangle.on.rectangle", title: "Emby 媒体库",
                            value: EmbyClient.servers.count > 1
                                ? "\(EmbyClient.activeServerName) · \(EmbyClient.base)"
-                               : EmbyClient.base)
+                               : EmbyClient.base,
+                           detail: embyCountsText)
                 }
                 .buttonStyle(.plain)
             }
@@ -506,14 +510,30 @@ struct MediaHubSection: View {
                     .font(.caption).foregroundStyle(Theme.textDim)
             }
         }
+        .task {
+            if EmbyClient.configured {
+                embyCounts = await EmbyClient.libraryCounts()
+            }
+        }
     }
 
-    private func hubRow(icon: String, title: String, value: String) -> some View {
+    /// "电影：12 · 剧集：34"；取不到的数字显示 —。
+    private var embyCountsText: String? {
+        guard let counts = embyCounts else { return nil }
+        let movies = counts.movies.map(String.init) ?? "—"
+        let series = counts.series.map(String.init) ?? "—"
+        return "电影：\(movies) · 剧集：\(series)"
+    }
+
+    private func hubRow(icon: String, title: String, value: String, detail: String? = nil) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon).foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
                 Text(value).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                if let detail {
+                    Text(detail).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                }
             }
             Spacer()
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textDim)

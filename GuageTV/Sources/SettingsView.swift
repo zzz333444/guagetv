@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.90 · 演职员跨线搜索"
+    static let buildLabel = "v1.91 · Emby 服务器计数"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.91", title: "Emby 服务器计数", lines: [
+            "资源库「Emby 媒体库」卡片新增「电影：x · 剧集：y」计数行（Emby /Items/Counts 取数）",
+            "服务器取不到数时对应位置显示 —",
+        ]),
         Entry(version: "v1.90", title: "演职员跨线搜索", lines: [
             "详情页点演职员头像/名字 → 在自有线路上跨线搜索该演员",
             "与「相似推荐」点按共用同一搜索弹窗",
