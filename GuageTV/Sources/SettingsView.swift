@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.86 · 更新日志与全量复查"
+    static let buildLabel = "v1.87 · 线路长按更新"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.87", title: "线路长按更新", lines: [
+            "资源库长按线路卡 →「更新线路」：立即拉取远程配置并给出结果提示",
+            "资源库右上角 ↻ 一键更新全部远程线路，汇总已更新/已是最新/失败条数",
+            "线路卡新鲜度改按上次更新时间显示；我的页热力格点按某天显示当天观看时长",
+        ]),
         Entry(version: "v1.86", title: "更新日志与全量复查", lines: [
             "设置页新增「更新日志」页，内置近几版改动清单",
             "全量复查：各页空状态、图标与文案一致性（媒体服务器图标去重）",

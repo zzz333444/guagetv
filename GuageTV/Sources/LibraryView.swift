@@ -27,6 +27,12 @@ struct LibraryView: View {
     @State private var pyGroupEntries: [ConfigLibrary.Entry] = []
     @State private var renamingEntry: ConfigLibrary.Entry?
     @State private var renameText = ""
+    /// Manual line refresh (v1.87): in-flight ids, the all-lines
+    /// flag, and the bottom toast that reports each outcome.
+    @State private var refreshingLineIDs: Set<String> = []
+    @State private var refreshingAll = false
+    @State private var lineToast: String?
+    @State private var lineToastGeneration = 0
     /// 资源库配置排序（v1.81）：名称 / 站点数 / 最近使用。
     /// 排序只作用于分组内的线路卡片顺序，分组本身的创建顺序不动。
     private enum LibrarySort: String, CaseIterable {
@@ -92,6 +98,16 @@ struct LibraryView: View {
                         .sheet(isPresented: $showGroupEditor, onDismiss: refreshLibrary) {
                             GroupEditorView()
                         }
+                    Button {
+                        refreshAllLines()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .glassCapsule()
+                            .foregroundStyle(Theme.text)
+                    }
+                    .disabled(refreshingAll)
                 }
 
                 MediaHubSection()
@@ -150,7 +166,9 @@ struct LibraryView: View {
                                          onDelete: {
                                              config = ConfigLibrary.remove(id: model.id)
                                              refreshLibrary()
-                                         })
+                                         },
+                                         onRefresh: model.entry.sourceURL.hasPrefix("http")
+                                             ? { refreshLine(model) } : nil)
                                 .equatable()
                         }
                     }
@@ -205,6 +223,18 @@ struct LibraryView: View {
             .padding(.bottom, 110)
         }
         .background(AmbientBackground(imageURL: ambientPic))
+        .overlay(alignment: .bottom) {
+            if let lineToast {
+                Text(lineToast)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .glassCapsule()
+                    .padding(.bottom, 118)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: lineToast)
         .onAppear { refreshLibrary() }
         .alert("线路备注名", isPresented: Binding(get: { renamingEntry != nil },
                                                 set: { if !$0 { renamingEntry = nil } })) {
@@ -225,6 +255,59 @@ struct LibraryView: View {
                 PySiteBrowseView(site: route.site, parses: route.parses)
             }
         }
+        }
+    }
+
+    /// Long-press → 更新线路 (v1.87): fetch the line's remote config
+    /// now and report the outcome in the bottom toast.
+    private func refreshLine(_ model: LineCardModel) {
+        let id = model.id
+        guard !refreshingLineIDs.contains(id) else { return }
+        refreshingLineIDs.insert(id)
+        Haptics.tap()
+        showLineToast("正在更新「\(model.shownName)」…")
+        Task {
+            let outcome = await ConfigLibrary.refreshEntry(id: id)
+            refreshingLineIDs.remove(id)
+            switch outcome {
+            case .updated(let count):
+                showLineToast("「\(model.shownName)」已更新：\(count) 个站点")
+            case .alreadyLatest:
+                showLineToast("「\(model.shownName)」已是最新")
+            case .notRemote:
+                showLineToast("本地线路没有远程地址，不能更新")
+            case .failed(let why):
+                showLineToast("更新失败：\(why)")
+            }
+            refreshLibrary()
+        }
+    }
+
+    /// Header ↻ button: refresh every remote line, one summary toast.
+    private func refreshAllLines() {
+        guard !refreshingAll else { return }
+        refreshingAll = true
+        Haptics.tap()
+        showLineToast("正在更新全部线路…")
+        Task {
+            let tally = await ConfigLibrary.refreshAllEntries()
+            refreshingAll = false
+            var parts: [String] = []
+            if tally.updated > 0 { parts.append("\(tally.updated) 条已更新") }
+            if tally.latest > 0 { parts.append("\(tally.latest) 条已是最新") }
+            if tally.failed > 0 { parts.append("\(tally.failed) 条失败") }
+            showLineToast(parts.isEmpty ? "没有可更新的远程线路" : "更新完成：" + parts.joined(separator: "、"))
+            refreshLibrary()
+        }
+    }
+
+    private func showLineToast(_ text: String) {
+        lineToast = text
+        lineToastGeneration += 1
+        let generation = lineToastGeneration
+        Task {
+            try? await Task.sleep(nanoseconds: 2_600_000_000)
+            if lineToastGeneration == generation { lineToast = nil }
         }
     }
 
@@ -334,7 +417,7 @@ struct LibraryView: View {
             return LineCardModel(entry: entry,
                                  shownName: shown,
                                  iconText: String(shown.prefix(1)),
-                                 freshnessText: Self.relativeDay(entry.addedAt),
+                                 freshnessText: Self.relativeDay(max(entry.addedAt, ConfigLibrary.lastRefreshAt(id: entry.id) ?? entry.addedAt)),
                                  isActive: isActive, isHome: isHome, isFile: isFile,
                                  roleText: role,
                                  kindText: kindSummary[entry.id] ?? "\(entry.siteCount) 个站点")
@@ -775,6 +858,8 @@ private struct LineCardView: View, Equatable {
     let onSetHome: () -> Void
     let onMoveToGroup: (String) -> Void
     let onDelete: () -> Void
+    /// v1.87: remote lines only — long-press 更新线路.
+    let onRefresh: (() -> Void)?
 
     static func == (lhs: LineCardView, rhs: LineCardView) -> Bool {
         lhs.model == rhs.model
@@ -818,6 +903,13 @@ private struct LineCardView: View, Equatable {
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
         .contextMenu {
+            if let onRefresh {
+                Button {
+                    onRefresh()
+                } label: {
+                    Label("更新线路", systemImage: "arrow.clockwise")
+                }
+            }
             Button {
                 onRename()
             } label: {

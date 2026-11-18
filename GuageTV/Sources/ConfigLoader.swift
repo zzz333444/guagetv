@@ -610,6 +610,74 @@ enum ConfigLibrary {
         }
     }
 
+    // MARK: manual refresh （长按线路 → 更新线路，v1.87）
+
+    enum LineRefreshOutcome {
+        case updated(siteCount: Int)
+        case alreadyLatest
+        case notRemote
+        case failed(String)
+    }
+
+    /// Manual per-line refresh: always fetches (no 12h gate) and
+    /// reports what happened. The stored copy is replaced only when
+    /// the fetched bytes parse AND differ, same safety rule as the
+    /// silent auto-refresh. A successful fetch also stamps the
+    /// refresh time, so the card's freshness text and the 12h
+    /// auto-refresh gate both see it.
+    static func refreshEntry(id: String) async -> LineRefreshOutcome {
+        guard let entry = entries().first(where: { $0.id == id }) else {
+            return .failed("线路不存在")
+        }
+        guard entry.sourceURL.hasPrefix("http://") || entry.sourceURL.hasPrefix("https://"),
+              let url = URL(string: entry.sourceURL) else { return .notRemote }
+        let data: Data
+        do {
+            data = try await NetFetch.dataForConfig(from: url)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+        stampRefresh(id: id)
+        let old = file(for: id).flatMap { try? Data(contentsOf: $0) }
+        if old == data { return .alreadyLatest }
+        let parsed: TVBoxConfig?
+        if MaoYuanAdapter.looksLikeMaoYuan(data) {
+            parsed = try? MaoYuanAdapter.convert(from: data)
+        } else {
+            parsed = try? ConfigLoader.load(from: data)
+        }
+        guard let parsed else { return .failed("新内容解析失败，已保留旧版") }
+        storeRefreshed(data: data, id: id)
+        return .updated(siteCount: parsed.sites.count)
+    }
+
+    /// Refresh every remote line in sequence; returns tallies for a
+    /// summary toast. Local / single-file lines are skipped.
+    static func refreshAllEntries() async -> (updated: Int, latest: Int, failed: Int) {
+        var updated = 0, latest = 0, failed = 0
+        for entry in entries() where entry.sourceURL.hasPrefix("http") {
+            switch await refreshEntry(id: entry.id) {
+            case .updated: updated += 1
+            case .alreadyLatest: latest += 1
+            case .failed: failed += 1
+            case .notRemote: break
+            }
+        }
+        return (updated, latest, failed)
+    }
+
+    private static func stampRefresh(id: String) {
+        var stamps = (UserDefaults.standard.dictionary(forKey: refreshStampKey)
+            as? [String: TimeInterval]) ?? [:]
+        stamps[id] = Date().timeIntervalSince1970
+        UserDefaults.standard.set(stamps, forKey: refreshStampKey)
+    }
+
+    static func lastRefreshAt(id: String) -> TimeInterval? {
+        (UserDefaults.standard.dictionary(forKey: refreshStampKey)
+            as? [String: TimeInterval])?[id]
+    }
+
     /// v7's single active-config.json becomes the library's first line,
     /// so an upgrade never loses the config the user already imported.
     private static func migrateLegacyIfNeeded() {

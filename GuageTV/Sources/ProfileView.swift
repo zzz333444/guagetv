@@ -5,6 +5,8 @@ import SwiftUI
 /// the history store in stage 3; the module layout matches Rex now.
 struct ProfileView: View {
     @ObservedObject private var store = HistoryStore.shared
+    /// Tapped heatmap cell readout (v1.87): "M月d日 · 观看 X".
+    @State private var heatDayInfo: String?
 
     /// Entries touched today / this week drive the stat cards.
     private var todayEntries: [HistoryStore.Entry] {
@@ -114,6 +116,17 @@ struct ProfileView: View {
                                   ? Color.white.opacity(0.07)
                                   : Theme.accent.opacity(0.30 + 0.17 * Double(level)))
                             .frame(width: 20, height: 20)
+                            .onTapGesture {
+                                Haptics.selection()
+                                let day = heatDate(cellIndex: i)
+                                let seconds = store.watchedSeconds(on: day)
+                                let f = DateFormatter()
+                                f.locale = Locale(identifier: "zh_CN")
+                                f.dateFormat = "M月d日"
+                                heatDayInfo = seconds > 0
+                                    ? "\(f.string(from: day)) · 观看 \(heatDurationText(seconds))"
+                                    : "\(f.string(from: day)) · 没看"
+                            }
                     }
                 }
                 HStack(spacing: 4) {
@@ -126,6 +139,10 @@ struct ProfileView: View {
                             .frame(width: 12, height: 12)
                     }
                     Text("多").font(.caption2).foregroundStyle(Theme.textDim)
+                    if let heatDayInfo {
+                        Spacer()
+                        Text(heatDayInfo).font(.caption2).foregroundStyle(Theme.text)
+                    }
                 }
                 Divider().background(Color.white.opacity(0.08))
                 HStack(spacing: 12) {
@@ -137,12 +154,21 @@ struct ProfileView: View {
         }
     }
 
+    /// Cell 0 = 83 days ago, cells flow day by day to today.
+    private func heatDate(cellIndex: Int) -> Date {
+        let cal = Calendar.current
+        return cal.date(byAdding: .day, value: -(12 * 7 - 1) + cellIndex,
+                        to: cal.startOfDay(for: Date())) ?? Date()
+    }
+
+    private func heatDurationText(_ seconds: Int) -> String {
+        if seconds < 3600 { return "\(max(1, seconds / 60)) 分钟" }
+        return String(format: "%.1f 小时", Double(seconds) / 3600)
+    }
+
     /// 0 = 没看；1 = <30 分钟；2 = <1 小时；3 = <2 小时；4 = ≥2 小时。
     private func heatLevel(cellIndex: Int) -> Int {
-        // Cell 0 = 83 days ago, cells flow day by day to today.
-        let cal = Calendar.current
-        guard let day = cal.date(byAdding: .day, value: -(12 * 7 - 1) + cellIndex,
-                                 to: cal.startOfDay(for: Date())) else { return 0 }
+        let day = heatDate(cellIndex: cellIndex)
         let seconds = store.watchedSeconds(on: day)
         switch seconds {
         case 0: return 0
