@@ -164,9 +164,9 @@ struct ProfileView: View {
             : "\(f.string(from: day)) · 没看"
     }
 
-    private func heatDurationText(_ seconds: Int) -> String {
-        if seconds < 3600 { return "\(max(1, seconds / 60)) 分钟" }
-        return String(format: "%.1f 小时", Double(seconds) / 3600)
+    private func heatDurationText(_ seconds: Double) -> String {
+        if seconds < 3600 { return "\(max(1, Int(seconds) / 60)) 分钟" }
+        return String(format: "%.1f 小时", seconds / 3600)
     }
 
     /// 0 = 没看；1 = <30 分钟；2 = <1 小时；3 = <2 小时；4 = ≥2 小时。
