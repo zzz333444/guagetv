@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.96 · 搜索无结果折叠"
+    static let buildLabel = "v1.97 · 选集卡集标题副行"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.97", title: "选集卡集标题副行", lines: [
+            "播放器选集面板集卡：主行只显示集数，原始集名里的标题部分（如「第1集 归来」里的「归来」）显示为小字副行",
+            "无标题数据的线路（纯数字/EP 编号）只显示集名，不再把原始编号当副行",
+        ]),
         Entry(version: "v1.96", title: "搜索无结果折叠", lines: [
             "搜索左侧栏新增「无结果」折叠区：有响应但 0 结果的站点收在这里，默认折叠只露一行计数，点按展开看站名",
             "每站结果数橙色徽标与「全部」进度计数不变；超时/失败的站不进无结果区，仍只计入底部汇总",

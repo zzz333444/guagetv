@@ -21,6 +21,35 @@ enum ResolveOutcome {
     }
 }
 
+/// Splits a raw episode name into (marker, title): the leading
+/// episode marker （第N集 / N / EP01 / S1E1…) and the title text
+/// after it, e.g. "第1集 归来" → ("第1集", "归来"),
+/// "01.归来" → ("01", "归来"). Title is nil when the name carries
+/// no title — pure marker ("第1集", "01", "EP01"), a whole label
+/// ("正片", "12集全") — so the card shows just the episode name,
+/// matching the Rex card rule. (v1.97)
+func guageEpisodeNameParts(_ rawName: String) -> (marker: String, title: String?) {
+    let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+    let markers = [
+        #"^第\s*[0-9一二三四五六七八九十百千]+\s*集"#,
+        #"^(?:S[0-9]+\s*)?E(?:P)?[0-9]+"#,
+        #"^[0-9]+"#,
+    ]
+    for pattern in markers {
+        if let range = name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+            let marker = String(name[..<range.upperBound])
+            var tail = String(name[range.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // "12集全" — digits followed by 集… is a whole label, not a title.
+            if tail.hasPrefix("集") { return (name, nil) }
+            tail = tail.trimmingCharacters(in: CharacterSet(charactersIn: "·-–—_.:：、 "))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (marker, tail.isEmpty ? nil : tail)
+        }
+    }
+    return (name, nil)
+}
+
 /// Episode names from sources are often bare numbers ("1",
 /// "01") or codes ("EP01"). The user wants them read as episodes:
 /// those become 「第N集」; names that already say something

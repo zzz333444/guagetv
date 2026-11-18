@@ -1182,7 +1182,10 @@ struct PlayerView: View {
     /// 30-per-segment tabs, a 正序/倒序 switch and episode tiles —
     /// the playing one filled white like the reference's selected
     /// card border. (Line episodes carry no stills, so the cards
-    /// are text tiles rather than 16:9 thumbnails.)
+    /// are text tiles rather than 16:9 thumbnails; each tile shows
+    /// the episode number with the episode title (parsed from the
+    /// raw name) as a small subtitle line, or just the number when
+    /// the line carries no title (v1.97).
     private var episodeSheet: some View {
         let display = episodeReversed ? Array(episodes.indices.reversed())
                                       : Array(episodes.indices)
@@ -1250,7 +1253,13 @@ struct PlayerView: View {
 
     private func episodeTile(_ i: Int) -> some View {
         let current = i == index
-        let displayName = guageEpisodeDisplayName(episodes[i].name, index: i)
+        // Rex-aligned card (v1.97): main line is just the episode
+        // number, the title part of the raw name (if any) sits below
+        // as a small subtitle; lines with no title data show only
+        // the episode name (the old raw-name subtitle, e.g. "01",
+        // was redundant noise, not a title).
+        let parts = guageEpisodeNameParts(episodes[i].name)
+        let displayName = guageEpisodeDisplayName(parts.marker, index: i)
         return Button {
             showEpisodes = false
             goToEpisode(i)
@@ -1260,8 +1269,8 @@ struct PlayerView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(current ? Color.black : Theme.text)
                     .lineLimit(1)
-                if episodes[i].name != displayName {
-                    Text(episodes[i].name)
+                if let title = parts.title {
+                    Text(title)
                         .font(.caption2)
                         .foregroundStyle(current ? Color.black.opacity(0.6) : Theme.textDim)
                         .lineLimit(1)
