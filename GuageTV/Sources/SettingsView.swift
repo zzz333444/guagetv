@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.94 · 模块卡自检结果"
+    static let buildLabel = "v1.95 · 下载按剧分组"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v1.95", title: "下载按剧分组", lines: [
+            "下载页同剧多集收进一组（剧名 · 共 N 集 · 已下载 M 集），点按展开/折叠",
+            "单集的剧仍是原来一条；组内集数按创建时间排序，左滑删除单集不变",
+        ]),
         Entry(version: "v1.94", title: "模块卡自检结果", lines: [
             "模块卡副行已有作者 · 版本 · 栏目数；自检结果现留在卡上（上次自检时间 + 结论）",
             "自检结果按模块持久化，重启仍在；删除模块时一并清除",

@@ -32,6 +32,10 @@ struct HistoryView: View {
     @State private var storageLoaded = false
     @State private var clearingCache = false
 
+    /// R8 (v1.95): multi-episode shows fold into one group row.
+    /// Groups start folded; the set holds the keys currently open.
+    @State private var expandedDownloadGroups: Set<String> = []
+
     /// History shows only entries that were actually played (they
     /// carry an episode URL); favourites include detail-page stubs
     /// filed before the first play.
@@ -237,14 +241,34 @@ struct HistoryView: View {
                 }
             } else {
                 List {
-                    ForEach(downloads.items) { item in
-                        downloadRow(item)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
-                    }
-                    .onDelete { offsets in
-                        offsets.map { downloads.items[$0] }.forEach { DownloadManager.shared.remove($0) }
+                    ForEach(downloadGroups, id: \.key) { group in
+                        if group.items.count == 1 {
+                            ForEach(group.items) { item in
+                                downloadRow(item)
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+                            }
+                            .onDelete { offsets in
+                                offsets.map { group.items[$0] }.forEach { DownloadManager.shared.remove($0) }
+                            }
+                        } else {
+                            downloadGroupHeader(group)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+                            if expandedDownloadGroups.contains(group.key) {
+                                ForEach(group.items) { item in
+                                    downloadRow(item)
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 2, leading: 18, bottom: 2, trailing: 18))
+                                }
+                                .onDelete { offsets in
+                                    offsets.map { group.items[$0] }.forEach { DownloadManager.shared.remove($0) }
+                                }
+                            }
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -315,6 +339,58 @@ struct HistoryView: View {
         if mb >= 1024 { return String(format: "%.1f GB", mb / 1024) }
         if mb >= 1 { return String(format: "%.1f MB", mb) }
         return String(format: "%.0f KB", Double(bytes) / 1_024)
+    }
+
+    /// R8 (v1.95): downloads grouped by show name (vodName), in
+    /// first-seen order; episodes inside a group sort by creation.
+    private struct DownloadGroup {
+        let key: String
+        let items: [DownloadManager.Item]
+    }
+
+    private var downloadGroups: [DownloadGroup] {
+        var order: [String] = []
+        var buckets: [String: [DownloadManager.Item]] = [:]
+        for item in downloads.items {
+            let name = item.vodName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = name.isEmpty ? "未命名" : name
+            if buckets[key] == nil { order.append(key); buckets[key] = [] }
+            buckets[key]?.append(item)
+        }
+        return order.map { DownloadGroup(key: $0, items: (buckets[$0] ?? []).sorted { $0.createdAt < $1.createdAt }) }
+    }
+
+    /// Folded group header: poster + show name + episode counts,
+    /// chevron flips the group open / closed.
+    private func downloadGroupHeader(_ group: DownloadGroup) -> some View {
+        let done = group.items.filter { $0.state == "done" }.count
+        let busy = group.items.filter { $0.state == "downloading" }.count
+        let expanded = expandedDownloadGroups.contains(group.key)
+        var subtitle = "共 \(group.items.count) 集 · 已下载 \(done) 集"
+        if busy > 0 { subtitle += " · 下载中 \(busy)" }
+        return Button {
+            Haptics.tap()
+            if expanded { expandedDownloadGroups.remove(group.key) }
+            else { expandedDownloadGroups.insert(group.key) }
+        } label: {
+            HStack(spacing: 12) {
+                PosterImage(urlString: group.items.first?.pic ?? "")
+                    .frame(width: 46, height: 69)
+                    .posterFrame()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.key).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text).lineLimit(1)
+                    Text(subtitle).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
+            }
+            .padding(10)
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func downloadRow(_ item: DownloadManager.Item) -> some View {
