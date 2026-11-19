@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v1.99 · 更新日志与全量复查"
+    static let buildLabel = "v2.00 · 模块 HTTP 真实状态码"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,10 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.00", title: "模块 HTTP 真实状态码", lines: [
+            "Widget.http 不再恒报 200：返回真实 HTTP 状态码与响应头，404/403/Cloudflare 挑战页不再被误判为成功",
+            "请求失败（断网/超时）返回状态 0 并带中文错误原因；正常返回的 body 解析行为不变",
+        ]),
         Entry(version: "v1.99", title: "更新日志与全量复查", lines: [
             "更新日志补齐本轮全部版本条目（v1.90–v1.99），当前版本置顶高亮",
             "全量复查：底部胶囊四入口与设置页各行入口均有目标页；全仓无占位文案，面向用户英文仅剩专有名词",

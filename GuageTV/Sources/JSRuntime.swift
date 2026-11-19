@@ -258,11 +258,20 @@ final class JSRuntime {
             return out
         }
         let obj = stringKeyed(obj)
-        let empty: [String: Any] = ["content": "", "headers": [String: String]()]
+        // v2.00: surface the real HTTP status and transport error
+        // alongside content/headers — Widget.http used to report
+        // a hardcoded 200, so modules reading status or headers
+        // (e.g. Cloudflare challenges, redirects) misjudged.
+        // status 0 = no HTTP response at all (network failure,
+        // invalid URL, unreadable file).
+        let empty: [String: Any] = ["content": "", "headers": [String: String](), "status": 0]
         if urlString.hasPrefix("file://") {
             let path = URL(string: urlString)?.path ?? ""
-            let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-            return ["content": text, "headers": [String: String]()]
+            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+                return ["content": text, "headers": [String: String](), "status": 200]
+            }
+            return ["content": "", "headers": [String: String](), "status": 0,
+                    "error": "文件读取失败"]
         }
         guard let url = URL(string: urlString) else { return empty }
         var request = URLRequest(url: url)
@@ -289,11 +298,22 @@ final class JSRuntime {
             ? noRedirectSession : URLSession.shared
         var result = empty
         let semaphore = DispatchSemaphore(value: 0)
-        session.dataTask(with: request) { data, response, _ in
+        session.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
-            guard let data else { return }
+            // Transport failure (or no data): keep content empty
+            // but name the cause — callers used to see an empty
+            // body with a fake 200.
+            guard let data else {
+                var failed = empty
+                failed["error"] = (error as? NSError)?.localizedDescription
+                    ?? error?.localizedDescription ?? "网络请求失败"
+                result = failed
+                return
+            }
             var headers: [String: String] = [:]
+            var status = 200
             if let http = response as? HTTPURLResponse {
+                status = http.statusCode
                 for (key, value) in http.allHeaderFields {
                     headers[String(describing: key)] = String(describing: value)
                 }
@@ -311,7 +331,11 @@ final class JSRuntime {
                 content = String(data: data, encoding: .utf8)
                     ?? String(decoding: data, as: UTF8.self)
             }
-            result = ["content": content, "headers": headers]
+            result = ["content": content, "headers": headers, "status": status]
+            if let error {
+                result["error"] = (error as? NSError)?.localizedDescription
+                    ?? error.localizedDescription
+            }
         }.resume()
         semaphore.wait()
         return result

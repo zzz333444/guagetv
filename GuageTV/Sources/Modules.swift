@@ -833,8 +833,15 @@ final class FWDRuntime {
     /// One synchronous HTTP round trip shaped for Widget.http:
     /// returns a JSON string {data, status, statusCode, headers};
     /// data is the parsed JSON value when the body parses as JSON,
-    /// otherwise the raw text. Status is not surfaced by the shared
-    /// sync transport, so it is reported as 200.
+    /// otherwise the raw text. v2.00: status/statusCode are the
+    /// REAL HTTP status from the transport (syncFetch), and
+    /// headers are the real response headers — previously both
+    /// were a hardcoded 200 / whatever the transport happened
+    /// to return, so modules could not tell a 404/403/Cloudflare
+    /// challenge from a success. status 0 + "error" means the
+    /// request never got a response (network failure); data is
+    /// still the body when the server answered with one (e.g. a
+    /// 404 JSON error), so existing modules keep working.
     private static func httpResponse(method: String, urlString: String,
                                      body: String, optionsJSON: String) -> String {
         var options: [String: Any] = [:]
@@ -870,16 +877,20 @@ final class FWDRuntime {
         let result = JSRuntime.syncFetch(urlString: url, obj: obj)
         let content = (result["content"] as? String) ?? ""
         let headers = (result["headers"] as? [String: String]) ?? [:]
+        let status = (result["status"] as? NSNumber)?.intValue ?? 0
         var dataValue: Any = content
         if let data = content.data(using: .utf8),
            let parsed = try? JSONSerialization.jsonObject(with: data) {
             dataValue = parsed
         }
-        let response: [String: Any] = ["data": dataValue, "status": 200,
-                                       "statusCode": 200, "headers": headers]
+        var response: [String: Any] = ["data": dataValue, "status": status,
+                                       "statusCode": status, "headers": headers]
+        if let error = result["error"] as? String, !error.isEmpty {
+            response["error"] = error
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: response),
               let text = String(data: data, encoding: .utf8) else {
-            return "{\"data\":\"\",\"status\":200,\"statusCode\":200,\"headers\":{}}"
+            return "{\"data\":\"\",\"status\":\(status),\"statusCode\":\(status),\"headers\":{}}"
         }
         return text
     }
