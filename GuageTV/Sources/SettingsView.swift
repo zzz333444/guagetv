@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.00 · 模块 HTTP 真实状态码"
+    static let buildLabel = "v2.01 · 模块超时分层与错误分类"
 
     var body: some View {
         NavigationStack {

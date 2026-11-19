@@ -413,13 +413,47 @@ enum FWDStore {
 
 final class FWDRuntime {
     struct FWDfailure: Error, CustomStringConvertible, LocalizedError {
+        /// Chinese error class (v2.01): network failure, script
+        /// exception and timeout are reported separately instead
+        /// of one undifferentiated message, so the module page
+        /// and diagnostics name the actual cause. `other` covers
+        /// host-side engine/resource failures, which are neither
+        /// a network nor a module-script problem.
+        enum Kind: String {
+            case network = "网络失败"
+            case script = "脚本异常"
+            case timeout = "超时"
+            case other = "模块错误"
+        }
         let message: String
-        var description: String { message }
+        let kind: Kind
+        init(message: String, kind: Kind = .other) {
+            self.message = message
+            self.kind = kind
+        }
+        var description: String { "[\(kind.rawValue)] \(message)" }
         // Without LocalizedError, localizedDescription degrades
         // to "(GuageTV.FWDRuntime.FWDfailure error 1.)" and the
         // real cause never reaches the screen (device report,
         // v1.76): the message IS the diagnosis, surface it.
-        var errorDescription: String? { message }
+        var errorDescription: String? { "[\(kind.rawValue)] \(message)" }
+
+        /// Classify a module rejection message: a sub-request
+        /// timeout ("子请求超时") or the 60 s call budget reads
+        /// as timeout, transport failures as network, everything
+        /// else as a script error. The strings it matches are
+        /// the ones this file and JSRuntime.syncFetch produce,
+        /// so the classification is deterministic, not a guess
+        /// over arbitrary module text.
+        static func classifyModuleError(_ text: String) -> Kind {
+            if text.contains("超时") { return .timeout }
+            if text.contains("网络") || text.contains("无网络")
+                || text.contains("无法连接") || text.contains("找不到服务器")
+                || text.contains("连接中断") || text.contains("证书") {
+                return .network
+            }
+            return .script
+        }
     }
 
     private let queue = DispatchQueue(label: "guage.fwd")
@@ -478,18 +512,18 @@ final class FWDRuntime {
             lastException = nil
             ctx.evaluateScript("(function(){\n" + src + "\n})();")
             if let lastException {
-                throw FWDfailure(message: "引擎资源加载失败（\(file)）：\(lastException)")
+                throw FWDfailure(message: "引擎资源加载失败（\(file)）：\(lastException)", kind: .script)
             }
         }
         lastException = nil
         installShim(ctx)
         if let lastException {
-            throw FWDfailure(message: "宿主接口安装失败：\(lastException)")
+            throw FWDfailure(message: "宿主接口安装失败：\(lastException)", kind: .script)
         }
         lastException = nil
         ctx.evaluateScript(source)
         if let lastException {
-            throw FWDfailure(message: "模块加载失败：\(lastException)")
+            throw FWDfailure(message: "模块加载失败：\(lastException)", kind: .script)
         }
         return ctx
     }
@@ -500,7 +534,7 @@ final class FWDRuntime {
               json != "null", json != "undefined",
               let data = json.data(using: .utf8),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw FWDfailure(message: "模块元数据读取失败")
+            throw FWDfailure(message: "模块元数据读取失败", kind: .script)
         }
         let hasDetail = ctx.evaluateScript("typeof loadDetail === 'function'")?.toBool() ?? false
         func str(_ d: [String: Any], _ key: String) -> String {
@@ -582,7 +616,7 @@ final class FWDRuntime {
         // the promise — fail fast with it instead of pumping the
         // full 30 s into a misleading timeout.
         if !settled, let lastException {
-            throw FWDfailure(message: lastException)
+            throw FWDfailure(message: lastException, kind: .script)
         }
         // Handlers await Widget.http, which is a synchronous native
         // value here, so every continuation is a promise job. Drain
@@ -593,16 +627,39 @@ final class FWDRuntime {
         // 60 s since v1.77: drive-aggregation modules fan out to
         // many sources with sequential fetches and legitimately
         // need more room than catalogue modules do.
+        // v2.01 pump hardening: the prelude's timer drain swallows
+        // a throwing timer callback (it only logs it), so without
+        // a probe the call would pump the full 60 s and report a
+        // misleading timeout. The prelude now records the first
+        // timer error in __timerError and the queue depth in
+        // __timersPending: fail fast once an error is recorded
+        // and no timers are left that could still settle the
+        // promise; otherwise keep pumping, and surface the
+        // recorded error inside the timeout message. A JS
+        // exception landing mid-pump fails fast the same way.
+        // (One hard limit stays: a timer callback stuck in an
+        // infinite loop never returns from evaluateScript, so no
+        // deadline can fire — synchronous JS by design.)
         let deadline = Date().addingTimeInterval(60)
+        var pumpTick = 0
         while !settled && Date() < deadline {
             ctx.evaluateScript("0")
             ctx.evaluateScript("if (typeof __drainTimers === 'function') { __drainTimers(); }")
+            if !settled, let lastException {
+                throw FWDfailure(message: lastException, kind: .script)
+            }
+            pumpTick += 1
+            if !settled, pumpTick % 20 == 0,
+               let timerError = FWDRuntime.timerErrorText(ctx), !timerError.isEmpty,
+               FWDRuntime.timersPending(ctx) == 0 {
+                throw FWDfailure(message: "定时器回调异常：\(timerError)", kind: .script)
+            }
             if !RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.005)) {
                 Thread.sleep(forTimeInterval: 0.002)
             }
         }
         if let errorText {
-            throw FWDfailure(message: errorText)
+            throw FWDfailure(message: errorText, kind: FWDfailure.classifyModuleError(errorText))
         }
         guard settled, let jsonText, let data = jsonText.data(using: .utf8) else {
             // Self-diagnosing timeout: report what the context
@@ -615,10 +672,33 @@ final class FWDRuntime {
             })
             """)?.toString() ?? "?"
             let extra = lastException.map { "；最近异常：\($0)" } ?? ""
-            throw FWDfailure(message: "模块调用超时（60 秒）[\(probe)]\(extra)")
+            let timerExtra = FWDRuntime.timerErrorText(ctx)
+                .map { "；定时器异常：\($0)" } ?? ""
+            throw FWDfailure(message: "模块调用超时（60 秒）[\(probe)]\(extra)\(timerExtra)",
+                             kind: .timeout)
         }
         if jsonText == "null" { return nil }
         return try JSONSerialization.jsonObject(with: data)
+    }
+
+    /// First timer-callback error recorded by the prelude's
+    /// __drainTimers (v2.01), if any. Nil when no timer has
+    /// thrown in this context.
+    private static func timerErrorText(_ ctx: JSContext) -> String? {
+        guard let text = ctx.evaluateScript(
+            "typeof globalThis.__timerError === 'string' ? globalThis.__timerError : ''"
+        )?.toString(), !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// Timers still queued in the prelude shim (v2.01). -1 when
+    /// the prelude never installed the shim (older bundle /
+    /// unexpected context) — callers treat that as unknown.
+    private static func timersPending(_ ctx: JSContext) -> Int {
+        guard let value = ctx.evaluateScript(
+            "typeof globalThis.__timersPending === 'number' ? globalThis.__timersPending : -1"
+        ) else { return -1 }
+        return Int(value.toInt32())
     }
 
     // MARK: natives
@@ -842,6 +922,11 @@ final class FWDRuntime {
     /// request never got a response (network failure); data is
     /// still the body when the server answered with one (e.g. a
     /// 404 JSON error), so existing modules keep working.
+    /// v2.01: the per-request timeout is capped at 20 s (the
+    /// 60 s call budget is untouched) and a timed-out request
+    /// additionally reports timedOut=true with a Chinese
+    /// "子请求超时（20 秒）" error, distinct from other
+    /// transport failures.
     private static func httpResponse(method: String, urlString: String,
                                      body: String, optionsJSON: String) -> String {
         var options: [String: Any] = [:]
@@ -860,6 +945,13 @@ final class FWDRuntime {
             url += (url.contains("?") ? "&" : "?") + query
         }
         var obj: [AnyHashable: Any] = ["method": method]
+        // v2.01 sub-request timeout layering: one request may
+        // take at most 20 s — the number is unchanged, but it is
+        // now enforced as a cap (a module asking for more must
+        // not eat the whole 60 s call budget) and its failure is
+        // reported separately from other transport failures.
+        let requestedMs = (options["timeout"] as? NSNumber)?.doubleValue ?? 20000
+        obj["timeout"] = min(max(requestedMs, 1000), 20000)
         if let headers = options["headers"] as? [String: Any] {
             obj["headers"] = headers
         }
@@ -885,7 +977,15 @@ final class FWDRuntime {
         }
         var response: [String: Any] = ["data": dataValue, "status": status,
                                        "statusCode": status, "headers": headers]
-        if let error = result["error"] as? String, !error.isEmpty {
+        // v2.01: a timed-out sub-request is a distinct outcome —
+        // timedOut + a Chinese message naming the 20 s cap — so
+        // a module (and the FWDfailure classifier) can tell a
+        // slow source from a dead network. Other transport
+        // failures keep the Chinese error syncFetch mapped.
+        if (result["timedOut"] as? NSNumber)?.boolValue == true {
+            response["timedOut"] = true
+            response["error"] = "子请求超时（20 秒）：\(URL(string: url)?.host ?? url)"
+        } else if let error = result["error"] as? String, !error.isEmpty {
             response["error"] = error
         }
         guard let data = try? JSONSerialization.data(withJSONObject: response),

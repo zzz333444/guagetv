@@ -302,11 +302,15 @@ final class JSRuntime {
             defer { semaphore.signal() }
             // Transport failure (or no data): keep content empty
             // but name the cause — callers used to see an empty
-            // body with a fake 200.
+            // body with a fake 200. v2.01: classify the failure
+            // in Chinese and flag a timeout separately, so the
+            // module layer can tell a slow source (sub-request
+            // timeout) from a dead network.
             guard let data else {
                 var failed = empty
-                failed["error"] = (error as? NSError)?.localizedDescription
-                    ?? error?.localizedDescription ?? "网络请求失败"
+                let mapped = JSRuntime.chineseTransportError(error)
+                failed["error"] = mapped.message
+                if mapped.timedOut { failed["timedOut"] = true }
                 result = failed
                 return
             }
@@ -333,11 +337,40 @@ final class JSRuntime {
             }
             result = ["content": content, "headers": headers, "status": status]
             if let error {
-                result["error"] = (error as? NSError)?.localizedDescription
-                    ?? error.localizedDescription
+                let mapped = JSRuntime.chineseTransportError(error)
+                result["error"] = mapped.message
+                if mapped.timedOut { result["timedOut"] = true }
             }
         }.resume()
         semaphore.wait()
         return result
+    }
+
+    /// Map a URLSession transport error to a deterministic
+    /// Chinese message (v2.01): NSError.localizedDescription
+    /// depends on device language and reads as a raw code
+    /// dump on some setups, while module errors must read
+    /// the same on every device. timedOut is true only for
+    /// NSURLErrorTimedOut, so callers can separate a slow
+    /// source from a dead network.
+    static func chineseTransportError(_ error: Error?) -> (message: String, timedOut: Bool) {
+        guard let error else { return ("网络请求失败", false) }
+        switch (error as NSError).code {
+        case NSURLErrorTimedOut: return ("请求超时", true)
+        case NSURLErrorNotConnectedToInternet: return ("无网络连接", false)
+        case NSURLErrorCannotFindHost: return ("找不到服务器", false)
+        case NSURLErrorCannotConnectToHost: return ("无法连接服务器", false)
+        case NSURLErrorNetworkConnectionLost: return ("网络连接中断", false)
+        case NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid,
+             NSURLErrorClientCertificateRequired:
+            return ("证书验证失败", false)
+        case NSURLErrorCancelled: return ("请求已取消", false)
+        default:
+            return ((error as NSError).localizedDescription, false)
+        }
     }
 }
