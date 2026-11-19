@@ -50,6 +50,13 @@ globalThis.__drainTimers = () => {
   let guard = 0;
   while (__timers.length && guard++ < 50) {
     const fn = __timers.shift();
-    if (fn) { try { fn(); } catch (e) { console.log("timer error: " + e); } }
+    // v2.01: a throwing timer callback used to be swallowed here
+    // (only console.logged), so the FWD settle pump would spin
+    // the full 60 s and report a misleading timeout. Record the
+    // first error for the host to fail fast on, and publish the
+    // remaining queue depth so the host can tell a dead call
+    // (error + no timers left) from one that may still settle.
+    if (fn) { try { fn(); } catch (e) { console.log("timer error: " + e); if (!globalThis.__timerError) globalThis.__timerError = String((e && e.message) || e); } }
   }
+  globalThis.__timersPending = __timers.length;
 };
