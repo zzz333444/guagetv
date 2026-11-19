@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.01 · 模块超时分层与错误分类"
+    static let buildLabel = "v2.02 · 官方模块目录预置"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,14 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.02", title: "官方模块目录预置", lines: [
+            "模块页新增「官方模块目录」：未下载的 Rex 官方模块（Rex TMDB、动漫数据）先展示卡片，含作者、版本、栏目数与简介，点「下载」一键启用",
+            "已导入的模块不再出现在目录里；Rex TMDB 卡片会提示需先在设置 → TMDB 填入自己的密钥",
+        ]),
+        Entry(version: "v2.01", title: "模块超时分层与错误分类", lines: [
+            "Widget.http 单请求超时封顶 20 秒，超时与断网分开报错，不再转满 60 秒才报",
+            "模块报错带【网络失败/脚本异常/超时】分类前缀；定时器回调异常不再闷满 60 秒",
+        ]),
         Entry(version: "v2.00", title: "模块 HTTP 真实状态码", lines: [
             "Widget.http 不再恒报 200：返回真实 HTTP 状态码与响应头，404/403/Cloudflare 挑战页不再被误判为成功",
             "请求失败（断网/超时）返回状态 0 并带中文错误原因；正常返回的 body 解析行为不变",

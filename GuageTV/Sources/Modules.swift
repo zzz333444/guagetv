@@ -1140,6 +1140,66 @@ enum FWDDanmu {
     }
 }
 
+// MARK: - Official module catalog (v2.02)
+
+/// Built-in directory for the two official Rex modules, so the
+/// module page shows something useful before anything is
+/// downloaded (ReelFlow keeps the same idea: its RexWidgetCatalog
+/// lists official modules with full metadata first, download
+/// second). The metadata below is the live WidgetMetadata of the
+/// files at the two URLs, verified 2026-11-20 against the
+/// official downloads (bangumi 5 columns, rex-tmdb 12 columns).
+/// The app downloads the .js from the URL at tap time, so a newer
+/// upstream version still imports with its own metadata;
+/// importModule replaces a same-id record, so re-downloads never
+/// duplicate.
+struct FWDCatalogEntry: Identifiable {
+    var id: String
+    var title: String
+    var version: String
+    var author: String
+    var description: String
+    var url: String
+    var columnCount: Int
+    var icon: String
+    /// rex-tmdb calls Widget.tmdb.get, which needs the user's own
+    /// TMDB key; without one its tmdb-backed columns fail (known
+    /// since v1.74), so the card says so up front.
+    var requiresTMDBKey: Bool
+}
+
+enum FWDCatalog {
+    static let entries: [FWDCatalogEntry] = [
+        FWDCatalogEntry(
+            id: "rex.tmdb",
+            title: "Rex TMDB",
+            version: "1.2.4",
+            author: "Rex",
+            description: "Rex 官方影视数据模块，提供 TMDB 榜单、片单、分类及按语言更新的地区剧集与综艺",
+            url: "https://assets.rexnow.tv/scripts/rex-tmdb.js",
+            columnCount: 12,
+            icon: "https://assets.rexnow.tv/scripts/rex-icon.png",
+            requiresTMDBKey: true
+        ),
+        FWDCatalogEntry(
+            id: "rex.bangumi",
+            title: "动漫数据",
+            version: "1.0.1",
+            author: "Rex",
+            description: "Rex 动漫数据模块，提供每日放送、近期热门、排行榜、年度新番与分类浏览",
+            url: "https://assets.rexnow.tv/scripts/bangumi.js",
+            columnCount: 5,
+            icon: "https://assets.rexnow.tv/scripts/rex-icon.png",
+            requiresTMDBKey: false
+        ),
+    ]
+
+    /// Entries not yet imported (matched by module id).
+    static func pending(importedIDs: Set<String>) -> [FWDCatalogEntry] {
+        entries.filter { !importedIDs.contains($0.id) }
+    }
+}
+
 // MARK: - Modules home
 
 struct ModulesView: View {
@@ -1152,6 +1212,12 @@ struct ModulesView: View {
     @State private var checking = false
     @State private var checkLines: [String] = []
     @State private var checkVersion = 0
+    @State private var downloadingCatalogID: String?
+
+    /// Catalog entries not yet imported (matched by module id).
+    private var pendingCatalog: [FWDCatalogEntry] {
+        FWDCatalog.pending(importedIDs: Set(records.map(\.id)))
+    }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1217,6 +1283,20 @@ struct ModulesView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(checking)
+                }
+                // v2.02: official-module directory. Entries not
+                // yet imported show as cards with metadata first
+                // and a one-tap download; imported ones disappear
+                // from the directory (they are in the list below).
+                if !pendingCatalog.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("官方模块目录")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        ForEach(pendingCatalog) { entry in
+                            catalogCard(entry)
+                        }
+                    }
                 }
                 if !checkLines.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1456,6 +1536,71 @@ struct ModulesView: View {
         parts.append("\(record.meta.listModules.count) 个栏目")
         if let host = URL(string: record.source)?.host { parts.append(host) }
         return parts.joined(separator: " · ")
+    }
+
+    /// One directory card (v2.02): metadata first, one tap to
+    /// download and enable. importRemote writes the module file
+    /// and replaces any same-id record, so a card can never
+    /// produce a duplicate.
+    private func catalogCard(_ entry: FWDCatalogEntry) -> some View {
+        HStack(spacing: 12) {
+            if !entry.icon.isEmpty {
+                PosterImage(urlString: entry.icon)
+                    .frame(width: 38, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+            } else {
+                Image(systemName: "puzzlepiece.extension")
+                    .foregroundStyle(Theme.accent)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(entry.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text).lineLimit(1)
+                    Text("v\(entry.version)")
+                        .font(.caption2).foregroundStyle(Theme.textDim)
+                }
+                Text("\(entry.author) · \(entry.columnCount) 个栏目")
+                    .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                Text(entry.description)
+                    .font(.caption).foregroundStyle(Theme.textDim).lineLimit(2)
+                if entry.requiresTMDBKey {
+                    Text("需先在设置 → TMDB 填入自己的密钥")
+                        .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
+                }
+            }
+            Spacer()
+            Button {
+                Haptics.tap()
+                downloadingCatalogID = entry.id
+                Task {
+                    defer { downloadingCatalogID = nil }
+                    do {
+                        _ = try await FWDStore.importRemote(entry.url)
+                        records = FWDStore.records()
+                        note = "已导入 \(entry.title)"
+                        Haptics.success()
+                    } catch {
+                        note = "\(entry.title) 下载失败：\(error.localizedDescription)"
+                        Haptics.error()
+                    }
+                }
+            } label: {
+                if downloadingCatalogID == entry.id {
+                    ProgressView().tint(Theme.text)
+                } else {
+                    Text("下载")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.glass, in: Capsule())
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(downloadingCatalogID != nil)
+        }
+        .padding(14)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
