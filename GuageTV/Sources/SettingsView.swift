@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.05 · 播放器起播与弱网"
+    static let buildLabel = "v2.06 · 模块全量自测与栏目缓存"
 
     var body: some View {
         NavigationStack {
