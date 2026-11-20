@@ -271,7 +271,9 @@ struct PySiteBrowseView: View {
                 pic: row["vod_pic"] as? String ?? "",
                 remarks: row["vod_remarks"] as? String ?? "",
                 year: row["vod_year"] as? String ?? "",
-                score: String(describing: row["vod_score"] ?? ""))
+                score: String(describing: row["vod_score"] ?? ""),
+                typeName: row["type_name"] as? String
+                    ?? row["vod_class"] as? String ?? "")
         }
     }
 

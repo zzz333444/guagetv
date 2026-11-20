@@ -1405,6 +1405,19 @@ struct ModulesView: View {
                     .buttonStyle(.plain)
                     .disabled(checking)
                 }
+                // v2.09: 播出日历入口 —— bangumi 每日放送的周视图
+                // （今天 + 周一…周日）；模块没导入时日历页只给
+                // 导入指引，不编造数据。
+                NavigationLink {
+                    BroadcastCalendarView()
+                } label: {
+                    Label("播出日历", systemImage: "calendar")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Theme.glass, in: Capsule())
+                }
+                .buttonStyle(.plain)
                 // v2.02: official-module directory. Entries not
                 // yet imported show as cards with metadata first
                 // and a one-tap download; imported ones disappear

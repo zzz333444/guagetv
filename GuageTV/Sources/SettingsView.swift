@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.08 · Rex 细节核查与玻璃修正"
+    static let buildLabel = "v2.09 · 播出日历与搜索筛选"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.09", title: "播出日历与搜索筛选", lines: [
+            "模块页新增「播出日历」：bangumi 每日放送周视图（今天 + 周一…周日），点哪天拉哪天，栏目结果 30 分钟缓存，重进即出屏",
+            "搜索页新增年份/类型筛选：只在结果确实带年份或类型时出现，筛空后有清除筛选入口",
+            "详情页「播放资源」卡补规格行：线路名带画质（如 1080P）或首集是 m3u8/MP4 时显示，数据里没有就不显示；媒体信息卡同步补「画质」行",
+        ]),
         Entry(version: "v2.02", title: "官方模块目录预置", lines: [
             "模块页新增「官方模块目录」：未下载的 Rex 官方模块（Rex TMDB、动漫数据）先展示卡片，含作者、版本、栏目数与简介，点「下载」一键启用",
             "已导入的模块不再出现在目录里；Rex TMDB 卡片会提示需先在设置 → TMDB 填入自己的密钥",

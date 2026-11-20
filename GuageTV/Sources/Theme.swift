@@ -174,4 +174,8 @@ struct VodItem: Identifiable {
     var remarks: String = ""
     var year: String = ""
     var score: String = ""
+    /// Content type (CMS `type_name` / `vod_class`, e.g. 电影/电视剧):
+    /// empty when the source sends none — the search filter only
+    /// offers types the result set actually carries. (v2.09)
+    var typeName: String = ""
 }

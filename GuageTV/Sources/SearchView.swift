@@ -56,6 +56,13 @@ struct SearchView: View {
     @State private var selectedTitleGroup: TitleGroup?
     /// The left rail can be hidden from the header's filter button.
     @State private var showSiteFilter = true
+    /// Result filters (v2.09): year + type, applied client-side to
+    /// the current result set. A chip row only appears when the
+    /// results actually carry that field — sources that send no
+    /// vod_year / type_name get no chips instead of a dead filter.
+    /// Reset on every new search in run().
+    @State private var selectedYear: String? = nil
+    @State private var selectedType: String? = nil
     /// Progress counters for the rail's 全部 (done/total) label,
     /// mirrored out of run()'s local tallies as sites answer.
     @State private var searchDoneCount = 0
@@ -292,7 +299,16 @@ struct SearchView: View {
             // behind the recents list until the run ended — the
             // "results only appear when the search finishes" bug.
             aggregateToggleBar
-            if aggregateTitles, selectedSiteKey == nil {
+            resultFilterBar
+            if filteredResults.isEmpty {
+                EmptyStateView(icon: "line.3.horizontal.decrease.circle",
+                               title: "筛选后没有结果",
+                               message: "换个年份或类型试试",
+                               actionTitle: "清除筛选",
+                               action: { selectedYear = nil; selectedType = nil },
+                               compact: true)
+                    .padding(.horizontal, 18)
+            } else if aggregateTitles, selectedSiteKey == nil {
                 aggregatedBrowser
             } else {
                 resultsBrowser
@@ -352,10 +368,87 @@ struct SearchView: View {
         var representative: VodItem { entries[0].item }
     }
 
+    /// Results after the year/type filter: groups that filter
+    /// down to nothing drop out entirely. Both browsers
+    /// (titleGroups, visibleGroups) read this, never `results`.
+    private var filteredResults: [(site: TVBoxConfig.Site, items: [VodItem])] {
+        guard selectedYear != nil || selectedType != nil else { return results }
+        return results.compactMap { group in
+            let items = group.items.filter { item in
+                (selectedYear == nil || item.year == selectedYear)
+                && (selectedType == nil || item.typeName == selectedType)
+            }
+            return items.isEmpty ? nil : (site: group.site, items: items)
+        }
+    }
+
+    /// Distinct years present in this result set, newest first.
+    private var availableYears: [String] {
+        Array(Set(results.flatMap(\.items).map(\.year).filter { !$0.isEmpty }))
+            .sorted { (Int($0) ?? 0, $0) > (Int($1) ?? 0, $1) }
+    }
+
+    /// Distinct content types present in this result set.
+    private var availableTypes: [String] {
+        Array(Set(results.flatMap(\.items).map(\.typeName).filter { !$0.isEmpty }))
+            .sorted()
+    }
+
+    /// Horizontal chip row for the year/type filter. Only rendered
+    /// when at least one section has values; each section keeps its
+    /// own 全部 chip so either dimension clears independently.
+    private var resultFilterBar: some View {
+        Group {
+            if !availableYears.isEmpty || !availableTypes.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if !availableYears.isEmpty {
+                            filterChip(label: "全部年份", selected: selectedYear == nil) {
+                                selectedYear = nil
+                            }
+                            ForEach(availableYears, id: \.self) { year in
+                                filterChip(label: year, selected: selectedYear == year) {
+                                    selectedYear = year
+                                }
+                            }
+                        }
+                        if !availableTypes.isEmpty {
+                            filterChip(label: "全部类型", selected: selectedType == nil) {
+                                selectedType = nil
+                            }
+                            ForEach(availableTypes, id: \.self) { type in
+                                filterChip(label: type, selected: selectedType == type) {
+                                    selectedType = type
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    private func filterChip(label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.selection()
+            action()
+        } label: {
+            Text(label)
+                .font(.caption.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? .black : Theme.text.opacity(0.85))
+                .padding(.horizontal, 11).padding(.vertical, 6)
+                .background(selected ? Color.white : Theme.glass, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var titleGroups: [TitleGroup] {
         var order: [String] = []
         var map: [String: TitleGroup] = [:]
-        for group in results {
+        for group in filteredResults {
             for item in group.items {
                 let key = Self.normalizedTitle(item.name)
                 if map[key] == nil {
@@ -431,10 +524,10 @@ struct SearchView: View {
     }
 
     /// The groups the poster grid shows: everything, or just the
-    /// site picked on the rail.
+    /// site picked on the rail — after the year/type filter.
     private var visibleGroups: [(site: TVBoxConfig.Site, items: [VodItem])] {
-        guard let key = selectedSiteKey else { return results }
-        return results.filter { $0.site.key == key }
+        guard let key = selectedSiteKey else { return filteredResults }
+        return filteredResults.filter { $0.site.key == key }
     }
 
     /// Results browser (reference layout): a site rail on the
@@ -716,6 +809,8 @@ struct SearchView: View {
         finalNote = ""
         probedKinds = [:]
         selectedSiteKey = nil
+        selectedYear = nil
+        selectedType = nil
         emptySites = []
         showEmptySites = false
         searchDoneCount = 0

@@ -50,6 +50,18 @@ func guageEpisodeNameParts(_ rawName: String) -> (marker: String, title: String?
     return (name, nil)
 }
 
+/// Quality token carried by a source string — a line name like
+/// "高清1080P线" or a remarks field like "HD1280高清中字".
+/// Only surfaced, never invented: nil when the source sent no
+/// such token, so cards without one show nothing extra. (v2.09)
+func guageQualityToken(in text: String) -> String? {
+    let upper = text.uppercased()
+    for token in ["2160P", "4K", "1080P", "720P", "480P", "蓝光", "超清", "高清", "标清", "HD"] {
+        if upper.contains(token) { return token }
+    }
+    return nil
+}
+
 /// Episode names from sources are often bare numbers ("1",
 /// "01") or codes ("EP01"). The user wants them read as episodes:
 /// those become 「第N集」; names that already say something
@@ -530,6 +542,10 @@ struct DetailView: View {
             ("年份", detail.year),
             ("地区", detail.area),
             ("更新状态", detail.remarks),
+            // v2.09: only when the remarks actually carry a
+            // quality token — otherwise the row stays hidden
+            // with the rest of the empty fields.
+            ("画质", guageQualityToken(in: detail.remarks) ?? ""),
         ].filter { !$0.value.isEmpty }
     }
 
@@ -729,9 +745,31 @@ struct DetailView: View {
 
     /// One 播放资源 line card (v1.76): name + episode count; the
     /// active line gets the lighter border and green check (Rex).
+    /// (v2.09) a spec line under the count, built only from data
+    /// the source actually sent: a quality token in the line name
+    /// (e.g. "1080P" in "高清1080P线") and the stream format of
+    /// the line's first episode URL (.m3u8 → HLS, .mp4 → MP4).
+    /// Lines without either show no spec row at all.
+    private func lineSpec(_ i: Int) -> String {
+        var parts: [String] = []
+        if detail.playFrom.indices.contains(i),
+           let token = guageQualityToken(in: detail.playFrom[i]) {
+            parts.append(token)
+        }
+        let episodes = detail.playGroups.indices.contains(i) ? detail.playGroups[i] : []
+        if let first = episodes.first?.url.lowercased() {
+            if first.contains(".m3u8") { parts.append("HLS") }
+            else if first.contains(".mp4") { parts.append("MP4") }
+            else if first.contains(".flv") { parts.append("FLV") }
+            else if first.contains(".mkv") { parts.append("MKV") }
+        }
+        return parts.joined(separator: " · ")
+    }
+
     private func lineCard(_ i: Int) -> some View {
         let active = i == lineIndex
         let count = detail.playGroups.indices.contains(i) ? detail.playGroups[i].count : 0
+        let spec = lineSpec(i)
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(detail.playFrom[i])
@@ -741,6 +779,11 @@ struct DetailView: View {
                 Text(count > 0 ? "共 \(count) 集" : "暂无集数")
                     .font(.caption2)
                     .foregroundStyle(Theme.textDim)
+                if !spec.isEmpty {
+                    Text(spec)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textDim)
+                }
             }
             Spacer(minLength: 0)
             if active {

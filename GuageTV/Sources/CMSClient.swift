@@ -195,7 +195,9 @@ final class CMSClient {
                     name: $0["vod_name"] as? String ?? "",
                     pic: $0["vod_pic"] as? String ?? "",
                     remarks: $0["vod_remarks"] as? String ?? "",
-                    year: $0["vod_year"] as? String ?? "")
+                    year: $0["vod_year"] as? String ?? "",
+                    typeName: $0["type_name"] as? String
+                        ?? $0["vod_class"] as? String ?? "")
         }
     }
 
