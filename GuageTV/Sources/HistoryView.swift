@@ -42,6 +42,18 @@ struct HistoryView: View {
     @State private var isSelectingDownloads = false
     @State private var selectedDownloadIDs: Set<String> = []
 
+    /// v2.11: history batch cleanup — multi-select delete +
+    /// one-tap clear of finished (≥95% watched) entries.
+    @State private var isSelectingHistory = false
+    @State private var selectedHistoryIDs: Set<String> = []
+    @State private var confirmFinishedClear = false
+    @State private var confirmHistoryBatchDelete = false
+
+    /// Finished, not favourited — the same set "清已看完" removes.
+    private var finishedCount: Int {
+        history.entries.filter { HistoryStore.isFinished($0) && !$0.isFavourite }.count
+    }
+
     /// History shows only entries that were actually played (they
     /// carry an episode URL); favourites include detail-page stubs
     /// filed before the first play.
@@ -91,6 +103,8 @@ struct HistoryView: View {
                                     Spacer()
                                     let count = history.favourites.filter(\.hasUpdate).count
                                     if count > 0 {
+                                        // v2.11: 更新红点与计数并列。
+                                        Circle().fill(Color.red).frame(width: 8, height: 8)
                                         Text("\(count) 部有更新")
                                             .font(.caption.weight(.semibold))
                                             .foregroundStyle(Theme.accent)
@@ -129,6 +143,12 @@ struct HistoryView: View {
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                 }
+                // v2.11: 历史批量清理条（仅管理模式）：全选 / 清已看完 / 批量删除。
+                if isSelectingHistory && segment == 0 && !shownEntries.isEmpty {
+                    historyBatchBar
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                }
             }
             .background(AmbientBackground(imageURL: shownEntries.first?.pic))
             .navigationTitle("记录")
@@ -147,10 +167,29 @@ struct HistoryView: View {
                         .foregroundStyle(Theme.text)
                     }
                 }
+                // v2.11: 历史页批量管理入口；管理模式下「清空」让给「完成」。
                 if segment == 0 && !history.entries.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("清空") { confirmClear = true }
-                            .foregroundStyle(.red.opacity(0.9))
+                    if isSelectingHistory {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") {
+                                Haptics.tap()
+                                selectedHistoryIDs.removeAll()
+                                isSelectingHistory = false
+                            }
+                            .foregroundStyle(Theme.text)
+                        }
+                    } else {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("管理") {
+                                Haptics.tap()
+                                isSelectingHistory = true
+                            }
+                            .foregroundStyle(Theme.text)
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("清空") { confirmClear = true }
+                                .foregroundStyle(.red.opacity(0.9))
+                        }
                     }
                 }
                 // v2.10: 下载页批量管理入口。
@@ -169,7 +208,29 @@ struct HistoryView: View {
                 Button("清空", role: .destructive) { history.clearAll() }
                 Button("取消", role: .cancel) {}
             }
+            .confirmationDialog("清理 \(finishedCount) 条已看完的记录？", isPresented: $confirmFinishedClear, titleVisibility: .visible) {
+                Button("清理", role: .destructive) {
+                    history.removeFinished()
+                    if history.entries.isEmpty { isSelectingHistory = false }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("只清理看到 95% 以上的记录，已收藏的剧不受影响。")
+            }
+            .confirmationDialog("删除选中的 \(selectedHistoryIDs.count) 条记录？", isPresented: $confirmHistoryBatchDelete, titleVisibility: .visible) {
+                Button("删除", role: .destructive) {
+                    history.remove(ids: selectedHistoryIDs)
+                    selectedHistoryIDs.removeAll()
+                    if history.entries.isEmpty { isSelectingHistory = false }
+                }
+                Button("取消", role: .cancel) {}
+            }
             .onChange(of: segment) { newValue in
+                // 离开历史分段即退出管理模式，选中态不带到别的分段。
+                if newValue != 0 {
+                    isSelectingHistory = false
+                    selectedHistoryIDs.removeAll()
+                }
                 if newValue == 1 && !history.favourites.isEmpty && !checkingUpdates {
                     checkingUpdates = true
                     Task {
@@ -197,6 +258,14 @@ struct HistoryView: View {
 
     private func row(_ entry: HistoryStore.Entry) -> some View {
         HStack(spacing: 12) {
+            // v2.11: 管理模式下行首勾选圈，点按只改选中态。
+            if isSelectingHistory && segment == 0 {
+                Image(systemName: selectedHistoryIDs.contains(entry.id)
+                      ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selectedHistoryIDs.contains(entry.id)
+                                     ? Theme.accent : Theme.textDim)
+            }
             PosterImage(urlString: entry.pic)
                 .frame(width: 46, height: 69)
                 .posterFrame()
@@ -233,8 +302,43 @@ struct HistoryView: View {
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
         .contentShape(Rectangle())
         .onTapGesture {
+            if isSelectingHistory && segment == 0 {
+                Haptics.tap()
+                if selectedHistoryIDs.contains(entry.id) { selectedHistoryIDs.remove(entry.id) }
+                else { selectedHistoryIDs.insert(entry.id) }
+                return
+            }
             if !entry.episodeURL.isEmpty { Haptics.medium(); playRoute = .history(entry) }
         }
+    }
+
+    /// v2.11: 历史批量操作条（仅管理模式）：全选 / 清已看完 / 批量删除。
+    private var historyBatchBar: some View {
+        HStack(spacing: 10) {
+            Button(selectedHistoryIDs.count == shownEntries.count ? "取消全选" : "全选") {
+                Haptics.tap()
+                if selectedHistoryIDs.count == shownEntries.count {
+                    selectedHistoryIDs.removeAll()
+                } else {
+                    selectedHistoryIDs = Set(shownEntries.map(\.id))
+                }
+            }
+            Spacer()
+            Button("清已看完\(finishedCount == 0 ? "" : " (\(finishedCount))")") {
+                Haptics.tap()
+                confirmFinishedClear = true
+            }
+            .disabled(finishedCount == 0)
+            Button("删除\(selectedHistoryIDs.isEmpty ? "" : " (\(selectedHistoryIDs.count))")") {
+                Haptics.tap()
+                confirmHistoryBatchDelete = true
+            }
+            .disabled(selectedHistoryIDs.isEmpty)
+            .foregroundStyle(.red.opacity(0.9))
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: downloads segment

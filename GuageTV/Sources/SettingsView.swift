@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.10 · 弹幕外观与批量管理"
+    static let buildLabel = "v2.11 · 备份列表与历史批量清理"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.11", title: "备份列表与历史批量清理", lines: [
+            "备份页新增「本机备份」列表：每次生成备份自动在本机留一份，每条带备份时间与大小，可分享、恢复、删除；只存本机，不走云同步",
+            "恢复前先确认：点恢复会先显示这份备份的内容（备份时间、线路条数、设置项数、有无观看历史），确认后才覆盖本机数据；从文件导入同样先确认",
+            "历史页新增批量管理：多选后批量删除；「清已看完」一键清理看到 95% 以上的记录，已收藏的剧不受影响",
+            "追剧页有更新的剧海报右上角挂红点；排序复核：有更新的置顶，其余按最近观看排序；进详情页后红点清除",
+        ]),
         Entry(version: "v2.10", title: "弹幕外观与批量管理", lines: [
             "弹幕外观独立成页：字号、透明度、滚动速度、显示区域、描边，改动立即生效（正在播放的弹幕也会跟着变），附实时预览",
             "直播页新增频道搜索：输入名字跨全部分组找频道；分组 chips 可折叠收起",

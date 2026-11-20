@@ -56,6 +56,9 @@ struct WatchlistView: View {
     @AppStorage("watchlistLastCheck") private var lastCheck: Double = 0
     @AppStorage("watchNotify.enabled") private var notifyEnabled = true
 
+    /// v2.11 排序复核：有更新的置顶（hasUpdate 优先），其余按
+    /// 最近观看时间倒序。进详情页会清掉该条的 hasUpdate
+    /// (DetailView 调 markUpdateSeen)，红点随之消失。
     private var sortedFavourites: [HistoryStore.Entry] {
         history.favourites.sorted { a, b in
             if a.hasUpdate != b.hasUpdate { return a.hasUpdate }
@@ -137,9 +140,19 @@ struct WatchlistView: View {
 
     private func row(_ entry: HistoryStore.Entry) -> some View {
         HStack(spacing: 12) {
-            PosterImage(urlString: entry.pic)
-                .frame(width: 46, height: 69)
-                .posterFrame()
+            // v2.11: 有更新的海报右上角挂红点（与「有更新」胶囊并列）。
+            ZStack(alignment: .topTrailing) {
+                PosterImage(urlString: entry.pic)
+                    .frame(width: 46, height: 69)
+                    .posterFrame()
+                if entry.hasUpdate {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                        .offset(x: 3, y: -3)
+                }
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.name)
                     .font(.subheadline.weight(.semibold))

@@ -174,6 +174,29 @@ final class HistoryStore: ObservableObject {
         save()
     }
 
+    func remove(ids: Set<String>) {
+        entries.removeAll { ids.contains($0.id) }
+        save()
+    }
+
+    /// Finished = played to (or past) 95% of a known duration — the
+    /// same cutoff continueWatching uses for "still watching".
+    static func isFinished(_ entry: Entry) -> Bool {
+        entry.durationSeconds > 0 && entry.positionSeconds >= entry.durationSeconds * 0.95
+    }
+
+    /// Batch-clear finished history (v2.11). Favourites are kept
+    /// even when finished — deleting them would also drop the show
+    /// from 追剧. Returns how many rows were removed.
+    @discardableResult
+    func removeFinished() -> Int {
+        let before = entries.count
+        entries.removeAll { Self.isFinished($0) && !$0.isFavourite }
+        let removed = before - entries.count
+        if removed > 0 { save() }
+        return removed
+    }
+
     func clearAll() {
         entries.removeAll()
         save()
