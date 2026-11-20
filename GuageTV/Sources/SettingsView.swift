@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.04 · 滚动流畅度与海报管线"
+    static let buildLabel = "v2.05 · 播放器起播与弱网"
 
     var body: some View {
         NavigationStack {

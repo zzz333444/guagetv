@@ -370,13 +370,18 @@ struct PlayerView: View {
             if currentTime > 3, recoveryStep != 0 { recoveryStep = 0; triedLines.removeAll() }
             checkOutroSkip()
             // P5: prefetch the next episode once playback passes
-            // 70% of this episode (was: immediately on appear /
+            // the threshold (was: immediately on appear /
             // episode change, i.e. at 0% — a spider round trip
             // even for episodes abandoned seconds in). duration
             // <= 0 (live / unknown) never triggers; the flag makes
             // it once per episode so a failed resolve doesn't
-            // re-fire on every tick past 70%.
-            if duration > 0, currentTime / duration >= 0.70,
+            // re-fire on every tick past the threshold. v2.05:
+            // short episodes (< 15 min, e.g. short dramas) fire
+            // at 50% — at 70% a slow spider resolve can still be
+            // running when the episode ends; long episodes stay
+            // at 70% so the resolve isn't wasted on abandonment.
+            let prefetchThreshold = duration < 900 ? 0.50 : 0.70
+            if duration > 0, currentTime / duration >= prefetchThreshold,
                prefetchTriggeredForEpisode != index {
                 prefetchTriggeredForEpisode = index
                 prefetchNext()
@@ -539,7 +544,10 @@ struct PlayerView: View {
             if showChrome { scheduleChromeHide() }
         }
         .simultaneousGesture(
-            DragGesture(minimumDistance: 14)
+            // v2.05: 8pt minimum distance + a 6pt direction lock
+            // (was 14/10) — the scrub/brightness/volume drag
+            // engages sooner, closer to the reference player's feel.
+            DragGesture(minimumDistance: 8)
                 .onChanged { value in handleDrag(value, size: size) }
                 .onEnded { value in endDrag(value) }
         )
@@ -581,7 +589,7 @@ struct PlayerView: View {
         let dx = value.translation.width
         let dy = value.translation.height
         if dragMode == nil {
-            guard abs(dx) > 10 || abs(dy) > 10 else { return }
+            guard abs(dx) > 6 || abs(dy) > 6 else { return }
             if abs(dx) > abs(dy) {
                 dragMode = .scrub
                 dragStartTime = currentTime
@@ -612,11 +620,13 @@ struct PlayerView: View {
             scrubTarget = min(max(dragStartTime + delta, 0), duration)
             requestPreview(at: scrubTarget)
         case .brightness:
-            let level = min(max(dragStartLevel - Double(dy) / 220, 0.05), 1)
+            // v2.05: 180pt of vertical travel covers the full range
+            // (was 220) — brightness/volume track the finger faster.
+            let level = min(max(dragStartLevel - Double(dy) / 180, 0.05), 1)
             dragLevel = level
             UIScreen.main.brightness = CGFloat(level)
         case .volume:
-            let level = min(max(dragStartLevel - Double(dy) / 220, 0), 1)
+            let level = min(max(dragStartLevel - Double(dy) / 180, 0), 1)
             dragLevel = level
             VolumeControl.set(level)
         case .episodeSwipe:
@@ -2021,10 +2031,15 @@ struct PlayerView: View {
     /// Stall watchdog: some failures never raise an error — the
     /// engine just sits in "buffering" forever (AVPlayer does this
     /// with proxied range fetchers and encodes it cannot decode:
-    /// no failure event, an eternal spinner). ~25 s of buffering
-    /// with zero playhead progress is treated as a failure and
-    /// enters the same recovery ladder (rebuild, then switch
-    /// engine), which is what gets those titles playing.
+    /// no failure event, an eternal spinner). Buffering with zero
+    /// playhead progress is treated as a failure and enters the
+    /// same recovery ladder (rebuild, then switch engine), which
+    /// is what gets those titles playing. v2.05: the threshold is
+    /// tiered — the first stall of a streak trips after 15 s
+    /// (3 ticks) instead of 25 s, so a dead link stops wasting
+    /// the user's time sooner; once the ladder is already
+    /// mid-recovery the bar goes back to 25 s (5 ticks) so a
+    /// slow-but-alive stream isn't killed twice.
     private func watchdogTick() {
         let nearEnd = duration > 0 && currentTime >= duration - 1
         if isBuffering, !nearEnd {
@@ -2033,7 +2048,8 @@ struct PlayerView: View {
             } else {
                 stallTicks = 0
             }
-            if stallTicks >= 5 {
+            let stallThreshold = recoveryStep == 0 ? 3 : 5
+            if stallTicks >= stallThreshold {
                 stallTicks = 0
                 handlePlaybackFailure("加载超时")
             }
@@ -2352,7 +2368,12 @@ final class NativeController: NSObject, ObservableObject {
         //  • FIXED here: live items did not fetch while paused
         //    (canUseNetworkResourcesForLiveStreamingWhilePaused
         //    defaults false), so a resume re-buffered from cold.
-        item.preferredForwardBufferDuration = isLive ? 0 : 60
+        //  • v2.05 fast start: VOD opens with a 10s forward
+        //    buffer so the first frame lands sooner (less to fill
+        //    before play starts); once playback is running past
+        //    1s the observer below grows it back to 60s for the
+        //    same stall resistance as before.
+        item.preferredForwardBufferDuration = isLive ? 0 : 10
         if isLive { item.canUseNetworkResourcesForLiveStreamingWhilePaused = true }
         // Adaptive HLS opens on the lowest eligible variant and
         // ramps up, instead of probing bandwidth at full rate
@@ -2394,6 +2415,15 @@ final class NativeController: NSObject, ObservableObject {
             }
             self.isPlaying = self.player.timeControlStatus == .playing
             self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            // v2.05 fast start, second half: once the playhead is
+            // moving, grow the forward buffer back to the full 60s
+            // (live stays 0). Checked here, not in load(), because
+            // the item only honours the change once it is playing.
+            if !self.lastIsLive, self.currentTime > 1,
+               let item = self.player.currentItem,
+               item.preferredForwardBufferDuration < 60 {
+                item.preferredForwardBufferDuration = 60
+            }
             self.sampleSpeed()
         }
     }

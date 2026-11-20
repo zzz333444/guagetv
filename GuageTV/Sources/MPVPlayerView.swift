@@ -135,14 +135,16 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "cache", "yes")
             // Buffers maxed (v1.35, at the user's explicit ask —
             // the earlier "60s is enough" call is superseded):
-            // two minutes of cache, a 256MiB forward cap, a
-            // 128MiB back cap (v1.43: was 64MiB — more room to
-            // seek back without re-fetching), and a 60s
-            // readahead target. Costs memory on long streams;
-            // buys real stall resistance on weak networks.
+            // two minutes of cache and a 60s readahead target.
+            // Costs memory on long streams; buys real stall
+            // resistance on weak networks. v2.05: the byte caps
+            // are memory-aware — 256/128MiB on devices with
+            // ≥4GiB RAM, 128/64MiB below, so the player never
+            // eats a third of a 3GiB phone's memory.
+            let memGiB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
             setOptionOn(h, "cache-secs", "120")
-            setOptionOn(h, "demuxer-max-bytes", "256MiB")
-            setOptionOn(h, "demuxer-max-back-bytes", "128MiB")
+            setOptionOn(h, "demuxer-max-bytes", memGiB >= 4 ? "256MiB" : "128MiB")
+            setOptionOn(h, "demuxer-max-back-bytes", memGiB >= 4 ? "128MiB" : "64MiB")
             // Read further ahead so brief network dips don't reach
             // the screen; hold playback while the cache refills
             // after an underrun instead of stutter-playing.
@@ -151,7 +153,8 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "cache-pause-wait", "1")
             // P3 buffer audit (v1.72), mpv side — cache table
             // verified consistent (120s / 256MiB forward /
-            // 128MiB back / 60s readahead; the byte cap binds
+            // 128MiB back / 60s readahead on ≥4GiB devices, halved
+            // below — v2.05 memory-aware caps; the byte cap binds
             // first only above ~17Mbps, as intended) and live is
             // deliberately not split out: a live HLS demuxer
             // cannot read past the live edge, so the 120s cap
@@ -160,6 +163,13 @@ final class MPVController: ObservableObject {
             // default — 1MiB smooths throughput on
             // high-latency links without touching the cache above.
             setOptionOn(h, "stream-buffer-size", "1MiB")
+            // v2.05: shrink the demuxer probe so the first frame
+            // lands sooner — 2MiB / 2s of analysis instead of
+            // libavformat's 5MiB / 5s default. HLS playlists and
+            // MP4 headers resolve well inside this; streams that
+            // need a deeper probe still fall back to mpv's retry.
+            setOptionOn(h, "demuxer-lavf-probesize", "2000000")
+            setOptionOn(h, "demuxer-lavf-analyzeduration", "2")
             // Network resilience: fail a stalled connection in
             // 30s instead of hanging (v1.43: was 15s — slow
             // networks need longer before giving up), and let
