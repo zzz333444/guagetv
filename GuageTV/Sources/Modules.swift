@@ -250,7 +250,7 @@ enum FWDStore {
     @discardableResult
     static func importModule(source: String, origin: String) throws -> FWDRecord {
         if source.hasPrefix("FWENC1") {
-            throw StoreFailure(message: "这是加密模块（FWENC1），暂不支持")
+            throw StoreFailure(message: "这是加密模块（FWENC1），内容已加密无法读取，暂不支持导入；请向模块作者索取未加密版本")
         }
         guard source.contains("WidgetMetadata") else {
             throw StoreFailure(message: "不是 Forward 模块（找不到 WidgetMetadata）")
@@ -274,6 +274,13 @@ enum FWDStore {
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(record.fileName))
         save(records().filter { $0.id != record.id })
         clearCheckResult(for: record.id)
+        // v2.07: a deleted module's per-module storage and cached
+        // columns go with it — otherwise a later re-import of the
+        // same id resurrects stale credentials and stale lists.
+        // Widget.sharedCache is intentionally shared across
+        // modules (Forward spec) and is left alone.
+        UserDefaults.standard.removeObject(forKey: "fwd.storage.\(record.id)")
+        FWDColumnCache.clear(moduleID: record.id)
     }
 
     /// v1.94: per-module self-check result, kept on the card
@@ -460,6 +467,14 @@ enum FWDColumnCache {
         guard let data = try? JSONSerialization.data(withJSONObject: [
             "savedAt": Date().timeIntervalSince1970, "rows": rows]) else { return }
         dict[key] = data
+        UserDefaults.standard.set(dict, forKey: storeKey)
+    }
+
+    /// Drop every cached column of one module (module delete,
+    /// v2.07): keys are "moduleID|columnID|params…".
+    static func clear(moduleID: String) {
+        guard var dict = UserDefaults.standard.dictionary(forKey: storeKey) as? [String: Data] else { return }
+        dict = dict.filter { !$0.key.hasPrefix(moduleID + "|") }
         UserDefaults.standard.set(dict, forKey: storeKey)
     }
 }
@@ -1004,6 +1019,14 @@ final class FWDRuntime {
     /// additionally reports timedOut=true with a Chinese
     /// "子请求超时（20 秒）" error, distinct from other
     /// transport failures.
+    /// v2.07 fetch-compat: the transport options syncFetch
+    /// already understands — encoding (gbk…), buffer (2 =
+    /// base64 body), redirect (0 = don't follow) and a form
+    /// `data` dict — are now forwarded instead of silently
+    /// dropped; `url` reports the final URL after redirects;
+    /// query/form values are percent-encoded with & = + ? kept
+    /// out, so one value can no longer split into several
+    /// parameters.
     private static func httpResponse(method: String, urlString: String,
                                      body: String, optionsJSON: String) -> String {
         var options: [String: Any] = [:]
@@ -1011,12 +1034,16 @@ final class FWDRuntime {
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             options = parsed
         }
+        // Query values must not carry & = + ? raw, or one value
+        // splits into several parameters (v2.07).
+        let valueAllowed = CharacterSet.urlQueryAllowed
+            .subtracting(CharacterSet(charactersIn: "&=+?"))
         var url = urlString
         if let params = options["params"] as? [String: Any], !params.isEmpty {
             let query = params.map { key, value in
-                let k = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
+                let k = key.addingPercentEncoding(withAllowedCharacters: valueAllowed) ?? key
                 let v = String(describing: value)
-                    .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                    .addingPercentEncoding(withAllowedCharacters: valueAllowed) ?? ""
                 return "\(k)=\(v)"
             }.joined(separator: "&")
             url += (url.contains("?") ? "&" : "?") + query
@@ -1032,6 +1059,13 @@ final class FWDRuntime {
         if let headers = options["headers"] as? [String: Any] {
             obj["headers"] = headers
         }
+        // v2.07: forward the transport options the module asked
+        // for — encoding, buffer and redirect used to be dropped
+        // here, so gbk pages decoded as mojibake and redirect: 0
+        // was silently ignored.
+        if let encoding = options["encoding"] as? String { obj["encoding"] = encoding }
+        if let buffer = options["buffer"] as? NSNumber { obj["buffer"] = buffer }
+        if let redirect = options["redirect"] as? NSNumber { obj["redirect"] = redirect }
         if method == "POST" {
             if !body.isEmpty {
                 obj["body"] = body
@@ -1041,6 +1075,11 @@ final class FWDRuntime {
                     h["Content-Type"] = "application/json"
                     obj["headers"] = h
                 }
+            } else if let data = options["data"] as? [String: Any], !data.isEmpty {
+                // Form POST: {data: {k: v}} → url-encoded body.
+                // syncFetch sets the form Content-Type when the
+                // caller didn't set one (v2.07).
+                obj["data"] = data
             }
         }
         let result = JSRuntime.syncFetch(urlString: url, obj: obj)
@@ -1054,6 +1093,11 @@ final class FWDRuntime {
         }
         var response: [String: Any] = ["data": dataValue, "status": status,
                                        "statusCode": status, "headers": headers]
+        // v2.07: the final URL after redirects, so a module can
+        // tell where it actually landed (e.g. a login wall).
+        if let finalURL = result["url"] as? String, !finalURL.isEmpty {
+            response["url"] = finalURL
+        }
         // v2.01: a timed-out sub-request is a distinct outcome —
         // timedOut + a Chinese message naming the 20 s cap — so
         // a module (and the FWDfailure classifier) can tell a
@@ -1448,7 +1492,7 @@ struct ModulesView: View {
                         }
                     }
                 }
-                Text("支持 Forward 规范的 JS 模块（WidgetMetadata）。加密模块（FWENC1）暂不支持；同包的弹幕模块会在播放时自动匹配弹幕。")
+                Text("支持 Forward 规范的 JS 模块（WidgetMetadata）。加密模块（FWENC1）内容已加密、无法导入，请向模块作者索取未加密版本；同包的弹幕模块会在播放时自动匹配弹幕。")
                     .font(.caption2).foregroundStyle(Theme.textDim)
             }
             .padding(.horizontal, 18)
