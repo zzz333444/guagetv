@@ -81,6 +81,10 @@ struct FWDMeta {
     var searchParams: [FWDParam] = []
     var globalParams: [FWDParam] = []
     var hasDetail: Bool = false
+    /// Column-result cache TTL in seconds, from the module's
+    /// declared `cacheDuration` (Forward spec). 0 = not
+    /// declared; the app default (30 min) applies. v2.06.
+    var cacheDuration: Int = 0
 
     /// Entries the browse UI can render as lists: everything that
     /// is not a stream resolver or a danmu feed.
@@ -99,6 +103,7 @@ extension FWDMeta: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, title, version, author, description, site, icon
         case modules, searchFunction, searchParams, globalParams, hasDetail
+        case cacheDuration
     }
 
     init(from decoder: Decoder) throws {
@@ -115,6 +120,7 @@ extension FWDMeta: Codable {
         searchParams = try c.decodeIfPresent([FWDParam].self, forKey: .searchParams) ?? []
         globalParams = try c.decodeIfPresent([FWDParam].self, forKey: .globalParams) ?? []
         hasDetail = try c.decodeIfPresent(Bool.self, forKey: .hasDetail) ?? false
+        cacheDuration = try c.decodeIfPresent(Int.self, forKey: .cacheDuration) ?? 0
     }
 }
 
@@ -409,6 +415,55 @@ enum FWDStore {
     }
 }
 
+/// Column-result cache (v2.06): re-entering a module column
+/// replays the last page-1 result instead of re-running the JS
+/// handler and the network. Entries live in UserDefaults as one
+/// JSON blob per key (rows + savedAt), capped at 30 entries with
+/// the oldest evicted. TTL honours the module's declared
+/// `cacheDuration` (seconds) when present, otherwise 30 min.
+/// Only page-1 list results are cached, never searches, never
+/// empty results (a transient 0 must not poison the next visit).
+enum FWDColumnCache {
+    private static let storeKey = "fwd.columnCache.v1"
+    private static let maxEntries = 30
+    static let defaultTTL: TimeInterval = 1800
+
+    static func key(moduleID: String, columnID: String, params: [String: Any]) -> String {
+        let paramsJSON = (try? JSONSerialization.data(withJSONObject: params, options: [.sortedKeys]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return moduleID + "|" + columnID + "|" + paramsJSON
+    }
+
+    static func get(key: String, ttl: TimeInterval) -> [[String: Any]]? {
+        guard let data = (UserDefaults.standard.dictionary(forKey: storeKey) as? [String: Data])?[key],
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let savedAt = obj["savedAt"] as? TimeInterval,
+              Date().timeIntervalSince1970 - savedAt < ttl,
+              let rows = obj["rows"] as? [[String: Any]] else { return nil }
+        return rows
+    }
+
+    static func set(key: String, rows: [[String: Any]]) {
+        var dict = (UserDefaults.standard.dictionary(forKey: storeKey) as? [String: Data]) ?? [:]
+        if dict.count >= maxEntries {
+            var oldestKey: String?
+            var oldestAt = TimeInterval.greatestFiniteMagnitude
+            for (k, data) in dict {
+                if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let at = obj["savedAt"] as? TimeInterval, at < oldestAt {
+                    oldestAt = at
+                    oldestKey = k
+                }
+            }
+            if let oldestKey { dict.removeValue(forKey: oldestKey) }
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: [
+            "savedAt": Date().timeIntervalSince1970, "rows": rows]) else { return }
+        dict[key] = data
+        UserDefaults.standard.set(dict, forKey: storeKey)
+    }
+}
+
 // MARK: - Runtime
 
 final class FWDRuntime {
@@ -569,6 +624,15 @@ final class FWDRuntime {
             ? (str(raw, "icon").isEmpty ? str(raw, "iconUrl") : str(raw, "icon"))
             : str(raw, "iconurl")
         meta.hasDetail = hasDetail
+        // Forward's declared cache TTL (seconds). Accept a
+        // number or a numeric string; absent/invalid = 0 and
+        // the app default applies (v2.06).
+        if let n = raw["cacheDuration"] as? NSNumber {
+            meta.cacheDuration = max(0, n.intValue)
+        } else if let s = raw["cacheDuration"] as? String,
+                  let n = Int(s) {
+            meta.cacheDuration = max(0, n)
+        }
         meta.globalParams = params(raw["globalParams"] as? [Any])
         meta.modules = (raw["modules"] as? [[String: Any]] ?? []).map { m in
             FWDModuleEntry(id: str(m, "id"), title: str(m, "title"),
@@ -795,7 +859,20 @@ final class FWDRuntime {
                 },
                 tmdb: {
                     get: function(path, params) {
-                        return JSON.parse(__fwdTmdbGet(String(path), JSON.stringify(params || {})));
+                        var r = JSON.parse(__fwdTmdbGet(String(path), JSON.stringify(params || {})));
+                        // A TMDB-shaped error object (no key, bad
+                        // key, no response) is NOT data: the
+                        // module would read r.results (undefined)
+                        // and die with a cryptic TypeError. Throw
+                        // the Chinese status_message instead, so
+                        // the column fails with a readable cause
+                        // (v2.06). Real TMDB payloads carry no
+                        // `success` field, so this never fires on
+                        // good data.
+                        if (r && r.success === false) {
+                            throw new Error(r.status_message || 'TMDB 请求失败');
+                        }
+                        return r;
                     }
                 },
                 html: {
@@ -1666,7 +1743,7 @@ struct FWDWidgetView: View {
                                title: "模块没拉到数据",
                                message: errorText,
                                actionTitle: "重新加载",
-                               action: { Task { await load(reset: true) } })
+                               action: { Task { await load(reset: true, bypassCache: true) } })
                     .padding(.horizontal, 18)
             } else {
                 content
@@ -1730,12 +1807,33 @@ struct FWDWidgetView: View {
                         inputRow(param)
                     }
                 }
+                // v2.06: a failed load-more / search no longer
+                // dies silently once items exist — the cause
+                // stays visible with a retry that refetches.
+                if let errorText, !items.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(Theme.accent)
+                        Text(errorText)
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                            .lineLimit(2)
+                        Spacer()
+                        Button("重新加载") {
+                            Haptics.tap()
+                            Task { await load(reset: true, bypassCache: true) }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .padding(10)
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                }
                 if items.isEmpty {
                     EmptyStateView(icon: "square.stack.3d.up.slash",
                                    title: "这个栏目暂时没有内容",
                                    message: "换个栏目或关键词试试",
                                    actionTitle: "重新加载",
-                                   action: { Task { await load(reset: true) } },
+                                   action: { Task { await load(reset: true, bypassCache: true) } },
                                    compact: true)
                 } else {
                     posterGrid(items)
@@ -1903,30 +2001,59 @@ struct FWDWidgetView: View {
         return params
     }
 
-    private func load(reset: Bool) async {
+    /// Page-1 list loads consult FWDColumnCache first (v2.06):
+    /// re-entering a column replays the last result while the
+    /// TTL holds (module `cacheDuration` or 30 min), so the
+    /// column opens instantly and skips the JS + network round
+    /// trip. Manual retries bypass the cache; searches and
+    /// pages > 1 never read or write it. Returns false on
+    /// failure so loadMore can roll the page back.
+    @discardableResult
+    private func load(reset: Bool, bypassCache: Bool = false) async -> Bool {
         guard let module = currentModule,
               let source = FWDStore.source(for: record) else {
             loading = false
-            return
+            return false
         }
         if reset { loading = true; errorText = nil }
+        let params = buildParams(for: module, page: page)
+        let ttl = meta.cacheDuration > 0
+            ? TimeInterval(meta.cacheDuration) : FWDColumnCache.defaultTTL
+        let cacheKey = FWDColumnCache.key(moduleID: record.id,
+                                          columnID: module.id, params: params)
+        if reset, page == 1, !bypassCache,
+           let cached = FWDColumnCache.get(key: cacheKey, ttl: ttl) {
+            items = cached.map(FWDItem.init)
+            loading = false
+            return true
+        }
         do {
             let result = try await FWDRuntime(widgetID: record.id)
                 .call(function: module.functionName,
-                      params: buildParams(for: module, page: page),
+                      params: params,
                       source: source)
-            let rows = (result as? [[String: Any]] ?? []).map(FWDItem.init)
-            items = reset ? rows : items + rows
+            let rows = (result as? [[String: Any]] ?? [])
+            items = reset ? rows.map(FWDItem.init) : items + rows.map(FWDItem.init)
+            if reset, page == 1, !rows.isEmpty {
+                FWDColumnCache.set(key: cacheKey, rows: rows)
+            }
+            errorText = nil
         } catch {
             if reset { errorText = "加载失败：\(error.localizedDescription)" }
+            else { errorText = "加载更多失败：\(error.localizedDescription)" }
+            loading = false
+            return false
         }
         loading = false
+        return true
     }
 
     private func loadMore() async {
         loadingMore = true
         page += 1
-        await load(reset: false)
+        if await load(reset: false) == false {
+            page = max(1, page - 1)
+        }
         loadingMore = false
     }
 
@@ -1945,6 +2072,7 @@ struct FWDWidgetView: View {
             let result = try await FWDRuntime(widgetID: record.id)
                 .call(function: fn, params: params, source: source)
             items = (result as? [[String: Any]] ?? []).map(FWDItem.init)
+            errorText = nil
         } catch {
             errorText = "搜索失败：\(error.localizedDescription)"
         }
