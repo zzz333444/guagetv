@@ -817,7 +817,12 @@ struct SearchView: View {
         catTried["CMS"] = cms.count
         var errorSamples: [String] = []
         await withTaskGroup(of: (TVBoxConfig.Site, Result<[VodItem], Error>?).self) { group in
-            func handleResult(_ site: TVBoxConfig.Site, _ raced: Result<[VodItem], Error>?) {
+            /// Main-actor isolated: it touches @State (results /
+            /// emptySites) and the main-actor local tick(). A plain
+            /// nested func here inherits no isolation from the
+            /// enclosing function, so calling tick() from it was a
+            /// hard error (#266); callers await into it instead.
+            @MainActor func handleResult(_ site: TVBoxConfig.Site, _ raced: Result<[VodItem], Error>?) {
                 switch raced {
                 case .success(let items):
                     responded += 1
@@ -852,14 +857,14 @@ struct SearchView: View {
                 }
                 pending += 1
                 if pending >= 12, let next = await group.next() {
-                    handleResult(next.0, next.1)
+                    await handleResult(next.0, next.1)
                     pending -= 1
                 }
             }
             if Task.isCancelled { group.cancelAll() }
             for await (site, raced) in group {
                 if Task.isCancelled { group.cancelAll(); break }
-                handleResult(site, raced)
+                await handleResult(site, raced)
             }
         }
         // Sniff the .unknown subscription sites (same probe the
