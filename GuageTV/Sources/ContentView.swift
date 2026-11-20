@@ -22,6 +22,13 @@ struct ContentView: View {
     @State private var appLocked = false
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Deferred launch work (v2.03): the JarProxy warm call and the
+    /// stale-line refresh used to run in onAppear, before the first
+    /// frame — warmLine alone did a full config read + parse on the
+    /// main thread. They now wait 1.5s, i.e. until after the shell
+    /// is on screen and interactive.
+    @State private var launchWorkDone = false
+
     private var colorScheme: ColorScheme? {
         switch themeMode {
         case "light": return .light
@@ -31,9 +38,13 @@ struct ContentView: View {
     }
 
     init() {
-        // Restore the persisted config (v7): imported lines survive the
-        // app being swiped away.
-        _config = State(initialValue: ConfigLibrary.loadActive())
+        // v2.03 startup: do NOT parse the active config here —
+        // loadActive() reads the config file off disk and JSON-parses
+        // 700+ sites, which used to block the first frame on the
+        // main thread. The shell renders immediately with config
+        // nil (every page tolerates that) and the config lands in
+        // the .task below, parsed on a background thread.
+        _config = State(initialValue: nil)
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -65,11 +76,27 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(colorScheme)
+        .task {
+            // v2.03: active config, parsed off the main thread.
+            // Runs after the first frame, so the shell is already
+            // interactive while the 700-site config parses.
+            if config == nil {
+                let cfg = await Task.detached(priority: .userInitiated) {
+                    ConfigLibrary.loadActive()
+                }.value
+                config = cfg
+            }
+        }
         .onAppear {
             clampTab()
             if appLockEnabled { appLocked = true }
-            if let id = ConfigLibrary.activeID() { JarProxyClient.warmLine(id: id) }
-            ConfigLibrary.refreshStaleEntries()
+            guard !launchWorkDone else { return }
+            launchWorkDone = true
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                if let id = ConfigLibrary.activeID() { JarProxyClient.warmLine(id: id) }
+                ConfigLibrary.refreshStaleEntries()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background, appLockEnabled { appLocked = true }

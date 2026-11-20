@@ -163,7 +163,7 @@ enum TMDBClient {
     /// One TMDB catalogue title, for the Discover page's hero and
     /// poster rows. Tapping one never plays from TMDB (it has no
     /// streams) — it hands the title to the cross-line search.
-    struct TMDBTitle: Identifiable {
+    struct TMDBTitle: Identifiable, Codable {
         var id: Int
         var mediaType: String   // "movie" | "tv"
         var title: String
@@ -288,6 +288,40 @@ enum TMDBClient {
             if i < shows.count { merged.append(shows[i]) }
         }
         return merged
+    }
+
+    // MARK: Discover feed cache (v2.03)
+
+    /// The six Discover lists, cached on disk so a cold start paints
+    /// last session's rows instantly and the network refresh swaps in
+    /// behind them — the page no longer waits on six TMDB round-trips
+    /// before showing anything. 12h TTL; a stale cache still paints
+    /// (better than a skeleton) and is refreshed right after.
+    struct DiscoverCache: Codable {
+        var savedAt: TimeInterval
+        var trending: [TMDBTitle]
+        var week: [TMDBTitle]
+        var movies: [TMDBTitle]
+        var shows: [TMDBTitle]
+        var top: [TMDBTitle]
+        var nowPlaying: [TMDBTitle]
+    }
+
+    private static var discoverCacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("tmdb-discover.json")
+    }
+
+    static func loadDiscoverCache() -> DiscoverCache? {
+        guard let data = try? Data(contentsOf: discoverCacheURL),
+              let cache = try? JSONDecoder().decode(DiscoverCache.self, from: data),
+              Date().timeIntervalSince1970 - cache.savedAt < 12 * 3600 else { return nil }
+        return cache
+    }
+
+    static func saveDiscoverCache(_ cache: DiscoverCache) {
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        try? data.write(to: discoverCacheURL, options: .atomic)
     }
 
     /// Settings-page probe: the configuration endpoint answers 200

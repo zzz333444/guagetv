@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.02 · 官方模块目录预置"
+    static let buildLabel = "v2.03 · 启动提速与首屏分级加载"
 
     var body: some View {
         NavigationStack {

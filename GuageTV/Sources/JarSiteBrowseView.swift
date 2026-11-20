@@ -150,20 +150,26 @@ enum JarProxyClient {
     /// moves that wait off the user's first tap. Fire-and-forget:
     /// any failure simply means the first real call pays the init
     /// itself, exactly like before.
+    ///
+    /// v2.03: the config read + parse + jar URL resolution used to
+    /// run synchronously on the caller's (main) thread — ContentView
+    /// called this in onAppear, so launch paid a full config parse
+    /// before the first frame. All of that now happens inside the
+    /// detached task; only the cheap 10-minute TTL check stays here.
     static func warmLine(id: String) {
         guard configured else { return }
         if let last = warmedAt[id], Date.now.timeIntervalSince(last) < 600 { return }
-        guard let entry = ConfigLibrary.entries().first(where: { $0.id == id }),
-              let config = ConfigLibrary.load(id: id),
-              let jar = jarURL(from: config, base: entry.sourceURL) else { return }
-        let items: [[String: String]] = config.sites
-            .filter { $0.kind == .spiderJAR }
-            .map { ["class": $0.api, "ext": $0.extJSONString] }
-        guard !items.isEmpty else { return }
         warmedAt[id] = .now
         let base = baseURL
         let tokenSnapshot = token
         Task.detached {
+            guard let entry = ConfigLibrary.entries().first(where: { $0.id == id }),
+                  let config = ConfigLibrary.load(id: id),
+                  let jar = jarURL(from: config, base: entry.sourceURL) else { return }
+            let items: [[String: String]] = config.sites
+                .filter { $0.kind == .spiderJAR }
+                .map { ["class": $0.api, "ext": $0.extJSONString] }
+            guard !items.isEmpty else { return }
             guard let url = URL(string: base + "/warm") else { return }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"

@@ -96,15 +96,40 @@ final class HistoryStore: ObservableObject {
         return dir.appendingPathComponent("history.json")
     }()
 
-    init() { load(); loadDaily() }
-
-    private func loadDaily() {
-        guard let data = try? Data(contentsOf: dailyFileURL),
-              let decoded = try? JSONDecoder().decode([String: Double].self, from: data) else { return }
-        dailyWatched = decoded
+    init() {
+        // v2.03 startup: ContentView mounts all four tabs at launch,
+        // so this singleton used to JSON-decode history.json +
+        // daily-watch.json on the main thread before the first frame.
+        // Decode happens on a background thread now; the published
+        // lists land on the main actor when ready. Until then save()
+        // is a no-op (diskLoaded guard) so an early write cannot
+        // clobber the not-yet-loaded files with empty lists.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let entries: [Entry] = {
+                guard let data = try? Data(contentsOf: self.fileURL),
+                      let decoded = try? JSONDecoder().decode([Entry].self, from: data)
+                else { return [] }
+            }()
+            let daily: [String: Double] = {
+                guard let data = try? Data(contentsOf: self.dailyFileURL),
+                      let decoded = try? JSONDecoder().decode([String: Double].self, from: data)
+                else { return [:] }
+            }()
+            await MainActor.run {
+                self.entries = entries
+                self.dailyWatched = daily
+                self.diskLoaded = true
+            }
+        }
     }
 
+    /// Set once the async init load above has landed; save() and
+    /// saveDaily() stay quiet until then (see init).
+    private var diskLoaded = false
+
     private func saveDaily() {
+        guard diskLoaded else { return }
         guard let data = try? JSONEncoder().encode(dailyWatched) else { return }
         try? data.write(to: dailyFileURL, options: .atomic)
     }
@@ -250,13 +275,8 @@ final class HistoryStore: ObservableObject {
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([Entry].self, from: data) else { return }
-        entries = decoded
-    }
-
     private func save() {
+        guard diskLoaded else { return }
         guard let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }

@@ -83,24 +83,53 @@ struct DiscoverView: View {
 
     // MARK: Data
 
+    /// v2.03 staged load: a cached feed (12h) paints instantly —
+    /// no skeleton, no waiting on the network — and the refresh
+    /// swaps in behind it. Only a first-ever launch with no cache
+    /// still shows the skeleton while the six lists load.
     private func load() async {
         guard TMDBClient.isOn else { loading = false; return }
-        loading = true
+        if let cache = TMDBClient.loadDiscoverCache() {
+            apply(cache)
+            loading = false
+            await refresh()
+        } else {
+            loading = true
+            await refresh()
+            loading = false
+        }
+    }
+
+    private func apply(_ cache: TMDBClient.DiscoverCache) {
+        trending = cache.trending
+        week = cache.week
+        nowPlaying = cache.nowPlaying
+        movies = cache.movies
+        shows = cache.shows
+        top = cache.top
+    }
+
+    private func refresh() async {
         async let t = TMDBClient.trending()
         async let w = TMDBClient.trendingWeek()
         async let np = TMDBClient.nowPlaying()
         async let m = TMDBClient.popularMovies()
         async let s = TMDBClient.popularTV()
         async let tp = TMDBClient.topRated()
-        trending = await t
-        week = await w
-        nowPlaying = await np
-        movies = await m
-        shows = await s
-        top = await tp
-        loading = false
+        let fresh = TMDBClient.DiscoverCache(
+            savedAt: Date().timeIntervalSince1970,
+            trending: await t, week: await w, movies: await m,
+            shows: await s, top: await tp, nowPlaying: await np)
+        // A failed refresh leaves the painted cache untouched —
+        // never blank a good screen for a bad network.
+        guard !fresh.trending.isEmpty else { return }
+        apply(fresh)
+        TMDBClient.saveDiscoverCache(fresh)
+        // v2.03 prefetch throttling: hero art + the first row only,
+        // 10 URLs max — the old 14-URL fan-out fired on every load
+        // including cache repaints.
         prefetchPosters(heroItems.map { $0.backdrop.isEmpty ? $0.poster : $0.backdrop }
-            + week.prefix(6).map(\.poster) + movies.prefix(6).map(\.poster))
+            + week.prefix(4).map(\.poster))
         // Title artwork for the hero pages, fetched once per title.
         for item in heroItems where logos[item.id] == nil {
             logos[item.id] = await TMDBClient.logo(for: item)
@@ -110,7 +139,7 @@ struct DiscoverView: View {
     /// Warm the poster cache for the art the user is about to
     /// scroll past, so rows and hero pages don't flash in.
     private func prefetchPosters(_ urls: [String]) {
-        let targets = Array(Set(urls.filter { !$0.isEmpty })).prefix(14)
+        let targets = Array(Set(urls.filter { !$0.isEmpty })).prefix(10)
         guard !targets.isEmpty else { return }
         Task.detached(priority: .utility) {
             for url in targets {
