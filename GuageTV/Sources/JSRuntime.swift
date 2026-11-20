@@ -200,13 +200,26 @@ final class JSRuntime {
             let v = pick(name)
             if !v.isEmpty { values[name] = v }
         }
-        if let v = values["baidu"] { values["baidu_cookie"] = v }
-        if let v = values["xunlei"] { values["xunlei_token"] = v }
-        guard !values.isEmpty else { return }
+        // Aliases some cat rules read instead of the base key.
+        var seeded = values
+        if let v = values["baidu"] { seeded["baidu_cookie"] = v }
+        if let v = values["xunlei"] { seeded["xunlei_token"] = v }
+        // v2.07: a field the user cleared must also clear the
+        // seeded local scopes. Previously only non-empty values
+        // were written, so "清空" in Settings left the old
+        // credential live in drpy.local.v1 and a cat rule kept
+        // using a revoked cookie. __panConfig needs no clearing:
+        // every rule load builds a fresh JSContext.
+        let allKeys = ["quark_cookie", "uc_cookie", "uc_token", "aliyun",
+                       "baidu", "baidu_cookie", "bili_cookie", "xunlei", "xunlei_token"]
         for scope in ["config", "pan"] {
-            for (key, value) in values { localSet(scope, key, value) }
+            for key in allKeys {
+                if let value = seeded[key] { localSet(scope, key, value) }
+                else { localDelete(scope, key) }
+            }
         }
-        if let data = try? JSONSerialization.data(withJSONObject: values),
+        guard !seeded.isEmpty else { return }
+        if let data = try? JSONSerialization.data(withJSONObject: seeded),
            let json = String(data: data, encoding: .utf8) {
             ctx.evaluateScript("globalThis.__panConfig = \(json);")
         }
@@ -268,7 +281,8 @@ final class JSRuntime {
         if urlString.hasPrefix("file://") {
             let path = URL(string: urlString)?.path ?? ""
             if let text = try? String(contentsOfFile: path, encoding: .utf8) {
-                return ["content": text, "headers": [String: String](), "status": 200]
+                return ["content": text, "headers": [String: String](), "status": 200,
+                        "url": urlString]
             }
             return ["content": "", "headers": [String: String](), "status": 0,
                     "error": "文件读取失败"]
@@ -279,16 +293,28 @@ final class JSRuntime {
         for (key, value) in stringKeyed(obj["headers"] as? [AnyHashable: Any]) {
             request.setValue(String(describing: value), forHTTPHeaderField: key)
         }
+        // Form values must not carry & = + ? raw, or one value
+        // splits into several fields (v2.07, same fix as
+        // Widget.http params).
+        let formAllowed = CharacterSet.urlQueryAllowed
+            .subtracting(CharacterSet(charactersIn: "&=+?"))
         if let body = obj["body"] as? String {
             request.httpBody = body.data(using: .utf8)
         } else if let rawData = obj["data"] as? [AnyHashable: Any] {
             let form = stringKeyed(rawData).map { key, value in
-                let k = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
+                let k = key.addingPercentEncoding(withAllowedCharacters: formAllowed) ?? key
                 let v = String(describing: value)
-                    .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                    .addingPercentEncoding(withAllowedCharacters: formAllowed) ?? ""
                 return "\(k)=\(v)"
             }.joined(separator: "&")
             request.httpBody = form.data(using: .utf8)
+            // A form body without a Content-Type was sent bare:
+            // servers expecting a form reject it. Default to
+            // url-encoded unless the caller set one (v2.07).
+            if request.value(forHTTPHeaderField: "Content-Type") == nil {
+                request.setValue("application/x-www-form-urlencoded",
+                                 forHTTPHeaderField: "Content-Type")
+            }
         } else if let data = obj["data"] as? String {
             request.httpBody = data.data(using: .utf8)
         }
@@ -336,6 +362,9 @@ final class JSRuntime {
                     ?? String(decoding: data, as: UTF8.self)
             }
             result = ["content": content, "headers": headers, "status": status]
+            // v2.07: the final URL after redirects, so Widget.http
+            // can report where the request actually landed.
+            result["url"] = response?.url?.absoluteString ?? urlString
             if let error {
                 let mapped = JSRuntime.chineseTransportError(error)
                 result["error"] = mapped.message
