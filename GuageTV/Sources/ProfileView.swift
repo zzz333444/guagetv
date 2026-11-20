@@ -56,21 +56,30 @@ struct ProfileView: View {
         }
     }
 
+    /// v2.08 fix: the old strip labelled weekdays by row index
+    /// (days[0] = "日" regardless of the real weekday) and computed
+    /// day numbers as today − 3 + i, which went negative or past
+    /// month-end at month boundaries. Dates now come from Calendar,
+    /// so weekday and day number always match the real date.
     private var calendarStrip: some View {
-        let days = ["日", "一", "二", "三", "四", "五", "六"]
-        let today = Calendar.current.component(.day, from: Date())
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
         return HStack(spacing: 6) {
-            ForEach(0..<7, id: \.self) { i in
-                let day = today - 3 + i
+            ForEach(-3...3, id: \.self) { offset in
+                let date = cal.date(byAdding: .day, value: offset, to: today) ?? today
+                let day = cal.component(.day, from: date)
+                let weekday = weekdays[cal.component(.weekday, from: date) - 1]
+                let isToday = offset == 0
                 VStack(spacing: 4) {
-                    Text(days[i]).font(.caption2).foregroundStyle(Theme.textDim)
+                    Text(weekday).font(.caption2).foregroundStyle(Theme.textDim)
                     Text("\(day)")
-                        .font(.subheadline.weight(i == 3 ? .bold : .regular))
-                        .foregroundStyle(i == 3 ? .white : .white.opacity(0.75))
+                        .font(.subheadline.weight(isToday ? .bold : .regular))
+                        .foregroundStyle(isToday ? .white : .white.opacity(0.75))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(i == 3 ? Theme.accent.opacity(0.45) : Color.clear,
+                .background(isToday ? Theme.accent.opacity(0.45) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 10))
             }
         }
@@ -109,7 +118,12 @@ struct ProfileView: View {
                     Spacer()
                     Text("近 12 周").font(.caption).foregroundStyle(Theme.textDim)
                 }
-                let cols = Array(repeating: GridItem(.fixed(20), spacing: 5), count: 12)
+                // v2.08: flexible columns size the cells from the
+                // card width — the old fixed 20pt cells needed 295pt,
+                // wider than a 320pt phone's usable width, so the
+                // grid clipped on the right. aspectRatio keeps them
+                // square at any width.
+                let cols = Array(repeating: GridItem(.flexible(), spacing: 5), count: 12)
                 LazyVGrid(columns: cols, spacing: 5) {
                     ForEach(0..<(12 * 7), id: \.self) { i in
                         let level = heatLevel(cellIndex: i)
@@ -118,7 +132,7 @@ struct ProfileView: View {
                             : Theme.accent.opacity(0.30 + 0.17 * Double(level))
                         RoundedRectangle(cornerRadius: 3)
                             .fill(fill)
-                            .frame(width: 20, height: 20)
+                            .aspectRatio(1, contentMode: .fit)
                             .onTapGesture { heatCellTapped(i) }
                     }
                 }

@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.07 · 模块兼容加固"
+    static let buildLabel = "v2.08 · Rex 细节核查与玻璃修正"
 
     var body: some View {
         NavigationStack {

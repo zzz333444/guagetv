@@ -234,15 +234,7 @@ struct DiscoverView: View {
                 .foregroundStyle(.white.opacity(0.85))
 
                 if !item.score.isEmpty {
-                    HStack(spacing: 6) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill").font(.caption2)
-                            Text("TMDB \(item.score)").font(.caption.weight(.bold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
-                    }
+                    TMDBScoreBadge(score: item.score)
                 }
                 if !item.overview.isEmpty {
                     Text(item.overview)
@@ -351,6 +343,24 @@ struct DiscoverView: View {
     }
 }
 
+/// TMDB score chip (v2.08): a glass capsule, not the old solid blue
+/// block — the Rex glass spec allows no solid colour blocks on photo
+/// surfaces. The score is TMDB vote_average only; a zero vote hides
+/// the chip at the source (TMDBClient), never a fabricated number.
+private struct TMDBScoreBadge: View {
+    var score: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "star.fill").font(.caption2)
+            Text("TMDB \(score)").font(.caption.weight(.bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .glassCapsule()
+    }
+}
+
 /// The "more" page behind a row's chevron: the row's full list as
 /// a three-column poster grid (Rex's HomeMoreScreen shape).
 private struct TMDBGridView: View {
@@ -442,13 +452,7 @@ private struct TMDBDetailSheet: View {
                     if !item.year.isEmpty { Text(item.year) }
                     if !item.genres.isEmpty { Text(item.genres.joined(separator: " / ")) }
                     if !item.score.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill").font(.caption2)
-                            Text("TMDB \(item.score)").font(.caption.weight(.bold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(Color(red: 0.05, green: 0.45, blue: 0.65), in: Capsule())
+                        TMDBScoreBadge(score: item.score)
                     }
                 }
                 .font(.subheadline.weight(.medium))

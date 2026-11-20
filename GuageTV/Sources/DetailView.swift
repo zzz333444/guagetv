@@ -765,11 +765,14 @@ struct DetailView: View {
     /// 16:9 still card — the show's TMDB backdrop when known,
     /// else its poster (line feeds carry no per-episode stills) —
     /// with 第N集 and the raw name under it. The episode the
-    /// history entry sits on keeps its white watched-check badge.
+    /// history entry sits on keeps its white watched-check badge,
+    /// and (v2.08) a white 1.5pt rim so the rail shows where you
+    /// are even when playback just started (position 0, no check).
     private func episodeRailCard(_ ep: VodDetail.Episode, origIndex: Int,
                                  in episodes: [VodDetail.Episode]) -> some View {
         let still = [tmdbInfo?.backdrop ?? "", detail.pic].first { !$0.isEmpty } ?? ""
         let displayName = guageEpisodeDisplayName(ep.name, index: origIndex)
+        let isCurrent = historyEntry?.episodeID == ep.url
         return VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 if !still.isEmpty {
@@ -792,6 +795,8 @@ struct DetailView: View {
                         .offset(x: 5, y: -5)
                 }
             }
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isCurrent ? Color.white.opacity(0.9) : .clear, lineWidth: 1.5))
             Text(displayName)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.text)
