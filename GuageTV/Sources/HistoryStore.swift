@@ -110,11 +110,13 @@ final class HistoryStore: ObservableObject {
                 guard let data = try? Data(contentsOf: self.fileURL),
                       let decoded = try? JSONDecoder().decode([Entry].self, from: data)
                 else { return [] }
+                return decoded
             }()
             let daily: [String: Double] = {
                 guard let data = try? Data(contentsOf: self.dailyFileURL),
                       let decoded = try? JSONDecoder().decode([String: Double].self, from: data)
                 else { return [:] }
+                return decoded
             }()
             await MainActor.run {
                 self.entries = entries
