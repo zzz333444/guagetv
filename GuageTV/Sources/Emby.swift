@@ -1194,8 +1194,16 @@ struct EmbyPlayLoader: View {
             if let errorText {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
             } else {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // v2.13: bare spinner → hero + rows skeleton while
+                // the stream URL is being resolved.
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        SkeletonHero()
+                        SkeletonRowList(count: 3)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                }
             }
         }
         .background(AmbientBackground(imageURL: nil))

@@ -334,8 +334,11 @@ struct WebDAVBrowserView: View {
     var body: some View {
         Group {
             if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // v2.13: bare spinner → row skeleton matching the
+                // folder/file list footprint.
+                SkeletonRowList(count: 6)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
             } else if let errorText {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
             } else {
