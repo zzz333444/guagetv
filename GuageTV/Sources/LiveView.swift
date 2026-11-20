@@ -91,8 +91,11 @@ struct LiveView: View {
     var body: some View {
         Group {
             if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // v2.12: bare spinner → channel-row skeleton.
+                SkeletonRowList(count: 6)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else if let errorText {
                 // R8 (v1.85): bare error text → shared empty state
                 // with a retry action (load() is idempotent).

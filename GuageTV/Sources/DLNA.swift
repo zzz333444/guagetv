@@ -186,12 +186,16 @@ struct DLNACastView: View {
         NavigationStack {
             Group {
                 if searching {
+                    // v2.12: bare spinner → row skeleton; the
+                    // "searching…" line stays as the status text.
                     VStack(spacing: 12) {
-                        ProgressView().tint(Theme.text)
+                        SkeletonRowList(count: 3)
                         Text("正在搜索局域网里的电视…")
                             .font(.subheadline).foregroundStyle(Theme.textDim)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 12)
                 } else if devices.isEmpty {
                     Text("没找到 DLNA 设备。确认电视开着、和手机连同一个 Wi-Fi，且电视的投屏/DLNA 功能已开。")
                         .font(.subheadline).foregroundStyle(Theme.textDim)

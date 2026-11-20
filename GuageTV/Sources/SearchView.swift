@@ -289,9 +289,11 @@ struct SearchView: View {
                 Spacer()
             }
         } else if searching && results.isEmpty {
-            Spacer()
-            ProgressView().tint(Theme.text)
-            Spacer()
+            // v2.12: bare spinner → poster-grid skeleton (search
+            // results render as posters).
+            SkeletonPosterGrid()
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
         } else if !results.isEmpty {
             // Results branch MUST outrank the !searched branch below:
             // `searched` stays false for the whole run, so ordering

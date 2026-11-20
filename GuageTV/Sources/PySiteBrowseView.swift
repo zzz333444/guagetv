@@ -35,8 +35,11 @@ struct PySiteBrowseView: View {
                         .padding(18)
                 }
             } else if loading {
-                ProgressView().tint(Theme.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // v2.12: bare spinner → poster-grid skeleton.
+                SkeletonPosterGrid()
+                    .padding(.horizontal, 18)
+                    .padding(.top, 6)
+                    .padding(.bottom, 110)
             } else {
                 VStack(spacing: 0) {
                     if !classes.isEmpty { classChips }
@@ -331,7 +334,16 @@ struct PyDetailLoaderView: View {
                         .padding(18)
                 }
             } else {
-                ProgressView().tint(Theme.text)
+                // v2.12: bare spinner → detail-shaped skeleton.
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        SkeletonHero()
+                        SkeletonRowList(count: 4)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .padding(.bottom, 110)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

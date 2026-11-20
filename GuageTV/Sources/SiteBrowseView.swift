@@ -66,7 +66,17 @@ struct DetailLoaderView: View {
                 }
                 .foregroundStyle(Theme.textDim)
             } else {
-                ProgressView().tint(Theme.text)
+                // v2.12: bare spinner → detail-shaped skeleton
+                // (hero + rows), matching what DetailView shows.
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        SkeletonHero()
+                        SkeletonRowList(count: 4)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .padding(.bottom, 110)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -276,9 +286,10 @@ struct SiteBrowseView: View {
     @ViewBuilder
     private var content: some View {
         if loading {
-            Spacer()
-            ProgressView().tint(Theme.text)
-            Spacer()
+            SkeletonPosterGrid()
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+                .padding(.bottom, 110)
         } else if let errorText {
             Spacer()
             VStack(spacing: 12) {

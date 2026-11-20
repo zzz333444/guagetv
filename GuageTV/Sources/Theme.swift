@@ -179,3 +179,130 @@ struct VodItem: Identifiable {
     /// offers types the result set actually carries. (v2.09)
     var typeName: String = ""
 }
+
+/// Five stars for a 0–10 score (v2.12, shared): the same fill
+/// rule DetailView.starBar has used since v1.78 — each star fills
+/// by clamp(score/2 − index, 0, 1) — so Emby and module detail
+/// pages show the identical star bar instead of each inventing one.
+struct StarBarView: View {
+    var value: Double
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<5) { i in
+                let fill = min(max(value / 2 - Double(i), 0), 1)
+                ZStack {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(Color.white.opacity(0.25))
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(Color(red: 1, green: 0.8, blue: 0.2))
+                        .mask(alignment: .leading) {
+                            Rectangle().frame(width: 13 * fill, height: 13)
+                        }
+                }
+                .font(.system(size: 13))
+                .frame(width: 13, height: 13)
+            }
+        }
+    }
+}
+
+/// Expandable glass 媒体信息卡 (v2.12, shared): the DetailView
+/// v1.78 card, factored out so Emby and module detail pages match
+/// its spec — header with chevron, label column 64pt, only the
+/// rows the caller passes (empty fields are the caller's job to
+/// drop, never invented); hidden entirely when rows is empty.
+struct MediaInfoCard: View {
+    var rows: [(label: String, value: String)]
+    @State private var expanded = false
+
+    var body: some View {
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    Haptics.selection()
+                    withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+                } label: {
+                    HStack {
+                        Text("媒体信息").font(.headline).foregroundStyle(Theme.text)
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if expanded {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows, id: \.label) { row in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(row.label)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.textDim)
+                                    .frame(width: 64, alignment: .leading)
+                                Text(row.value)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.text.opacity(0.88))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 7)
+                            if row.label != rows.last?.label {
+                                Divider().background(Theme.glassStroke)
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.glassStroke, lineWidth: 1))
+        }
+    }
+}
+
+/// 演职员横滑行 (v2.12, shared): "演职员" header plus one chip
+/// per person — initial-letter circle, name, role. DetailView
+/// keeps its own photo version (v1.41); Emby and module detail
+/// pages have no portrait URLs, so initials stand in — same
+/// header, same spacing, same glass language.
+struct CastRowView: View {
+    var people: [(name: String, role: String)]
+
+    var body: some View {
+        if !people.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("演职员").font(.headline).foregroundStyle(Theme.text)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(Array(people.enumerated()), id: \.offset) { pair in
+                            let person = pair.element
+                            VStack(spacing: 5) {
+                                Text(String(person.name.prefix(1)))
+                                    .font(.headline)
+                                    .foregroundStyle(Theme.text)
+                                    .frame(width: 58, height: 58)
+                                    .background(Circle().fill(Theme.glass))
+                                    .clipShape(Circle())
+                                Text(person.name)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Theme.text)
+                                    .lineLimit(1)
+                                if !person.role.isEmpty {
+                                    Text(person.role)
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textDim)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(width: 64)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

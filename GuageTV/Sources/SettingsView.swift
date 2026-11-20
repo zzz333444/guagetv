@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.11 · 备份列表与历史批量清理"
+    static let buildLabel = "v2.12 · 底栏设置与详情页对齐"
 
     var body: some View {
         NavigationStack {
@@ -999,6 +999,8 @@ struct AppearanceSettingsView: View {
     @AppStorage("themeMode.v1") private var themeMode = "dark"
     @AppStorage("tabShowRecords") private var showRecordsTab = true
     @AppStorage("tabShowLibrary") private var showLibraryTab = true
+    @AppStorage("tabCompact.v1") private var compactTab = false
+    @AppStorage("tabShowSearch") private var showSearchTab = true
     @AppStorage("haptics.enabled") private var hapticsEnabled = true
 
     var body: some View {
@@ -1023,7 +1025,11 @@ struct AppearanceSettingsView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                     Toggle("显示「资源库」", isOn: $showLibraryTab)
                         .font(.subheadline).foregroundStyle(Theme.text)
-                    Text("「发现」和「设置」固定显示。关掉正在看的页会自动回到发现。")
+                    Toggle("紧凑底栏（仅图标）", isOn: $compactTab)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("显示搜索按钮", isOn: $showSearchTab)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("「发现」和「设置」固定显示。关掉正在看的页会自动回到发现；搜索按钮关掉后仍可从发现页「跨线搜索」进入。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
@@ -1051,6 +1057,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.12", title: "底栏设置与详情页对齐", lines: [
+            "外观与交互新增底栏设置：紧凑底栏（仅图标）、搜索按钮显隐；记录/资源库开关不变，搜索关掉后仍可从发现页「跨线搜索」进入",
+            "Emby 剧集详情页对齐点播详情页规格：评分五星条、展开式「媒体信息」卡（服务器/类型/年份/评分/分级/季数/片长）、「演职员」横滑行",
+            "模块详情页同样对齐：评分五星条、「媒体信息」卡（来源模块/类型/年份/评分/时长）、「演职员」改带标题的横滑行（原为一行纯文本）",
+            "加载态最后一轮统一：CMS/py/JS 浏览页、详情加载页、直播页、DLNA 搜索页、搜索页的裸转圈全部换成与页面结构一致的骨架屏；加载更多与状态行转圈不变",
+        ]),
         Entry(version: "v2.11", title: "备份列表与历史批量清理", lines: [
             "备份页新增「本机备份」列表：每次生成备份自动在本机留一份，每条带备份时间与大小，可分享、恢复、删除；只存本机，不走云同步",
             "恢复前先确认：点恢复会先显示这份备份的内容（备份时间、线路条数、设置项数、有无观看历史），确认后才覆盖本机数据；从文件导入同样先确认",

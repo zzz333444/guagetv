@@ -101,6 +101,12 @@ enum EmbyClient {
         var positionTicks: Int64 = 0   // resume position (UserData)
         var runTimeTicks: Int64 = 0
         var rating: Double = 0         // CommunityRating
+        /// v2.12 detail alignment: only the full-item fetch carries
+        /// these (list endpoints don't return People), so they stay
+        /// empty until itemDetail() fills them in.
+        var genres: [String] = []
+        var officialRating: String = ""  // e.g. PG-13
+        var people: [(name: String, role: String)] = []
     }
 
     private static let clientInfo = "Client=\"GuageTV\", Device=\"iPhone\", DeviceId=\"guagetv-ios\", Version=\"1.41\""
@@ -185,6 +191,21 @@ enum EmbyClient {
         }
         if let r = (raw["CommunityRating"] as? NSNumber)?.doubleValue {
             item.rating = r
+        }
+        item.genres = (raw["Genres"] as? [String]) ?? []
+        item.officialRating = (raw["OfficialRating"] as? String) ?? ""
+        // v2.12: People only arrives on the full-item fetch.
+        // Keep actors + directors; a director's Role is usually
+        // "Director", shown as 导演 when the server sends none.
+        if let people = raw["People"] as? [[String: Any]] {
+            item.people = people.compactMap { p in
+                guard let name = p["Name"] as? String, !name.isEmpty else { return nil }
+                let type = (p["Type"] as? String) ?? ""
+                guard type == "Actor" || type == "Director" else { return nil }
+                var role = (p["Role"] as? String) ?? ""
+                if role.isEmpty, type == "Director" { role = "导演" }
+                return (name: name, role: role)
+            }
         }
         if let ud = raw["UserData"] as? [String: Any],
            let pos = (ud["PlaybackPositionTicks"] as? NSNumber)?.int64Value {
@@ -298,6 +319,16 @@ enum EmbyClient {
         }
         let json = try await get("/Users/\(userID)/Items", query: query)
         return (json["Items"] as? [[String: Any]] ?? []).compactMap(mapItem)
+    }
+
+    /// Full single-item fetch (v2.12): the list endpoints never
+    /// return People/Genres/OfficialRating, so the series detail
+    /// page pulls its own item to fill the media-info card and
+    /// the cast row. The bare /Items/{id} response carries them.
+    static func itemDetail(id: String) async throws -> Item {
+        let json = try await get("/Users/\(userID)/Items/\(id)")
+        guard let item = mapItem(json) else { throw failure("服务器返回无法识别") }
+        return item
     }
 
     static func seasons(seriesID: String) async throws -> [Item] {
@@ -922,6 +953,25 @@ struct EmbySeriesView: View {
     @State private var loading = true
     @State private var errorText: String?
     @State private var playSelection: EmbyPlaySelection?
+    /// v2.12: full item (People/Genres/OfficialRating) for the
+    /// media-info card + cast row; nil until the fetch lands or
+    /// when it fails — the page works off `series` either way.
+    @State private var detailItem: EmbyClient.Item?
+
+    /// Media-info rows (v2.12): same spec as DetailView's card —
+    /// only fields the server actually sent; empty ones dropped.
+    private var mediaInfoRows: [(label: String, value: String)] {
+        let detail = detailItem ?? series
+        return [
+            ("来源", "Emby · \(EmbyClient.activeServerName)"),
+            ("类型", detail.genres.joined(separator: " / ")),
+            ("年份", series.year),
+            ("评分", series.rating > 0 ? String(format: "%.1f", series.rating) : ""),
+            ("分级", detail.officialRating),
+            ("季数", seasons.isEmpty ? "" : "\(seasons.count) 季"),
+            ("单集片长", series.runtimeText),
+        ].filter { !$0.value.isEmpty }
+    }
 
     private struct EmbyPlaySelection: Identifiable {
         var episodes: [PlayerView.EpisodeRef]
@@ -951,12 +1001,25 @@ struct EmbySeriesView: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
+                        if series.rating > 0 {
+                            HStack(spacing: 8) {
+                                StarBarView(value: series.rating)
+                                Text(String(format: "%.1f", series.rating))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.text)
+                                Text("Emby 评分")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textDim)
+                            }
+                        }
                         if !series.overview.isEmpty {
                             Text(series.overview)
                                 .font(.subheadline)
                                 .foregroundStyle(Theme.text.opacity(0.75))
                                 .lineSpacing(4)
                         }
+                        MediaInfoCard(rows: mediaInfoRows)
+                        CastRowView(people: (detailItem ?? series).people)
                         if let next = nextUpItem {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("接下来").font(.headline).foregroundStyle(Theme.text)
@@ -1058,6 +1121,8 @@ struct EmbySeriesView: View {
             seasons = try await EmbyClient.seasons(seriesID: series.id)
             if let first = seasons.first { await pickSeason(first) }
             nextUpItem = (try? await EmbyClient.nextUp(seriesID: series.id))?.first
+            // v2.12: non-fatal — People/Genres only enrich the card.
+            detailItem = try? await EmbyClient.itemDetail(id: series.id)
         } catch {
             errorText = "读取失败：\(error.localizedDescription)"
         }

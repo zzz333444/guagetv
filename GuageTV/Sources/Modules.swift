@@ -2173,6 +2173,19 @@ struct FWDDetailView: View {
         return []
     }
 
+    /// Media-info rows (v2.12): same spec as DetailView's card —
+    /// only fields the module actually sent; empty ones dropped.
+    private var fwdMediaInfoRows: [(label: String, value: String)] {
+        [
+            ("来源模块", meta.title),
+            ("类型", full.mediaType.isEmpty ? full.type : full.mediaType),
+            ("年份", String(full.releaseDate.prefix(4))),
+            ("评分", full.rating),
+            ("时长", full.durationText),
+            ("分类", full.genreTitle),
+        ].filter { !$0.value.isEmpty }
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -2187,18 +2200,25 @@ struct FWDDetailView: View {
                 if !metaLine.isEmpty {
                     Text(metaLine).font(.caption).foregroundStyle(Theme.textDim)
                 }
+                if let score = Double(full.rating), score > 0 {
+                    HStack(spacing: 8) {
+                        StarBarView(value: score)
+                        Text(full.rating)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Text("TMDB 评分")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                    }
+                }
                 if !full.overview.isEmpty {
                     Text(full.overview)
                         .font(.subheadline)
                         .foregroundStyle(Theme.text.opacity(0.8))
                         .lineSpacing(4)
                 }
-                if !full.peoples.isEmpty {
-                    Text(full.peoples.map { $0.role.isEmpty ? $0.name : "\($0.name)（\($0.role)）" }
-                        .joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                }
+                MediaInfoCard(rows: fwdMediaInfoRows)
+                CastRowView(people: full.peoples)
                 if loadingDetail {
                     HStack(spacing: 8) {
                         ProgressView().tint(Theme.text)

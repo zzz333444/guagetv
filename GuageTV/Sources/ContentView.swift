@@ -11,6 +11,11 @@ struct ContentView: View {
     @AppStorage("themeMode.v1") private var themeMode = "dark"
     @AppStorage("tabShowRecords") private var showRecordsTab = true
     @AppStorage("tabShowLibrary") private var showLibraryTab = true
+    /// v2.12 bottom-bar settings: compact (icons only, no labels)
+    /// and the floating search circle on/off. Search stays
+    /// reachable from Discover's 跨线搜索 when the circle is off.
+    @AppStorage("tabCompact.v1") private var compactTab = false
+    @AppStorage("tabShowSearch") private var showSearchTab = true
     /// Share-sheet import offer (SharedImportCenter bumps the
     /// counter from onOpenURL; the alert below consumes it).
     @AppStorage(SharedImportCenter.counterKey) private var sharedImportCounter = 0
@@ -163,12 +168,14 @@ struct ContentView: View {
             if showLibraryTab { tabButton(index: 2, icon: "externaldrive.fill", label: "资源库") }
             tabButton(index: 3, icon: "gearshape.fill", label: "设置")
             Spacer()
-            Button { showSearch = true } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                    .frame(width: 52, height: 52)
-                    .glassCircle()
+            if showSearchTab {
+                Button { showSearch = true } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 52, height: 52)
+                        .glassCircle()
+                }
             }
         }
         .padding(.vertical, 22)
@@ -187,12 +194,14 @@ struct ContentView: View {
             .padding(6)
             .glassCapsule()
 
-            Button { showSearch = true } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                    .frame(width: 52, height: 52)
-                    .glassCircle()
+            if showSearchTab {
+                Button { showSearch = true } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 52, height: 52)
+                        .glassCircle()
+                }
             }
         }
     }
@@ -206,13 +215,20 @@ struct ContentView: View {
 
     private func tabButton(index: Int, icon: String, label: String) -> some View {
         Button { Haptics.tap(); withAnimation(.easeInOut(duration: 0.2)) { tab = index } } label: {
-            VStack(spacing: 3) {
+            if compactTab {
                 Image(systemName: icon).font(.system(size: 19))
-                Text(label).font(.system(size: 10))
+                    .foregroundStyle(tab == index ? Theme.text : Theme.text.opacity(0.55))
+                    .frame(width: 52, height: 40)
+                    .background(tab == index ? Theme.text.opacity(0.14) : Color.clear, in: Capsule())
+            } else {
+                VStack(spacing: 3) {
+                    Image(systemName: icon).font(.system(size: 19))
+                    Text(label).font(.system(size: 10))
+                }
+                .foregroundStyle(tab == index ? Theme.text : Theme.text.opacity(0.55))
+                .frame(width: 62, height: 46)
+                .background(tab == index ? Theme.text.opacity(0.14) : Color.clear, in: Capsule())
             }
-            .foregroundStyle(tab == index ? Theme.text : Theme.text.opacity(0.55))
-            .frame(width: 62, height: 46)
-            .background(tab == index ? Theme.text.opacity(0.14) : Color.clear, in: Capsule())
         }
     }
 }
