@@ -62,13 +62,10 @@ struct AmbientBackground: View {
     }
 }
 
-/// Ambient glow image: same downsampled PosterCache decode as the
-/// poster grid (ImageIO thumbnail, ≤ 900 px on the long side) instead
-/// of AsyncImage's full-resolution decode — this image only ever shows
-/// blurred at radius 60, so full-res pixels were pure decode cost.
-/// Also goes through NetFetch's okhttp identity (hosts that drop bare
-/// URLSession requests no longer leave the ambient blank) and shares
-/// the poster disk cache, so the detail cover is fetched once.
+/// Ambient glow image: a 240 px downsampled PosterCache decode
+/// instead of the grid's 480 px — this image only ever shows blurred
+/// at radius 60, so anything larger was pure decode cost and memory.
+/// Shares the poster disk cache, so the detail cover is fetched once.
 private struct AmbientPosterImage: View {
     let urlString: String
     @State private var image: UIImage?
@@ -82,14 +79,18 @@ private struct AmbientPosterImage: View {
             }
         }
         .task(id: urlString) {
-            image = await PosterCache.shared.load(urlString)
+            image = await PosterCache.shared.load(urlString, maxPixelSize: 240)
         }
     }
 }
 
 /// Frosted glass card container used by every list/section in the app.
+/// GlassCard carries no drop shadow (the material + hairline already
+/// separate it); `shadow` exists for one-off callers that want the
+/// GlassPanel depth without switching containers.
 struct GlassCard<Content: View>: View {
     var padding: CGFloat = 16
+    var shadow: Bool = false
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -98,22 +99,26 @@ struct GlassCard<Content: View>: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.glassStroke, lineWidth: 1))
+            .shadow(color: shadow ? .black.opacity(0.25) : .clear, radius: shadow ? 12 : 0, x: 0, y: shadow ? 6 : 0)
     }
 }
 
 /// Rex-grade glass panel: the GlassCard layout contract (padding +
 /// content) on the richer glass recipe — tint wash, gradient rim
 /// light, soft deep shadow. Prefer this over GlassCard for surfaces
-/// that should read as real frosted glass.
+/// that should read as real frosted glass. `shadow` defaults on;
+/// dense repeated rows pass false — a drop shadow per card forces an
+/// offscreen pass per cell while scrolling.
 struct GlassPanel<Content: View>: View {
     var padding: CGFloat = 16
     var cornerRadius: CGFloat = 20
+    var shadow: Bool = true
     @ViewBuilder var content: Content
 
     var body: some View {
         content
             .padding(padding)
-            .glassPanel(cornerRadius: cornerRadius)
+            .glassPanel(cornerRadius: cornerRadius, shadow: shadow)
     }
 }
 
@@ -121,18 +126,20 @@ extension View {
     /// The shared Rex glass recipe on any insettable shape:
     /// ultra-thin material at the back, a white 0.07 tint wash above
     /// it, a 1pt gradient edge stroke (bright at the top, fading
-    /// down), and a soft black drop shadow.
-    func glassSurface<S: InsettableShape>(_ shape: S) -> some View {
+    /// down), and a soft black drop shadow. Pass shadow: false for
+    /// dense repeated rows — the shadow is the per-cell offscreen
+    /// pass that makes long lists drop frames.
+    func glassSurface<S: InsettableShape>(_ shape: S, shadow: Bool = true) -> some View {
         self
             .background(Color.white.opacity(0.07), in: shape)
             .background(.ultraThinMaterial, in: shape)
             .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 1))
-            .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
+            .shadow(color: shadow ? .black.opacity(0.25) : .clear, radius: shadow ? 12 : 0, x: 0, y: shadow ? 6 : 0)
     }
 
     /// Glass panel surface (rounded rect, 20pt corners by default).
-    func glassPanel(cornerRadius: CGFloat = 20) -> some View {
-        glassSurface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    func glassPanel(cornerRadius: CGFloat = 20, shadow: Bool = true) -> some View {
+        glassSurface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), shadow: shadow)
     }
 
     /// Glass capsule surface (floating bars, chips, pills).

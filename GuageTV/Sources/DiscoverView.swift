@@ -198,7 +198,7 @@ struct DiscoverView: View {
         ZStack(alignment: .bottomLeading) {
             let art = item.backdrop.isEmpty ? item.poster : item.backdrop
             if !art.isEmpty {
-                PosterImage(urlString: art)
+                PosterImage(urlString: art, pixelSize: 900)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Rectangle().fill(Theme.glass)

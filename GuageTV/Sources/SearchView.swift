@@ -806,22 +806,18 @@ struct SearchView: View {
             progressText = "已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
         }
 
-        // CMS sites are independent HTTP calls: search them all at
-        // once instead of one by one.
+        // CMS sites are independent HTTP calls: search them in
+        // parallel — but bounded (12 at a time). The old code fired
+        // every CMS site at once, which on a 100+ site config opened
+        // a hundred simultaneous connections and spiked memory and
+        // socket pressure for no speed gain past a dozen. Results
+        // still stream in as each site answers (results = out per
+        // arrival), so the first hits reach the screen just as fast.
         let cms = cmsSites
         catTried["CMS"] = cms.count
         var errorSamples: [String] = []
         await withTaskGroup(of: (TVBoxConfig.Site, Result<[VodItem], Error>?).self) { group in
-            for site in cms {
-                group.addTask {
-                    let raced = await withTimeoutError(12) {
-                        do { return .success(try await CMSClient(site: site).search(keyword: kw)) }
-                        catch { return .failure(error) }
-                    }
-                    return (site, raced)
-                }
-            }
-            for await (site, raced) in group {
+            func handleResult(_ site: TVBoxConfig.Site, _ raced: Result<[VodItem], Error>?) {
                 switch raced {
                 case .success(let items):
                     responded += 1
@@ -843,6 +839,27 @@ struct SearchView: View {
                     }
                 }
                 tick()
+            }
+            var pending = 0
+            for site in cms {
+                if Task.isCancelled { break }
+                group.addTask {
+                    let raced = await withTimeoutError(12) {
+                        do { return .success(try await CMSClient(site: site).search(keyword: kw)) }
+                        catch { return .failure(error) }
+                    }
+                    return (site, raced)
+                }
+                pending += 1
+                if pending >= 12, let next = await group.next() {
+                    handleResult(next.0, next.1)
+                    pending -= 1
+                }
+            }
+            if Task.isCancelled { group.cancelAll() }
+            for await (site, raced) in group {
+                if Task.isCancelled { group.cancelAll(); break }
+                handleResult(site, raced)
             }
         }
         // Sniff the .unknown subscription sites (same probe the

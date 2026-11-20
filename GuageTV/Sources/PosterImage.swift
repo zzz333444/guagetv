@@ -13,6 +13,11 @@ struct PosterImage: View {
     /// Fit instead of fill: for transparent title artwork (logos),
     /// where cropping would cut the lettering.
     var fit: Bool = false
+    /// Decode ceiling in pixels on the long side. Grid cells are
+    /// ~120 pt wide (≤ 360 px @3x), so 480 is ample and keeps the
+    /// decoded resident set ~4× smaller than the old 900 px flat
+    /// ceiling; the hero passes 900 explicitly.
+    var pixelSize: Int = 480
     @State private var image: UIImage?
     @State private var appeared = false
 
@@ -36,7 +41,7 @@ struct PosterImage: View {
         .clipped()
         .onChange(of: urlString) { _ in appeared = false }
         .task(id: urlString) {
-            image = await PosterCache.shared.load(urlString)
+            image = await PosterCache.shared.load(urlString, maxPixelSize: pixelSize)
         }
     }
 }
@@ -59,8 +64,8 @@ final class PosterCache {
     private var warningObserver: NSObjectProtocol?
 
     init() {
-        // Memory level only: posters are ≤ 900 px thumbnails, so an
-        // 80 MB cost cap bounds the resident set without starving
+        // Memory level only: posters are downsampled thumbnails, so
+        // an 80 MB cost cap bounds the resident set without starving
         // grids. Cost is supplied per image at insert time.
         memory.totalCostLimit = 80 * 1024 * 1024
         warningObserver = NotificationCenter.default.addObserver(
@@ -75,14 +80,14 @@ final class PosterCache {
 
     deinit { if let warningObserver { NotificationCenter.default.removeObserver(warningObserver) } }
 
-    func load(_ urlString: String) async -> UIImage? {
-        let key = urlString as NSString
+    func load(_ urlString: String, maxPixelSize: Int = 480) async -> UIImage? {
+        let key = "\(urlString)|\(maxPixelSize)" as NSString
         if let hit = memory.object(forKey: key) { return hit }
         var text = urlString.trimmingCharacters(in: .whitespaces)
         if text.hasPrefix("//") { text = "https:" + text }
         else if !text.contains("://") { text = "https://" + text }
         guard let url = URL(string: text) else { return nil }
-        guard let img = await store.image(for: text, url: url) else { return nil }
+        guard let img = await store.image(for: text, url: url, maxPixelSize: maxPixelSize) else { return nil }
         memory.setObject(img, forKey: key, cost: Self.cost(of: img))
         return img
     }
@@ -107,34 +112,35 @@ final class PosterCache {
 /// at once) and the eviction counter stay race-free; the actual file
 /// IO runs in detached utility tasks, never on the main thread.
 ///
-/// Layout: Caches/posters/<sha256(normalised URL)>.img holding the
-/// original bytes — inside the Caches directory, so the settings
+/// Layout: Caches/posters/<sha256(normalised URL + size)>.img holding
+/// the original bytes — inside the Caches directory, so the settings
 /// cache manager's "clear caches" wipes it along with everything
 /// else. Decoded images are downsampled via ImageIO thumbnails
-/// (≤ 900 px on the long side), which is what poster grids actually
-/// display, instead of full-resolution decodes.
+/// (per-call ceiling, 480 px for grids by default) instead of
+/// full-resolution decodes.
 private actor PosterStore {
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
     private var writeCount = 0
     private static let maxBytes = 150 * 1024 * 1024
     private static let sweepEvery = 20
 
-    func image(for key: String, url: URL) async -> UIImage? {
-        if let pending = inFlight[key] { return await pending.value }
-        let task = Task<UIImage?, Never> { await self.fetch(key: key, url: url) }
-        inFlight[key] = task
+    func image(for key: String, url: URL, maxPixelSize: Int) async -> UIImage? {
+        let flightKey = "\(key)|\(maxPixelSize)"
+        if let pending = inFlight[flightKey] { return await pending.value }
+        let task = Task<UIImage?, Never> { await self.fetch(key: key, url: url, maxPixelSize: maxPixelSize) }
+        inFlight[flightKey] = task
         let result = await task.value
-        inFlight[key] = nil
+        inFlight[flightKey] = nil
         return result
     }
 
-    private func fetch(key: String, url: URL) async -> UIImage? {
-        let file = Self.fileURL(for: key)
-        if let data = await Self.readData(file), let img = Self.decode(data) {
+    private func fetch(key: String, url: URL, maxPixelSize: Int) async -> UIImage? {
+        let file = Self.fileURL(for: key, maxPixelSize: maxPixelSize)
+        if let data = await Self.readData(file), let img = Self.decode(data, maxPixelSize: maxPixelSize) {
             return img
         }
         guard let data = try? await NetFetch.imageData(from: url),
-              let img = Self.decode(data) else { return nil }
+              let img = Self.decode(data, maxPixelSize: maxPixelSize) else { return nil }
         await persist(data, to: file)
         return img
     }
@@ -190,21 +196,24 @@ private actor PosterStore {
             .appendingPathComponent("posters", isDirectory: true)
     }
 
-    private static func fileURL(for key: String) -> URL {
-        let digest = SHA256.hash(data: Data(key.utf8))
+    private static func fileURL(for key: String, maxPixelSize: Int) -> URL {
+        // The size rides in the cache key: a 480 px grid decode and
+        // a 900 px hero decode of the same URL are different files.
+        // (Old size-less files are simply orphaned and evicted.)
+        let digest = SHA256.hash(data: Data("\(key)|\(maxPixelSize)".utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return diskDir.appendingPathComponent(hex + ".img")
     }
 
-    /// Downsampled decode: ImageIO builds a ≤ 900 px thumbnail
+    /// Downsampled decode: ImageIO builds a ≤ maxPixelSize thumbnail
     /// straight from the encoded bytes (no full-size bitmap pass).
     /// Anything ImageIO refuses falls back to a plain UIImage decode.
-    private static func decode(_ data: Data) -> UIImage? {
+    private static func decode(_ data: Data, maxPixelSize: Int) -> UIImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: 900,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
         ]
         if let source = CGImageSourceCreateWithData(data as CFData, nil),
            let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {

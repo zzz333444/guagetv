@@ -812,7 +812,9 @@ private struct LightGlassCard<Content: View>: View {
                         in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.glassEdge, lineWidth: 1))
-            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
+        // No drop shadow: this card repeats in the library grids,
+        // and a shadow per cell is an offscreen pass per cell while
+        // scrolling. The tint + rim light carry the separation.
     }
 }
 

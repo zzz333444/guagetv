@@ -140,7 +140,7 @@ struct LiveView: View {
             HStack(spacing: 8) {
                 chip(Self.favouritesGroup)
                 ForEach(customGroupNames, id: \.self) { name in chip(name) }
-                ForEach(groups, id: \.name) { group in chip(group.name) }
+                ForEach(groups) { group in chip(group.name) }
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
@@ -344,10 +344,10 @@ struct LiveView: View {
                     guard let url = item.urls.first, !url.isEmpty else { return nil }
                     return LiveListParser.Channel(name: item.name, url: url, group: live.name)
                 }
-                groups = [LiveGroup(name: live.name, channels: channels)]
+                groups = [LiveGroup(ordinal: 0, name: live.name, channels: channels)]
             } else {
                 let text = try await fetchListText()
-                groups = LiveListParser.parse(text).map { LiveGroup(name: $0.name, channels: $0.channels) }
+                groups = LiveListParser.parse(text).enumerated().map { LiveGroup(ordinal: $0.offset, name: $0.element.name, channels: $0.element.channels) }
             }
             if groups.isEmpty {
                 errorText = "直播列表是空的，或格式不认识"
@@ -400,11 +400,15 @@ struct LiveView: View {
     }
 }
 
-/// One channel group in first-seen order.
+/// One channel group in first-seen order. The id carries the
+/// first-seen ordinal: two sources may both ship a group called
+/// "电影", and keying on name alone collapsed the second group's
+/// rows (and their selection state) into the first.
 struct LiveGroup: Identifiable {
+    let ordinal: Int
     let name: String
     let channels: [LiveListParser.Channel]
-    var id: String { name }
+    var id: String { "\(ordinal)-\(name)" }
 }
 
 // Sheet payload wrapper (tuples are not Identifiable).

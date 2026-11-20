@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.03 · 启动提速与首屏分级加载"
+    static let buildLabel = "v2.04 · 滚动流畅度与海报管线"
 
     var body: some View {
         NavigationStack {
