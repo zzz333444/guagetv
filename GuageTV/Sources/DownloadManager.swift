@@ -197,6 +197,22 @@ final class DownloadManager: NSObject, ObservableObject {
         save()
     }
 
+    /// Batch remove (v2.10): used by the downloads multi-select bar.
+    /// Cancels live tasks and deletes local files per item, same as
+    /// the single-item path.
+    func remove(ids: Set<String>) {
+        for id in ids {
+            if let item = items.first(where: { $0.id == id }) { remove(item) }
+        }
+    }
+
+    /// Batch retry (v2.10): only failed / paused items restart.
+    func retry(ids: Set<String>) {
+        for id in ids {
+            if let item = items.first(where: { $0.id == id }) { retry(item) }
+        }
+    }
+
     /// 下载前验货： media URLs (m3u8 / media file extensions) pass
     /// instantly; anything else gets a HEAD probe — if the server
     /// answers with a web page (text/html), the "stream" is a play

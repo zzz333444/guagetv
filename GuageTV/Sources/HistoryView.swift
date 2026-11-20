@@ -36,6 +36,12 @@ struct HistoryView: View {
     /// Groups start folded; the set holds the keys currently open.
     @State private var expandedDownloadGroups: Set<String> = []
 
+    /// v2.10: downloads batch management — multi-select + batch
+    /// delete / batch retry. Selection holds item ids; stale ids
+    /// (swipe-deleted rows) are harmless.
+    @State private var isSelectingDownloads = false
+    @State private var selectedDownloadIDs: Set<String> = []
+
     /// History shows only entries that were actually played (they
     /// carry an episode URL); favourites include detail-page stubs
     /// filed before the first play.
@@ -145,6 +151,17 @@ struct HistoryView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("清空") { confirmClear = true }
                             .foregroundStyle(.red.opacity(0.9))
+                    }
+                }
+                // v2.10: 下载页批量管理入口。
+                if segment == 2 && !downloads.items.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(isSelectingDownloads ? "完成" : "管理") {
+                            Haptics.tap()
+                            if isSelectingDownloads { selectedDownloadIDs.removeAll() }
+                            isSelectingDownloads.toggle()
+                        }
+                        .foregroundStyle(Theme.text)
                     }
                 }
             }
@@ -274,7 +291,46 @@ struct HistoryView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
+            // v2.10: 批量操作条（仅管理模式）：全选 / 批量重试 / 批量删除。
+            if isSelectingDownloads && !downloads.items.isEmpty {
+                batchBar
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+            }
         }
+    }
+
+    private var batchBar: some View {
+        let retryable = selectedDownloadIDs.intersection(
+            Set(downloads.items.filter { $0.state == "failed" || $0.state == "paused" }.map(\.id)))
+        return HStack(spacing: 10) {
+            Button(selectedDownloadIDs.count == downloads.items.count ? "取消全选" : "全选") {
+                Haptics.tap()
+                if selectedDownloadIDs.count == downloads.items.count {
+                    selectedDownloadIDs.removeAll()
+                } else {
+                    selectedDownloadIDs = Set(downloads.items.map(\.id))
+                }
+            }
+            Spacer()
+            Button("批量重试\(retryable.isEmpty ? "" : " (\(retryable.count))")") {
+                Haptics.tap()
+                DownloadManager.shared.retry(ids: retryable)
+                selectedDownloadIDs.subtract(retryable)
+            }
+            .disabled(retryable.isEmpty)
+            Button("删除\(selectedDownloadIDs.isEmpty ? "" : " (\(selectedDownloadIDs.count))")") {
+                Haptics.tap()
+                DownloadManager.shared.remove(ids: selectedDownloadIDs)
+                selectedDownloadIDs.removeAll()
+                if downloads.items.isEmpty { isSelectingDownloads = false }
+            }
+            .disabled(selectedDownloadIDs.isEmpty)
+            .foregroundStyle(.red.opacity(0.9))
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
     }
 
     /// Storage usage card: downloaded videos on disk + poster
@@ -361,14 +417,23 @@ struct HistoryView: View {
     }
 
     /// Folded group header: poster + show name + episode counts,
-    /// chevron flips the group open / closed.
+    /// chevron flips the group open / closed. In batch mode the
+    /// tap toggles the whole group's selection instead (v2.10).
     private func downloadGroupHeader(_ group: DownloadGroup) -> some View {
         let done = group.items.filter { $0.state == "done" }.count
         let busy = group.items.filter { $0.state == "downloading" }.count
         let expanded = expandedDownloadGroups.contains(group.key)
         var subtitle = "共 \(group.items.count) 集 · 已下载 \(done) 集"
         if busy > 0 { subtitle += " · 下载中 \(busy)" }
+        let groupIDs = Set(group.items.map(\.id))
+        let groupSelected = !groupIDs.isEmpty && groupIDs.isSubset(of: selectedDownloadIDs)
         return Button {
+            if isSelectingDownloads {
+                Haptics.tap()
+                if groupSelected { selectedDownloadIDs.subtract(groupIDs) }
+                else { selectedDownloadIDs.formUnion(groupIDs) }
+                return
+            }
             Haptics.tap()
             if expanded { expandedDownloadGroups.remove(group.key) }
             else { expandedDownloadGroups.insert(group.key) }
@@ -383,8 +448,14 @@ struct HistoryView: View {
                     Text(subtitle).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 }
                 Spacer()
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
+                if isSelectingDownloads {
+                    Image(systemName: groupSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(groupSelected ? Theme.accent : Theme.textDim)
+                } else {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
+                }
             }
             .padding(10)
             .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
@@ -395,6 +466,14 @@ struct HistoryView: View {
 
     private func downloadRow(_ item: DownloadManager.Item) -> some View {
         HStack(spacing: 12) {
+            // v2.10: 管理模式下行首勾选圈，点按只改选中态。
+            if isSelectingDownloads {
+                Image(systemName: selectedDownloadIDs.contains(item.id)
+                      ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selectedDownloadIDs.contains(item.id)
+                                     ? Theme.accent : Theme.textDim)
+            }
             PosterImage(urlString: item.pic)
                 .frame(width: 46, height: 69)
                 .posterFrame()
@@ -424,6 +503,12 @@ struct HistoryView: View {
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
         .contentShape(Rectangle())
         .onTapGesture {
+            if isSelectingDownloads {
+                Haptics.tap()
+                if selectedDownloadIDs.contains(item.id) { selectedDownloadIDs.remove(item.id) }
+                else { selectedDownloadIDs.insert(item.id) }
+                return
+            }
             if item.state == "done" {
                 Haptics.medium()
                 playRoute = .download(item)

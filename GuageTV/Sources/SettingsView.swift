@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.09 · 播出日历与搜索筛选"
+    static let buildLabel = "v2.10 · 弹幕外观与批量管理"
 
     var body: some View {
         NavigationStack {
@@ -1051,6 +1051,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.10", title: "弹幕外观与批量管理", lines: [
+            "弹幕外观独立成页：字号、透明度、滚动速度、显示区域、描边，改动立即生效（正在播放的弹幕也会跟着变），附实时预览",
+            "直播页新增频道搜索：输入名字跨全部分组找频道；分组 chips 可折叠收起",
+            "下载页新增批量管理：多选后批量删除、批量重试失败/暂停的任务；分组头可整组勾选",
+        ]),
         Entry(version: "v2.09", title: "播出日历与搜索筛选", lines: [
             "模块页新增「播出日历」：bangumi 每日放送周视图（今天 + 周一…周日），点哪天拉哪天，栏目结果 30 分钟缓存，重进即出屏",
             "搜索页新增年份/类型筛选：只在结果确实带年份或类型时出现，筛空后有清除筛选入口",
@@ -1332,8 +1337,6 @@ struct PlaySettingsView: View {
     @AppStorage("gesture.boostRate") private var boostRate = 2.0
     @AppStorage("danmaku.enabled") private var danmakuEnabled = false
     @AppStorage("danmaku.apiTemplate") private var danmakuAPI = ""
-    @AppStorage("danmaku.opacity") private var danmakuOpacity = 0.9
-    @AppStorage("danmaku.speed") private var danmakuSpeed = 1.0
     @AppStorage("danmaku.blockWords") private var danmakuBlockWords = ""
 
     /// 上次去广告过滤的统计行（v1.67）；无记录时提示尚未过滤过。
@@ -1449,12 +1452,17 @@ struct PlaySettingsView: View {
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
                     Text("填一个返回弹幕数据的接口地址，用 {title} 和 {ep} 占位剧名和集数；返回 B 站式 XML 或 JSON 数组都能解析。留空则只能在播放页手动加载弹幕文件。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
-                    Text("不透明度").font(.subheadline).foregroundStyle(Theme.text)
-                    Slider(value: $danmakuOpacity, in: 0.2...1, step: 0.05)
-                        .tint(Theme.text)
-                    Text("滚动速度").font(.subheadline).foregroundStyle(Theme.text)
-                    Slider(value: $danmakuSpeed, in: 0.5...2, step: 0.1)
-                        .tint(Theme.text)
+                    // v2.10: 字号/透明度/速度/区域/描边移入独立的
+                    // 弹幕外观页，这里只留开关、接口与屏蔽词。
+                    NavigationLink { DanmakuSettingsView() } label: {
+                        HStack {
+                            Text("弹幕外观").font(.subheadline).foregroundStyle(Theme.text)
+                            Spacer()
+                            Text("字号 · 透明度 · 区域 · 描边").font(.caption).foregroundStyle(Theme.textDim)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textDim)
+                        }
+                    }
+                    .buttonStyle(.plain)
                     Text("屏蔽词").font(.subheadline).foregroundStyle(Theme.text)
                     TextField("词与词之间用逗号隔开，含词的弹幕不显示", text: $danmakuBlockWords)
                         .font(.footnote)

@@ -16,6 +16,10 @@ struct LiveView: View {
     @State private var templateCache: [String: [EPGProgramme]] = [:]
     @State private var sheetProgrammes: ProgrammeSheetItem?
 
+    /// v2.10: 频道搜索（跨全部分组）与分组折叠。
+    @State private var searchText = ""
+    @AppStorage("live.groupsCollapsed") private var groupsCollapsed = false
+
     // Favourites + custom groups (v1.42), stored per live source.
     @AppStorage("live.favourites") private var favouritesJSON = "[]"
     @AppStorage("live.customGroups") private var customGroupsJSON = "{}"
@@ -65,6 +69,11 @@ struct LiveView: View {
 
     private var isTemplateEPG: Bool { (live.epg ?? "").contains("{name}") }
     private var currentChannels: [LiveListParser.Channel] {
+        // v2.10: 有搜索词时跨全部分组找频道，不受当前分组限制。
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            return allChannels.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        }
         if selectedGroup == Self.favouritesGroup {
             let keys = favouriteKeys
             return allChannels.filter { keys.contains(channelKey($0)) }
@@ -100,7 +109,13 @@ struct LiveView: View {
                 }
             } else {
                 VStack(spacing: 0) {
-                    groupChips
+                    searchBar
+                    if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        groupHeader
+                        if !groupsCollapsed { groupChips }
+                    } else {
+                        searchSummary
+                    }
                     channelList
                 }
             }
@@ -133,6 +148,61 @@ struct LiveView: View {
         } message: {
             Text("频道会同时出现在这个分组里（长按频道可管理）。")
         }
+    }
+
+    /// v2.10: 频道搜索框（玻璃胶囊，跨全部分组过滤）。
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textDim)
+            TextField("搜索频道", text: $searchText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textDim)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+    }
+
+    /// v2.10: 搜索时显示命中计数；平时显示当前分组与折叠开关。
+    private var searchSummary: some View {
+        HStack {
+            Text("在 \(groups.count) 个分组中找到 \(currentChannels.count) 个频道")
+                .font(.caption).foregroundStyle(Theme.textDim)
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+    }
+
+    private var groupHeader: some View {
+        HStack(spacing: 8) {
+            Text("分组").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+            Text(selectedGroup).font(.subheadline).foregroundStyle(Theme.textDim).lineLimit(1)
+            Spacer()
+            Text("\(groups.count) 组 · \(allChannels.count) 频道")
+                .font(.caption).foregroundStyle(Theme.textDim)
+            Button {
+                Haptics.selection()
+                withAnimation { groupsCollapsed.toggle() }
+            } label: {
+                Image(systemName: groupsCollapsed ? "chevron.down" : "chevron.up")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
+                    .padding(6)
+                    .background(Theme.glass, in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, groupsCollapsed ? 10 : 2)
     }
 
     private var groupChips: some View {

@@ -206,10 +206,15 @@ struct DanmakuView: View {
     let isMPV: Bool
     @AppStorage("danmaku.opacity") private var opacity = 0.9
     @AppStorage("danmaku.speed") private var speedFactor = 1.0
+    /// v2.10: appearance keys shared with DanmakuSettingsView —
+    /// read live here, so a change applies to the danmaku already
+    /// on screen without reopening the player.
+    @AppStorage("danmaku.fontSize") private var fontSize = 15.0
+    @AppStorage("danmaku.area") private var areaFraction = 0.45
+    @AppStorage("danmaku.outline") private var outline = true
 
     private static let travel: Double = 9   // seconds to cross the screen
-    private static let fontSize: CGFloat = 15
-    private static let laneHeight: CGFloat = 24
+    private var laneHeight: CGFloat { CGFloat(fontSize) + 9 }
 
     var body: some View {
         TimelineView(.animation) { _ in
@@ -225,7 +230,7 @@ struct DanmakuView: View {
         var ctx = context
         ctx.opacity = opacity
         let travel = Self.travel / max(speedFactor, 0.2)
-        let laneCount = max(3, Int((size.height * 0.45) / Self.laneHeight))
+        let laneCount = max(3, Int((size.height * areaFraction) / laneHeight))
         for item in store.items {
             let age = now - item.time
             if item.mode == 1 {
@@ -252,17 +257,122 @@ struct DanmakuView: View {
     private func estimateWidth(_ text: String) -> CGFloat {
         var width: CGFloat = 0
         for scalar in text.unicodeScalars {
-            width += scalar.value > 0x2E7F ? Self.fontSize : Self.fontSize * 0.55
+            width += scalar.value > 0x2E7F ? CGFloat(fontSize) : CGFloat(fontSize) * 0.55
         }
         return width
     }
 
     private func drawText(_ text: String, color: Color, at point: CGPoint,
                           in ctx: inout GraphicsContext) {
+        // 描边：先在上下左右各 1pt 处描一层黑字，再叠彩色字。
+        if outline {
+            let stroke = ctx.resolve(
+                Text(text)
+                    .font(.system(size: CGFloat(fontSize), weight: .semibold))
+                    .foregroundColor(.black))
+            for offset in [CGPoint(x: -1, y: 0), CGPoint(x: 1, y: 0),
+                           CGPoint(x: 0, y: -1), CGPoint(x: 0, y: 1)] {
+                ctx.draw(stroke, at: CGPoint(x: point.x + offset.x, y: point.y + offset.y),
+                         anchor: .topLeading)
+            }
+        }
         let resolved = ctx.resolve(
             Text(text)
-                .font(.system(size: Self.fontSize, weight: .semibold))
+                .font(.system(size: CGFloat(fontSize), weight: .semibold))
                 .foregroundColor(color))
         ctx.draw(resolved, at: point, anchor: .topLeading)
+    }
+}
+
+/// 弹幕外观 — 独立设置页（v2.10，R8）：字号 / 不透明度 /
+/// 滚动速度 / 显示区域 / 描边。全部走 AppStorage，与
+/// DanmakuView 读同一组键，改动立即生效（正在播放的弹幕
+/// 也会跟着变）；顶部预览行实时反映当前设置。
+struct DanmakuSettingsView: View {
+    @AppStorage("danmaku.fontSize") private var fontSize = 15.0
+    @AppStorage("danmaku.opacity") private var opacity = 0.9
+    @AppStorage("danmaku.speed") private var speedFactor = 1.0
+    @AppStorage("danmaku.area") private var areaFraction = 0.45
+    @AppStorage("danmaku.outline") private var outline = true
+
+    var body: some View {
+        SettingsPage(title: "弹幕外观") {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("预览").font(.headline).foregroundStyle(Theme.text)
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.black.opacity(0.35))
+                            .frame(height: 104)
+                        VStack(alignment: .leading, spacing: 10) {
+                            sample("这片绝了，泪目", color: .white)
+                            sample("前方高能！！", color: .yellow)
+                            sample("弹幕护体", color: .cyan)
+                        }
+                        .padding(12)
+                    }
+                    Text("改动立即生效，正在播放的弹幕也会跟着变。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+
+            Text("字号与透明度").font(.headline).foregroundStyle(Theme.text)
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    sliderRow(title: "字号", valueText: "\(Int(fontSize))pt") {
+                        Slider(value: $fontSize, in: 12...24, step: 1)
+                    }
+                    sliderRow(title: "不透明度", valueText: "\(Int(opacity * 100))%") {
+                        Slider(value: $opacity, in: 0.2...1, step: 0.05)
+                    }
+                }
+            }
+
+            Text("滚动与区域").font(.headline).foregroundStyle(Theme.text)
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    sliderRow(title: "滚动速度", valueText: "\(String(format: "%.1fx", speedFactor))") {
+                        Slider(value: $speedFactor, in: 0.5...2, step: 0.1)
+                    }
+                    sliderRow(title: "显示区域", valueText: "屏幕上部 \(Int(areaFraction * 100))%") {
+                        Slider(value: $areaFraction, in: 0.25...1, step: 0.05)
+                    }
+                    Text("显示区域越小，滚动弹幕只占画面上方一块，不挡字幕与画面主体。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+
+            Text("描边").font(.headline).foregroundStyle(Theme.text)
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("文字描边", isOn: $outline)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("给弹幕字加一圈黑边，亮画面上也看得清；关掉后字更干净。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
+        }
+    }
+
+    private func sample(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: CGFloat(fontSize), weight: .semibold))
+            .foregroundColor(color)
+            .opacity(opacity)
+            .shadow(color: outline ? .black.opacity(0.9) : .clear,
+                    radius: outline ? 1 : 0, x: 0, y: 0)
+    }
+
+    private func sliderRow<Content: View>(title: String, valueText: String,
+                                          @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.subheadline).foregroundStyle(Theme.text)
+                Spacer()
+                Text(valueText).font(.subheadline).foregroundStyle(Theme.textDim)
+                    .monospacedDigit()
+            }
+            content().tint(Theme.text)
+        }
     }
 }
