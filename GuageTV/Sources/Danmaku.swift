@@ -230,7 +230,7 @@ struct DanmakuView: View {
         var ctx = context
         ctx.opacity = opacity
         let travel = Self.travel / max(speedFactor, 0.2)
-        let laneCount = max(3, Int((size.height * areaFraction) / laneHeight))
+        let laneCount = max(3, Int((size.height * CGFloat(areaFraction)) / laneHeight))
         for item in store.items {
             let age = now - item.time
             if item.mode == 1 {
@@ -239,7 +239,7 @@ struct DanmakuView: View {
                 let progress = age / travel
                 let x = size.width - progress * (size.width + textWidth)
                 let lane = item.id % laneCount
-                let y = 6 + CGFloat(lane) * Self.laneHeight
+                let y = 6 + CGFloat(lane) * laneHeight
                 drawText(item.text, color: item.color,
                          at: CGPoint(x: x, y: y), in: &ctx)
             } else if item.mode == 5, age >= 0, age < 4 {
