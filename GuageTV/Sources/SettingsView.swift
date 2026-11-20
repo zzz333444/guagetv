@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.06 · 模块全量自测与栏目缓存"
+    static let buildLabel = "v2.07 · 模块兼容加固"
 
     var body: some View {
         NavigationStack {
