@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.24 · 稳定扫荡三轮"
+    static let buildLabel = "v2.25 · 收官·全量复查与更新日志"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.25", title: "收官·全量复查与更新日志", lines: [
+            "更新日志补齐第七次通宵全部 11 轮（v2.15–v2.25）：性能三轮、模块对标 Rex 两轮、UI 对标 Rex 两轮、功能补强两轮、稳定扫荡一轮，当前版本置顶高亮",
+            "全量复查：版本号三处一致（project.yml 2.25 / 225、buildLabel、更新日志首条），11 轮进度记录齐全；本轮不再加新功能，只做收官修正",
+            "最终包全项验包：Info.plist 版本与最低 iOS 18.0、buildLabel 新旧计数、主程序 LC_LOAD_DYLIB 的 13 个 @rpath framework 与 Payload/*.app/Frameworks/ 清单逐个对照（含 AMSMB2）",
+        ]),
         Entry(version: "v2.24", title: "稳定扫荡三轮", lines: [
             "全仓强制解包复查：try!/as!/显式 ! 仍为零（仅剩 required init?(coder:) 里那个约定俗成的 fatalError 桩）；SMB.swift 与 AMSMB2 调用点专项检查——AMSMB2 单次操作默认 60 秒超时，现建连接时改 30 秒，死 NAS 不再等满一分钟才报错；超时/拒连/找不到主机/账号无权/共享不存在五类失败改报中文原因，不再是英文 POSIX 原文",
             "主线程阻塞审计：四处信号量等待逐个核过——JS 串行队列（guage.jsruntime）与 HLS 代理后台队列、SMB 60 秒分块读（代理全局后台队列）均不在主线程；揪出一处真问题：本机代理首次启动的 2 秒封顶等待被两个调用点直接同步等在主线程上（py 蜘蛛首次加载的 ensureProxyBase、SMB 播放准备的 prepare），现改为后台启动、就绪后再绑定/再取地址，首屏与点按不再有最长 2 秒的卡顿窗口；JS 同步取数的等待此前无上限（会话中途被拆会永久卡住 JS 串行队列），现按请求超时 +5 秒封顶、超时报中文「请求超时」而不是空的假 200",
