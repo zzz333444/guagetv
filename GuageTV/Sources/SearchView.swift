@@ -188,6 +188,10 @@ struct SearchView: View {
     /// 最近搜索 — stored locally, newest first, capped at 10.
     @State private var recentsList: [String] =
         UserDefaults.standard.stringArray(forKey: "searchRecents.v1") ?? []
+    /// v2.22: clearing recents now asks first — it used to wipe
+    /// immediately on one tap, and the button sits next to the
+    /// chips it deletes.
+    @State private var confirmClearRecents = false
     /// TMDB 热门标题（v1.80 热搜）：点即搜；未开 TMDB 时不显示。
     @State private var hotTitles: [String] = []
     @State private var hotLoaded = false
@@ -236,8 +240,8 @@ struct SearchView: View {
                             Text("最近搜索").font(.headline).foregroundStyle(Theme.text)
                             Spacer()
                             Button("清空") {
-                                recentsList = []
-                                UserDefaults.standard.removeObject(forKey: "searchRecents.v1")
+                                Haptics.tap()
+                                confirmClearRecents = true
                             }
                             .font(.caption).foregroundStyle(Theme.textDim)
                         }
@@ -251,6 +255,14 @@ struct SearchView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
+            }
+            .confirmationDialog("清空最近搜索？", isPresented: $confirmClearRecents,
+                                titleVisibility: .visible) {
+                Button("清空", role: .destructive) {
+                    recentsList = []
+                    UserDefaults.standard.removeObject(forKey: "searchRecents.v1")
+                }
+                Button("取消", role: .cancel) {}
             }
         }
     }
@@ -900,10 +912,16 @@ struct SearchView: View {
         func statusLine(_ prefix: String) -> String {
             "\(prefix) · 已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
         }
+        /// v2.22: the per-answer tick used to drop the phase name,
+        /// so during the long CMS phase the status line read only
+        /// "已找到 N 部 · 已搜 d/t 站" — the user could not tell
+        /// which pool was being searched. Every phase now sets
+        /// phasePrefix before it starts; tick() keeps it.
+        var phasePrefix = "正在搜 CMS 站"
         func tick() {
             done += 1
             searchDoneCount = done
-            progressText = "已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
+            progressText = "\(phasePrefix) · 已找到 \(foundCount()) 部 · 已搜 \(done)/\(total) 站"
         }
 
         // CMS sites are independent HTTP calls: search them in
@@ -970,17 +988,44 @@ struct SearchView: View {
         // Sniff the .unknown subscription sites (same probe the
         // browse page uses, same cache): CMS results are already on
         // screen by now, so this never delays the fast category.
+        // v2.22: the sniff used to run serially — one dead unknown
+        // site cost up to 6 s before any py/JS search could start,
+        // and a config with several of them stalled the whole run
+        // for close to a minute. Sniff up to 6 at a time now (same
+        // bounded pattern as the CMS phase); each answer still
+        // ticks the progress counters, and pool appends stay on the
+        // main actor — the group only returns (site, kind) pairs.
         if !Task.isCancelled {
-            for (index, site) in unknownPool.enumerated() {
-                if Task.isCancelled { break }
-                progressText = "正在识别站点类型 \(index + 1)/\(unknownPool.count)：\(site.name)…"
-                let kind = await withTimeout(6) { await SiteBrowseView.sniffKind(for: site) } ?? nil
-                if let kind {
-                    probedKinds[site.key] = kind
-                    if kind == .spiderPY { pyPool.append(site) }
-                    else if kind == .spiderJS { jsPool.append(site) }
+            phasePrefix = "正在识别站点类型"
+            await withTaskGroup(of: (TVBoxConfig.Site, TVBoxConfig.Site.Kind?).self) { group in
+                var pending = 0
+                for site in unknownPool {
+                    if Task.isCancelled { break }
+                    group.addTask {
+                        let kind = await withTimeout(6) { await SiteBrowseView.sniffKind(for: site) } ?? nil
+                        return (site, kind)
+                    }
+                    pending += 1
+                    if pending >= 6, let next = await group.next() {
+                        if let kind = next.1 {
+                            probedKinds[next.0.key] = kind
+                            if kind == .spiderPY { pyPool.append(next.0) }
+                            else if kind == .spiderJS { jsPool.append(next.0) }
+                        }
+                        pending -= 1
+                        tick()
+                    }
                 }
-                tick()
+                if Task.isCancelled { group.cancelAll() }
+                for await next in group {
+                    if Task.isCancelled { group.cancelAll(); break }
+                    if let kind = next.1 {
+                        probedKinds[next.0.key] = kind
+                        if kind == .spiderPY { pyPool.append(next.0) }
+                        else if kind == .spiderJS { jsPool.append(next.0) }
+                    }
+                    tick()
+                }
             }
         }
         // The py and JS bridges each hold ONE loaded site on ONE
@@ -998,6 +1043,7 @@ struct SearchView: View {
                 > SiteHealth.score(PySiteBrowseView.healthKey(for: $1))
         }
         var pyMisses = 0
+        phasePrefix = "正在搜 py 站"
         for (index, site) in pyPool.enumerated() {
             if Task.isCancelled { break }
             if pyMisses >= 3 {
@@ -1020,6 +1066,7 @@ struct SearchView: View {
             tick()
         }
         var jsMisses = 0
+        phasePrefix = "正在搜 JS 站"
         for (index, site) in jsPool.enumerated() {
             if Task.isCancelled { break }
             if jsMisses >= 3 {
@@ -1044,16 +1091,30 @@ struct SearchView: View {
         let orderedJarPool = jarPool.sorted {
             SiteHealth.score("jar:" + $0.key) > SiteHealth.score("jar:" + $1.key)
         }
-        for site in orderedJarPool {
+        // v2.22: the jar pool had no circuit breaker — py/JS skip
+        // the rest after 3 straight misses, but a hung JarProxy
+        // used to cost every jar site its full 25 s hard timeout,
+        // up to 130 sites in a row. Same rule as the other pools.
+        var jarMisses = 0
+        phasePrefix = "正在搜 Jar 站"
+        for (index, site) in orderedJarPool.enumerated() {
             if Task.isCancelled { break }
+            if jarMisses >= 3 {
+                poolNotes.append("Jar 站连续 3 个超时或失败，疑似 JarProxy 被某个站点卡住，已跳过剩余 \(orderedJarPool.count - index) 个 Jar 站（逐站打开不受影响）")
+                done += orderedJarPool.count - index
+                break
+            }
             catTried["Jar", default: 0] += 1
             progressText = statusLine("正在搜 Jar 站：\(site.name)")
             let items = await hardTimeout(25) { await searchJar(site, jar: jarMap[site.key] ?? activeJar, keyword: kw) }
             if let items {
+                jarMisses = 0
                 responded += 1
                 catResponded["Jar", default: 0] += 1
                 if !items.isEmpty { out.append((site, items)); results = out }
                 else { empty.append(site); emptySites = empty }
+            } else {
+                jarMisses += 1
             }
             tick()
         }

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.21 · 动效与手感"
+    static let buildLabel = "v2.22 · 搜索与历史补强"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.22", title: "搜索与历史补强", lines: [
+            "跨线搜索慢站不再拖整页：未知类型站点的嗅探由串行改 6 路并行（每站仍 6 秒超时），一个死站此前要卡 6 秒才放行 py/JS 搜索、多个死站能拖近一分钟，现并行嗅探、逐站回进度；Jar 串行池补上与 py/JS 同款熔断——连续 3 个超时或失败即跳过剩余 Jar 站，JarProxy 卡住时不再逐站烧满 25 秒",
+            "搜索进度提示细化到站数与阶段：每站回答后进度行都带阶段名与「已搜 d/t 站」，CMS 长阶段此前只有「已找到 N 部 · 已搜 d/t 站」、看不出在搜哪类站，现四阶段（CMS / 识别站点 / py / JS / Jar）全程带名",
+            "搜索历史三件套补齐最后一件：上限 10 条、单条删除早已有，点「清空」此前一点即删、无确认，现弹确认框再清",
+            "历史页继续观看排序：重看一部旧剧现在立即浮到顶部——此前 record() 只原地合并、要等播放心跳 5 秒后才浮顶，刚重看完打开记录页会发现它还埋在下面；进度条仍按 position/duration 显示",
+            "已核查无需改动：搜索结果逐站到达即上屏（CMS 12 并发、每站 12 秒超时）、无结果折叠区随回答实时长大、py/JS 3 连 miss 熔断、热搜与历史 chips、热力格点按出当天时长（有看显示「M月d日 · 观看 X 分钟/小时」，没看显示「没看」）",
+        ]),
         Entry(version: "v2.21", title: "动效与手感", lines: [
             "页面转场：发现页 TMDB 详情 sheet 的内容 0.3 秒淡入（sheet 本身仍走系统滑入，不硬造共享元素过渡）；发现页 hero 轮播 0.45 秒缓动、点按海报已有轻触感均复核无误；资源库三处 NavigationLink（Python 分组卡、点播源卡、直播源卡）与追剧页行跳转此前点按无触感，现补轻触感",
             "触感统一：点按用轻触感、选择类（分类 chips、筛选值、季选择、模块 chips、Emby 类型筛选）用 selection 刻度、播放类（播放/续播/Emby 集数播放）用 medium、完成用 success、失败用 error；补上此前全仓漏掉的：底栏与 iPad 侧栏的搜索悬浮钮、线路卡点按、分类/筛选 chips、搜索热搜与历史 chips（含单条删除 ×）、追剧页提醒开关与检测更新、热力格点按、播放器剩余时间切换、Emby 搜索/清空/排序/播放、TMDB 测试连接（成功 success、失败 error）、播放失败阶梯走到头（换线也无路可走时）补 error 震动",

@@ -200,7 +200,11 @@ final class HistoryStore: ObservableObject {
             merged.isWatchlist = entries[i].isWatchlist
             if merged.lastRemarks.isEmpty { merged.lastRemarks = entries[i].lastRemarks }
             merged.hasUpdate = entries[i].hasUpdate && merged.lastRemarks == entries[i].lastRemarks
-            entries[i] = merged
+            // v2.22: re-watching used to merge in place, so the show
+            // sat buried until the player heartbeat floated it ~5 s
+            // into playback. Float it now, like updatePosition does.
+            entries.remove(at: i)
+            entries.insert(merged, at: 0)
         } else {
             entries.insert(entry, at: 0)
         }
