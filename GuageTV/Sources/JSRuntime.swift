@@ -342,17 +342,34 @@ final class JSRuntime {
             }
             var headers: [String: String] = [:]
             var status = 200
+            // v2.19: remember the charset the server declared, so
+            // a GBK page decodes correctly even when the module
+            // didn't pass encoding:"gbk" (most gbk-site modules
+            // don't — they rely on the host to auto-detect).
+            var declaredGBK = false
             if let http = response as? HTTPURLResponse {
                 status = http.statusCode
                 for (key, value) in http.allHeaderFields {
                     headers[String(describing: key)] = String(describing: value)
                 }
+                declaredGBK = (http.textEncodingName ?? "")
+                    .lowercased().contains("gb")
             }
             let content: String
             if (obj["buffer"] as? NSNumber)?.intValue == 2 {
                 content = data.base64EncodedString()
             } else if let encoding = (obj["encoding"] as? String)?.lowercased(),
                       encoding.contains("gb") {
+                let cfEncoding = CFStringConvertIANACharSetNameToEncoding("GB18030" as CFString)
+                let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+                content = String(data: data, encoding: String.Encoding(rawValue: nsEncoding))
+                    ?? String(decoding: data, as: UTF8.self)
+            } else if declaredGBK {
+                // No explicit encoding, but the server declared a
+                // GB charset (Content-Type: …; charset=gbk): decode
+                // as GB18030 (superset of gbk/gb2312) instead of
+                // lossy UTF-8, which used to turn the whole page
+                // into replacement characters.
                 let cfEncoding = CFStringConvertIANACharSetNameToEncoding("GB18030" as CFString)
                 let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
                 content = String(data: data, encoding: String.Encoding(rawValue: nsEncoding))

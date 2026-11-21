@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.18 · Rex 官方模块全量自测三轮"
+    static let buildLabel = "v2.19 · 模块兼容加固三轮"
 
     var body: some View {
         NavigationStack {
@@ -1070,6 +1070,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.19", title: "模块兼容加固三轮", lines: [
+            "Widget.http 四路径逐一桩测补齐：重定向跟随回报最终 URL、redirect: 0 时回 3xx 与 Location（响应头同时给原大小写与小写两份，两种读法都命中）；Set-Cookie 解析进 cookies[] 字段、跨请求自动带回（共享 cookie jar），多条 Set-Cookie 不再被逗号拼坏；GBK 页面没传 encoding 时按响应 charset 自动解码、传了则按指定编码；表单 POST 的 data 字典与预编码字符串两种形态都发得出、值里的 & = + ? 不再拆字段",
+            "自写测试模块 + 本地服务器端到端跑通 loadDetail 与 loadResource：列表 2 条、搜索 1 条、详情带 videoUrl 与 2 集、取流 POST 回流地址与 Referer，全 20 项桩测通过（含重定向/Set-Cookie/GBK/表单）",
+            "模块页体验收口：搜索失败后「重新加载」重跑同一关键词的搜索（原来是重载栏目、失败原样回来）；详情页 loadDetail 失败不再静默——页面内显中文原因横幅、可点重试",
+            "已核查无需改动：栏目加载骨架、空结果空态、加载更多失败回滚页码与报错横幅（v2.06 已有，规格与 App 其余页面一致）",
+        ]),
         Entry(version: "v2.18", title: "Rex 官方模块全量自测三轮", lines: [
             "Node 沙盒全量复测两官方模块 17 个栏目：bangumi 5/5 通过（每日播出 23 条、近期注目 22 条、排行榜 47 条、年度新番 41 条、分类 47 条）；rex-tmdb 走 Widget.http 的 5 栏全过（地区剧集/综艺各 40 条、热门/最新电影各 20 条，片单 0 条是 TMDB 官网对服务器抓取回 Cloudflare 挑战页的老问题）",
             "rex-tmdb 其余 7 个 tmdb.get 栏目无密钥时仍报中文「未配置 TMDB 密钥（设置 → TMDB）」、0–1ms 快速失败，没有英文 TypeError；用无效密钥桩测有密钥路径：直连与 JarProxy 转发两路都返回 TMDB 401「Invalid API key」，错误对象被原样抛出、不再是 TypeError；转发线路实测可达（401 证明代理已通 TMDB）",

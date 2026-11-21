@@ -1093,6 +1093,13 @@ final class FWDRuntime {
                 // syncFetch sets the form Content-Type when the
                 // caller didn't set one (v2.07).
                 obj["data"] = data
+            } else if let data = options["data"] as? String, !data.isEmpty {
+                // v2.19: form data passed as a pre-encoded string
+                // ("a=1&b=2") used to be dropped here — only the
+                // dict shape was forwarded. Send it through as-is;
+                // syncFetch puts a String data straight into the
+                // request body.
+                obj["data"] = data
             }
         }
         let result = JSRuntime.syncFetch(urlString: url, obj: obj)
@@ -1104,8 +1111,30 @@ final class FWDRuntime {
            let parsed = try? JSONSerialization.jsonObject(with: data) {
             dataValue = parsed
         }
+        // v2.19: headers keep the server's casing ("Set-Cookie",
+        // "Location"), so a module reading headers["set-cookie"]
+        // or headers["location"] lowercase missed them. Ship a
+        // lowercase copy of every header alongside the original,
+        // so both casings read. The same gap hid multi-value
+        // Set-Cookie (allHeaderFields comma-joins them, and the
+        // commas inside Expires= dates corrupt the split), so
+        // also expose the parsed cookies for the final URL:
+        // URLSession already stored them in the shared jar and
+        // sends them on later requests — `cookies` just makes
+        // them visible to modules that forward cookies by hand.
+        var headersOut: [String: String] = headers
+        for (key, value) in headers {
+            let lower = key.lowercased()
+            if headersOut[lower] == nil { headersOut[lower] = value }
+        }
         var response: [String: Any] = ["data": dataValue, "status": status,
-                                       "statusCode": status, "headers": headers]
+                                       "statusCode": status, "headers": headersOut]
+        if let finalURLString = result["url"] as? String,
+           let finalURL = URL(string: finalURLString),
+           let cookies = HTTPCookieStorage.shared.cookies(for: finalURL),
+           !cookies.isEmpty {
+            response["cookies"] = cookies.map { "\($0.name)=\($0.value)" }
+        }
         // v2.07: the final URL after redirects, so a module can
         // tell where it actually landed (e.g. a login wall).
         if let finalURL = result["url"] as? String, !finalURL.isEmpty {
@@ -1836,6 +1865,11 @@ struct FWDWidgetView: View {
     @State private var detailItem: FWDItem?
     @State private var showSearch = false
     @State private var searchSeed = ""
+    /// v2.19: the keyword of the last search, so the error
+    /// banner's retry re-runs the SEARCH instead of reloading
+    /// the column (the old retry called load(reset:) and the
+    /// search failure just came back as an empty column).
+    @State private var lastSearchKeyword: String?
 
     private var meta: FWDMeta { record.meta }
     private var listModules: [FWDModuleEntry] { meta.listModules }
@@ -1860,7 +1894,7 @@ struct FWDWidgetView: View {
                                title: "模块没拉到数据",
                                message: errorText,
                                actionTitle: "重新加载",
-                               action: { Task { await load(reset: true, bypassCache: true) } })
+                               action: { Task { await retryCurrent() } })
                     .padding(.horizontal, 18)
             } else {
                 content
@@ -1937,7 +1971,7 @@ struct FWDWidgetView: View {
                         Spacer()
                         Button("重新加载") {
                             Haptics.tap()
-                            Task { await load(reset: true, bypassCache: true) }
+                            Task { await retryCurrent() }
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.accent)
@@ -2132,7 +2166,7 @@ struct FWDWidgetView: View {
             loading = false
             return false
         }
-        if reset { loading = true; errorText = nil }
+        if reset { loading = true; errorText = nil; lastSearchKeyword = nil }
         let params = buildParams(for: module, page: page)
         let ttl = meta.cacheDuration > 0
             ? TimeInterval(meta.cacheDuration) : FWDColumnCache.defaultTTL
@@ -2174,11 +2208,23 @@ struct FWDWidgetView: View {
         loadingMore = false
     }
 
-    private func runSearch() async {
+    /// Retry whatever the page was last doing: a failed search
+    /// re-runs the search with the same keyword, anything else
+    /// reloads the column bypassing the cache (v2.19).
+    private func retryCurrent() async {
+        if let keyword = lastSearchKeyword {
+            await runSearch(keyword: keyword)
+        } else {
+            await load(reset: true, bypassCache: true)
+        }
+    }
+
+    private func runSearch(keyword: String? = nil) async {
         guard let fn = meta.searchFunction,
               let source = FWDStore.source(for: record) else { return }
-        let keyword = searchText.trimmingCharacters(in: .whitespaces)
+        let keyword = (keyword ?? searchText).trimmingCharacters(in: .whitespaces)
         guard !keyword.isEmpty else { return }
+        lastSearchKeyword = keyword
         loading = true
         errorText = nil
         var params: [String: Any] = ["keyword": keyword, "query": keyword,
@@ -2204,6 +2250,10 @@ struct FWDDetailView: View {
     let item: FWDItem
     @State private var full: FWDItem
     @State private var loadingDetail = false
+    /// v2.19: enrich() used to swallow a loadDetail failure into
+    /// the diagnostics log only — the page showed the thin list
+    /// item with no episodes and no hint why. Surface it.
+    @State private var detailError: String?
     @State private var playSelection: FWDPlaySelection?
     @State private var resolvingNote: String?
 
@@ -2284,6 +2334,24 @@ struct FWDDetailView: View {
                         ProgressView().tint(Theme.text)
                         Text("正在加载详情…").font(.caption).foregroundStyle(Theme.textDim)
                     }
+                }
+                if let detailError, !loadingDetail {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(Theme.accent)
+                        Text(detailError)
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                            .lineLimit(2)
+                        Spacer()
+                        Button("重试") {
+                            Haptics.tap()
+                            Task { await enrich() }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .padding(10)
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
                 }
                 if let resolvingNote {
                     Text(resolvingNote).font(.footnote).foregroundStyle(.orange)
@@ -2394,10 +2462,15 @@ struct FWDDetailView: View {
                 .callString(function: "loadDetail", argument: item.link, source: source)
             if let dict = result as? [String: Any] {
                 full = FWDItem(dict)
+                detailError = nil
             } else if let list = result as? [[String: Any]], let first = list.first {
                 full = FWDItem(first)
+                detailError = nil
+            } else {
+                detailError = "详情没有返回内容，集数与播放地址为空"
             }
         } catch {
+            detailError = "详情加载失败：\(error.localizedDescription)"
             Diagnostics.log("模块", "loadDetail 失败：\(error.localizedDescription)")
         }
     }
