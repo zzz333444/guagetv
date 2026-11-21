@@ -266,12 +266,15 @@ struct DiscoverView: View {
                 prefetchNextHeroArt()
             }
 
-            // Dot indicators (Rex: small dots under the synopsis).
-            HStack(spacing: 5) {
+            // Dot indicators (Rex: small dots under the synopsis;
+            // v2.20: the active page stretches into a pill, the
+            // rest stay dots — a row of equal circles gave no
+            // sense of position at a glance).
+            HStack(spacing: 6) {
                 ForEach(heroItems.indices, id: \.self) { i in
-                    Circle()
+                    Capsule()
                         .fill(i == heroIndex ? Color.white : Color.white.opacity(0.35))
-                        .frame(width: i == heroIndex ? 7 : 5, height: i == heroIndex ? 7 : 5)
+                        .frame(width: i == heroIndex ? 18 : 7, height: 7)
                 }
             }
             .padding(.bottom, 14)

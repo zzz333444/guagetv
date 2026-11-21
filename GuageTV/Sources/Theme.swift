@@ -36,6 +36,19 @@ enum Theme {
                            light: UIColor.white.withAlphaComponent(0.25))
     static let accent = Color(red: 0.55, green: 0.45, blue: 0.95)
     static let ok = Color(red: 0.35, green: 0.85, blue: 0.45)
+
+    /// Canonical glass radii (v2.20): one set of numbers for every
+    /// card in the app — 20 for top-level cards, 16 for inner
+    /// cards, 12 for posters/stills. Before this round the same
+    /// surfaces used 20/16/14/12 ad hoc (detail line cards were
+    /// 14, media-info 16, module chips 10/12) with no shared value.
+    static let cardRadius: CGFloat = 20
+    static let innerCardRadius: CGFloat = 16
+    static let posterRadius: CGFloat = 12
+    /// Tint wash over the translucent fill — the Library's
+    /// LightGlassCard recipe; flat Theme.glass alone reads as a
+    /// plain grey block next to it.
+    static let cardTint = Color.white.opacity(0.05)
 }
 
 /// Blurred, darkened artwork glow that tints the whole screen (Rex's
@@ -96,8 +109,8 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.glassStroke, lineWidth: 1))
             .shadow(color: shadow ? .black.opacity(0.25) : .clear, radius: shadow ? 12 : 0, x: 0, y: shadow ? 6 : 0)
     }
@@ -111,7 +124,7 @@ struct GlassCard<Content: View>: View {
 /// offscreen pass per cell while scrolling.
 struct GlassPanel<Content: View>: View {
     var padding: CGFloat = 16
-    var cornerRadius: CGFloat = 20
+    var cornerRadius: CGFloat = Theme.cardRadius
     var shadow: Bool = true
     @ViewBuilder var content: Content
 
@@ -138,7 +151,7 @@ extension View {
     }
 
     /// Glass panel surface (rounded rect, 20pt corners by default).
-    func glassPanel(cornerRadius: CGFloat = 20, shadow: Bool = true) -> some View {
+    func glassPanel(cornerRadius: CGFloat = Theme.cardRadius, shadow: Bool = true) -> some View {
         glassSurface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), shadow: shadow)
     }
 
@@ -161,7 +174,7 @@ extension View {
     /// cells now size themselves from a bare Rectangle base instead.
     func posterFrame() -> some View {
         self.clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous))
     }
 }
 
@@ -257,8 +270,9 @@ struct MediaInfoCard: View {
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .background(Theme.cardTint, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous)
                 .strokeBorder(Theme.glassStroke, lineWidth: 1))
         }
     }

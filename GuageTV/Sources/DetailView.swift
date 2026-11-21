@@ -591,8 +591,9 @@ struct DetailView: View {
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .background(Theme.cardTint, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous)
                 .strokeBorder(Theme.glassStroke, lineWidth: 1))
         }
     }
@@ -793,8 +794,9 @@ struct DetailView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .background(Theme.cardTint, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous)
             .strokeBorder(active ? Color.white.opacity(0.45) : Color.white.opacity(0.12),
                           lineWidth: active ? 1.5 : 1))
         .contentShape(Rectangle())

@@ -2316,7 +2316,13 @@ struct FWDDetailView: View {
                         Text(full.rating)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.text)
-                        Text("TMDB 评分")
+                        // v2.20: plain "评分" — the number comes
+                        // from the module's own rating field, and
+                        // only rex-tmdb's happens to be TMDB
+                        // vote_average; labelling every module's
+                        // number "TMDB 评分" asserted a source the
+                        // module never promised.
+                        Text("评分")
                             .font(.caption)
                             .foregroundStyle(Theme.textDim)
                     }

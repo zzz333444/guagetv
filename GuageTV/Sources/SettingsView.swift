@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.19 · 模块兼容加固三轮"
+    static let buildLabel = "v2.20 · Rex 细节核查三轮"
 
     var body: some View {
         NavigationStack {
@@ -114,7 +114,12 @@ struct SettingsView: View {
 
                     group(title: "应用") {
                         linkRow(icon: "clock.arrow.circlepath", title: "更新日志",
-                                value: "v1.86") {
+                                // v2.20: was hardcoded "v1.86" since the
+                                // page was added — the row lagged 34
+                                // versions behind the real changelog.
+                                // Derive it from buildLabel so it can
+                                // never go stale again.
+                                value: Self.buildLabel.components(separatedBy: " ").first ?? "v2.20") {
                             ChangelogView()
                         }
                         rexDivider()
@@ -193,7 +198,10 @@ private struct SettingsGroup<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline).foregroundStyle(Theme.textDim)
+            // v2.20: was Theme.textDim while the main page's group
+            // titles use Theme.section — sub-page titles sat a
+            // shade dimmer than the main page for no reason.
+            Text(title).font(.headline).foregroundStyle(Theme.section)
             GlassCard { VStack(alignment: .leading, spacing: 12) { content } }
         }
     }
@@ -1070,6 +1078,14 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.20", title: "Rex 细节核查三轮", lines: [
+            "玻璃规格收进同一套 Theme 值：新增 cardRadius 20 / innerCardRadius 16 / posterRadius 12 与 cardTint 淡白覆膜，GlassCard、GlassPanel、posterFrame 与媒体信息卡全部走这套常量；详情页「播放资源」线路卡由 14 改 16、补淡白覆膜，媒体信息卡同样补覆膜——之前两处是扁平 Theme.glass + 细描边，放在资源库的 LightGlassCard 旁边像灰色实块",
+            "发现页 hero 指示点改当前页拉长胶囊（18×7），其余仍为 7pt 圆点；一排等大圆点扫一眼看不出停在哪页",
+            "设置子页的分组标题由 Theme.textDim 改 Theme.section，与设置主页面分组标题同色；之前子页标题无故暗一档",
+            "设置页「更新日志」行的版本号由写死的 v1.86 改成从 buildLabel 自动取，之前落后了 34 个版本；更新日志页本身的「当前版本」置顶高亮仍按 entries 首条判定，补 v2.20 条目后自动跟上",
+            "评分红线复查：发现页与详情页的评分只走 TMDB vote_average、0 分隐藏，Emby 评分标「Emby 评分」；模块详情页把无依据的「TMDB 评分」改回中性「评分」——模块的 rating 字段是模块自带数字，只有 rex-tmdb 那路恰好是 TMDB vote_average，不能给所有模块都盖 TMDB 的章",
+            "已核查无需改动：播放器 chrome 按 Rex 参考播放器有意平铺白字、无玻璃（注释已写明，黑底胶囊只用于视频上的 toast/亮度音量 HUD）；资源库双列源卡与线路卡已是 LightGlassCard 全套玻璃配方；环境光浓度发现/资源库 0.45、详情页 0.65 是按页有意的分档；详情页播放钮两行、动作胶囊三键、播放资源双列卡、选集轨 176×99 均符合 Rex 规格",
+        ]),
         Entry(version: "v2.19", title: "模块兼容加固三轮", lines: [
             "Widget.http 四路径逐一桩测补齐：重定向跟随回报最终 URL、redirect: 0 时回 3xx 与 Location（响应头同时给原大小写与小写两份，两种读法都命中）；Set-Cookie 解析进 cookies[] 字段、跨请求自动带回（共享 cookie jar），多条 Set-Cookie 不再被逗号拼坏；GBK 页面没传 encoding 时按响应 charset 自动解码、传了则按指定编码；表单 POST 的 data 字典与预编码字符串两种形态都发得出、值里的 & = + ? 不再拆字段",
             "自写测试模块 + 本地服务器端到端跑通 loadDetail 与 loadResource：列表 2 条、搜索 1 条、详情带 videoUrl 与 2 集、取流 POST 回流地址与 Referer，全 20 项桩测通过（含重定向/Set-Cookie/GBK/表单）",
