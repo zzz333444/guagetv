@@ -98,14 +98,15 @@ final class PosterCache {
     func clearMemory() { memory.removeAllObjects() }
 
     /// v2.16 memory tier (see init): 6 GiB+ → 160 MB, 4 GiB+ →
-    /// 120 MB, smaller devices → 48 MB.
+    /// 120 MB, smaller devices → 48 MB. Plain if/else: a switch
+    /// `case 6 * gib...:` does not compile — a computed
+    /// PartialRangeFrom is not a valid switch pattern for UInt64.
     private static func memoryLimitBytes() -> Int {
+        let mem = ProcessInfo.processInfo.physicalMemory
         let gib: UInt64 = 1 << 30
-        switch ProcessInfo.processInfo.physicalMemory {
-        case 6 * gib...: return 160 * 1024 * 1024
-        case 4 * gib...: return 120 * 1024 * 1024
-        default: return 48 * 1024 * 1024
-        }
+        if mem >= 6 * gib { return 160 * 1024 * 1024 }
+        if mem >= 4 * gib { return 120 * 1024 * 1024 }
+        return 48 * 1024 * 1024
     }
 
     /// Cancellable prefetch batch (v2.16): one sequential utility
