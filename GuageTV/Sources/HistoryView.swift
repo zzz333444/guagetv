@@ -165,7 +165,8 @@ struct HistoryView: View {
                         Button(checkingUpdates ? "检测中…" : "检测更新") {
                             checkingUpdates = true
                             Task {
-                                await HistoryStore.shared.checkFavouritesForUpdates()
+                                // v2.23: 手动检测绕过 6 小时节流。
+                                await HistoryStore.shared.checkFavouritesForUpdates(force: true)
                                 checkingUpdates = false
                             }
                         }

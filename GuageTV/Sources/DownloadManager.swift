@@ -112,26 +112,49 @@ final class DownloadManager: NSObject, ObservableObject {
     /// re-attach them to their items. An item with no live task
     /// left becomes "paused" when a resume blob exists,
     /// otherwise "failed" (the pre-v1.42 behaviour).
+    ///
+    /// v2.23: the HLS session is re-attached too. Previously only
+    /// the file session was queried, so an HLS download still
+    /// running in its own background session was marked "failed"
+    /// at launch — and when it later finished, the delegate
+    /// dropped the event because hlsTasks was empty, leaving an
+    /// orphaned .movpkg on disk. Both sessions are queried before
+    /// anything is marked failed.
     private func reconnectTasks() {
-        fileSession.getAllTasks { [weak self] tasks in
+        fileSession.getAllTasks { [weak self] fileTasks in
             guard let self else { return }
-            var liveIDs = Set<String>()
-            for task in tasks {
-                guard let url = task.originalRequest?.url?.absoluteString,
-                      let item = self.items.first(where: {
-                          $0.remoteURL == url && $0.state == "downloading"
-                      }) else { continue }
-                self.fileTaskIDs[task.taskIdentifier] = item.id
-                liveIDs.insert(item.id)
-            }
-            var changed = false
-            for item in self.items where item.state == "downloading" && !liveIDs.contains(item.id) {
-                self.update(item.id, save: false) {
-                    $0.state = self.resumeData(for: item.id) != nil ? "paused" : "failed"
+            self.hlsSession.getAllTasks { [weak self] hlsTasks in
+                guard let self else { return }
+                var liveIDs = Set<String>()
+                for task in fileTasks {
+                    guard let url = task.originalRequest?.url?.absoluteString,
+                          let item = self.items.first(where: {
+                              $0.remoteURL == url && $0.state == "downloading"
+                          }) else { continue }
+                    self.fileTaskIDs[task.taskIdentifier] = item.id
+                    liveIDs.insert(item.id)
                 }
-                changed = true
+                var anyHLSLive = false
+                for task in hlsTasks {
+                    guard let assetTask = task as? AVAssetDownloadTask,
+                          let item = self.items.first(where: {
+                              $0.remoteURL == assetTask.urlAsset.url.absoluteString
+                                  && $0.state == "downloading"
+                          }) else { continue }
+                    self.hlsTasks[item.id] = assetTask
+                    liveIDs.insert(item.id)
+                    anyHLSLive = true
+                }
+                if anyHLSLive { self.startProgressTimerIfNeeded() }
+                var changed = false
+                for item in self.items where item.state == "downloading" && !liveIDs.contains(item.id) {
+                    self.update(item.id, save: false) {
+                        $0.state = self.resumeData(for: item.id) != nil ? "paused" : "failed"
+                    }
+                    changed = true
+                }
+                if changed { self.save() }
             }
-            if changed { self.save() }
         }
     }
 

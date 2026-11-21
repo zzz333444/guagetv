@@ -301,7 +301,24 @@ final class HistoryStore: ObservableObject {
     /// its own line and compare the "更新至…" remarks. py/JS
     /// favourites are skipped (their bridges load one spider at a
     /// time; a mass check would thrash them).
-    func checkFavouritesForUpdates() async {
+    ///
+    /// v2.23: the 6-hour throttle lives here, not in the callers.
+    /// The 追剧 page and the 记录页 favourites segment each fired
+    /// a full re-check on every appearance, so flipping between
+    /// the two pages re-fetched every CMS detail. Now an automatic
+    /// check within 6 hours of the last one is a no-op; the manual
+    /// "检测更新" button passes force: true. The timestamp is
+    /// written up front, so two overlapping auto-checks cannot
+    /// both run the full fetch.
+    private static let favouritesCheckKey = "history.favouritesLastCheck.v1"
+
+    func checkFavouritesForUpdates(force: Bool = false) async {
+        let now = Date.now.timeIntervalSince1970
+        if !force {
+            let last = UserDefaults.standard.double(forKey: Self.favouritesCheckKey)
+            if last > 0, now - last < 6 * 3600 { return }
+        }
+        UserDefaults.standard.set(now, forKey: Self.favouritesCheckKey)
         WatchNotify.requestAuthorizationIfNeeded()
         var newlyUpdated: [String] = []
         for entry in favourites {

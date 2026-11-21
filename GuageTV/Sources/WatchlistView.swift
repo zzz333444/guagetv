@@ -53,7 +53,6 @@ struct EntryDetailDestination: View {
 struct WatchlistView: View {
     @ObservedObject private var history = HistoryStore.shared
     @State private var checking = false
-    @AppStorage("watchlistLastCheck") private var lastCheck: Double = 0
     @AppStorage("watchNotify.enabled") private var notifyEnabled = true
 
     /// v2.11 排序复核：有更新的置顶（hasUpdate 优先），其余按
@@ -107,16 +106,16 @@ struct WatchlistView: View {
                     .foregroundStyle(Theme.text)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(checking ? "检测中…" : "检测更新") { Haptics.tap(); runCheck() }
+                    Button(checking ? "检测中…" : "检测更新") { Haptics.tap(); runCheck(force: true) }
                         .disabled(checking)
                         .foregroundStyle(Theme.text)
                 }
             }
         }
         .task {
-            // Quiet auto-check, at most once per 6 hours.
-            if !sortedFavourites.isEmpty,
-               Date.now.timeIntervalSince1970 - lastCheck > 6 * 3600 {
+            // Quiet auto-check; the 6-hour throttle lives in
+            // HistoryStore (v2.23) so every entry point shares it.
+            if !sortedFavourites.isEmpty {
                 runCheck()
             }
         }
@@ -192,12 +191,13 @@ struct WatchlistView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func runCheck() {
+    /// 手动点「检测更新」绕过 6 小时节流（force: true）；
+    /// 进页自动检查走节流。
+    private func runCheck(force: Bool = false) {
         guard !checking else { return }
         checking = true
         Task {
-            await HistoryStore.shared.checkFavouritesForUpdates()
-            lastCheck = Date.now.timeIntervalSince1970
+            await HistoryStore.shared.checkFavouritesForUpdates(force: force)
             checking = false
         }
     }

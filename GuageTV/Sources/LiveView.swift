@@ -8,7 +8,6 @@ struct LiveView: View {
     let live: TVBoxConfig.Live
 
     @State private var groups: [LiveGroup] = []
-    @State private var selectedGroup = ""
     @State private var loading = true
     @State private var errorText: String?
     @State private var playChannel: LiveListParser.Channel?
@@ -18,7 +17,34 @@ struct LiveView: View {
 
     /// v2.10: 频道搜索（跨全部分组）与分组折叠。
     @State private var searchText = ""
+    /// v2.23: 折叠状态与当前分组按直播源分别持久化（此前是
+    /// 全源共用一个 "live.groupsCollapsed" 开关，在 A 源折叠
+    /// 会把 B 源也折叠起来；选中分组每次进页都回到第一组）。
+    /// AppStorage 的 key 只能在 init 里动态拼，用源名 + 源地址
+    /// 区分同名不同源的直播配置。
     @AppStorage("live.groupsCollapsed") private var groupsCollapsed = false
+    @AppStorage("live.selectedGroup") private var selectedGroup = ""
+
+    init(live: TVBoxConfig.Live) {
+        self.live = live
+        let keySuffix = "\(live.name)|\(live.url)"
+        _groupsCollapsed = AppStorage(wrappedValue: false,
+                                      "live.groupsCollapsed.\(keySuffix)")
+        _selectedGroup = AppStorage(wrappedValue: "",
+                                    "live.selectedGroup.\(keySuffix)")
+    }
+
+    /// v2.23: EPG 进度条的刷新节拍对齐到整分钟。节目起止都在
+    /// 整分钟上，TimelineView 从 .now 起每 60 秒一拍会让「正在播」
+    /// 在节目交接后最多晚一分钟才翻页、进度条也跳变；从下一个
+    /// 整分钟起拍，交接时刻正好重绘。
+    @State private var epgTickStart: Date = LiveView.nextMinuteBoundary()
+
+    private static func nextMinuteBoundary() -> Date {
+        Calendar.current.nextDate(after: Date(),
+                                  matching: DateComponents(second: 0),
+                                  matchingPolicy: .nextTime) ?? Date()
+    }
 
     // Favourites + custom groups (v1.42), stored per live source.
     @AppStorage("live.favourites") private var favouritesJSON = "[]"
@@ -234,7 +260,8 @@ struct LiveView: View {
     private var channelList: some View {
         ScrollView(showsIndicators: false) {
             // R5 (v1.92): 60 秒一拍重绘，EPG 进度条随时间推进。
-            TimelineView(.periodic(from: .now, by: 60)) { _ in
+            // v2.23: 节拍从下一个整分钟起，与节目起止时刻对齐。
+            TimelineView(.periodic(from: epgTickStart, by: 60)) { _ in
                 LazyVStack(spacing: 10) {
                     ForEach(currentChannels) { channel in
                         channelRow(channel)
@@ -427,7 +454,11 @@ struct LiveView: View {
             }
             if groups.isEmpty {
                 errorText = "直播列表是空的，或格式不认识"
-            } else {
+            } else if !groups.contains(where: { $0.name == selectedGroup })
+                        && !customGroupNames.contains(selectedGroup)
+                        && selectedGroup != Self.favouritesGroup {
+                // v2.23: 只在存的分组已不存在时回落到第一组，
+                // 否则保留上次选中的分组（按源持久化）。
                 selectedGroup = groups[0].name
             }
         } catch {
