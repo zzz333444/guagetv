@@ -74,10 +74,16 @@ enum HLSAdFilter {
     }
 
     /// Synchronous fetch used by the proxy endpoints.
+    /// v2.17: the timeout is split by caller — a playlist is a
+    /// few KB on the start path, so it fails fast (8s) instead of
+    /// holding the first frame up to 25s; a segment keeps a
+    /// longer budget (15s) but still fails before the 15s stall
+    /// watchdog would fire anyway, so a dead segment 502s and the
+    /// engine retries instead of hanging the whole episode.
     static func fetch(url: URL, headers: [String: String],
-                      range: String?) -> (Int, String, Data, [String: String]) {
+                      range: String?, timeout: TimeInterval = 15) -> (Int, String, Data, [String: String]) {
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        request.timeoutInterval = timeout
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -97,7 +103,7 @@ enum HLSAdFilter {
                    http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream",
                    data, headers)
         }.resume()
-        _ = semaphore.wait(timeout: .now() + 25)
+        _ = semaphore.wait(timeout: .now() + timeout + 3)
         return out
     }
 

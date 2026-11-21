@@ -168,8 +168,14 @@ final class MPVController: ObservableObject {
             // libavformat's 5MiB / 5s default. HLS playlists and
             // MP4 headers resolve well inside this; streams that
             // need a deeper probe still fall back to mpv's retry.
-            setOptionOn(h, "demuxer-lavf-probesize", "2000000")
-            setOptionOn(h, "demuxer-lavf-analyzeduration", "2")
+            // v2.17: split by container — an HLS playlist is
+            // plain text and TS segments probe in kilobytes, so
+            // .m3u8 gets 512KiB / 1s and starts sooner still;
+            // MP4 and other containers keep 2MiB / 2s, where a
+            // shallower probe can miss a stream and cost a retry.
+            let isHLS = url.pathExtension.lowercased() == "m3u8"
+            setOptionOn(h, "demuxer-lavf-probesize", isHLS ? "512000" : "2000000")
+            setOptionOn(h, "demuxer-lavf-analyzeduration", isHLS ? "1" : "2")
             // Network resilience: fail a stalled connection in
             // 30s instead of hanging (v1.43: was 15s — slow
             // networks need longer before giving up), and let

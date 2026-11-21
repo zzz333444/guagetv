@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.16 · 滚动与图片二轮"
+    static let buildLabel = "v2.17 · 播放器起播与切集二轮"
 
     var body: some View {
         NavigationStack {
@@ -1070,6 +1070,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.17", title: "播放器起播与切集二轮", lines: [
+            "mpv 起播探测按容器分流：HLS（.m3u8）播放列表是纯文本、TS 分片几 KB 即可探明，探测收紧到 512KB / 1 秒，首帧更快；MP4 等容器保持 2MB / 2 秒，探测过浅漏流反而要重试",
+            "下集预解析失败不再整集作废：进度到阈值 +15%（短剧 65%、长剧 85%）时重试一次，重试也失败才放弃，切集不再等同步解析；失败记一条诊断日志，命中率可查",
+            "HLS 去广告代理超时分开算：播放列表 8 秒、分片 15 秒（原来统一 20 秒），死链分片快速 502、引擎重试接手，不再拖满整段播放；分片多连接仍由代理后台队列并发拉取",
+            "已核查无需改动：短集 50% / 长剧 70% 预解析阈值、原生引擎 10 秒起播后回长到 60 秒前向缓冲、mpv 内存分级缓存上限与 60 秒预读（均为 v2.05 已实现，数值复核无误）",
+        ]),
         Entry(version: "v2.16", title: "滚动与图片二轮", lines: [
             "海报按显示尺寸分级解码：详情大图、TMDB 详情横幅与模块详情背景升到 900px；演职员头像、模块图标、直播台标与 46pt 小缩略图降到 240px；其余网格保持 480px，环境光仍为 240px",
             "海报内存缓存按设备物理内存分级：6GB 以上 160MB、4GB 以上 120MB、其余 48MB；内存警告仍整清内存层、磁盘层不受影响",

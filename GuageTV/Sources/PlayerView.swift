@@ -269,6 +269,15 @@ struct PlayerView: View {
     /// for — set once per episode so a failed resolve doesn't
     /// re-trigger on every progress tick past 70%.
     @State private var prefetchTriggeredForEpisode: Int?
+    /// v2.17: which episode's prefetch failed — the progress
+    /// handler re-arms exactly one retry once playback passes
+    /// threshold + 15%, so a transient spider failure doesn't
+    /// leave the cut to a synchronous resolve at episode end.
+    @State private var prefetchFailedForEpisode: Int?
+    /// v2.17: which episode already spent its one retry — stops
+    /// a twice-failed prefetch from re-firing on every tick past
+    /// the retry threshold.
+    @State private var prefetchRetryUsedForEpisode: Int?
     /// Same key 设置 → 音画 writes; the in-player settings sheet
     /// offers it too (mpv applies it on the next load).
     @AppStorage("videoGravity") private var videoGravity = "aspect"
@@ -380,11 +389,29 @@ struct PlayerView: View {
             // at 50% — at 70% a slow spider resolve can still be
             // running when the episode ends; long episodes stay
             // at 70% so the resolve isn't wasted on abandonment.
+            // v2.17 retry: the old code left a failed prefetch
+            // dead for the rest of the episode (the trigger flag
+            // was already set), so the cut resolved synchronously
+            // and the user waited. One retry is re-armed once
+            // progress passes threshold + 15% (65% short / 85%
+            // long); the retry-used flag is set when it fires, so
+            // a twice-failed prefetch never loops on later ticks.
             let prefetchThreshold = duration < 900 ? 0.50 : 0.70
-            if duration > 0, currentTime / duration >= prefetchThreshold,
-               prefetchTriggeredForEpisode != index {
-                prefetchTriggeredForEpisode = index
-                prefetchNext()
+            let prefetchRetryThreshold = min(prefetchThreshold + 0.15, 0.90)
+            if duration > 0 {
+                let progress = currentTime / duration
+                if progress >= prefetchThreshold,
+                   prefetchTriggeredForEpisode != index {
+                    prefetchTriggeredForEpisode = index
+                    prefetchNext()
+                } else if progress >= prefetchRetryThreshold,
+                          prefetchFailedForEpisode == index,
+                          prefetchRetryUsedForEpisode != index {
+                    prefetchFailedForEpisode = nil
+                    prefetchRetryUsedForEpisode = index
+                    prefetchTriggeredForEpisode = index
+                    prefetchNext()
+                }
             }
         }
         .onChange(of: showStats) { _ in applyStatsSamplingFlags() }
@@ -1782,6 +1809,10 @@ struct PlayerView: View {
     private func notifyEpisodeChange() {
         // P5: new episode → allow its own 70% prefetch to fire once.
         prefetchTriggeredForEpisode = nil
+        // v2.17: a stale failure/retry flag must not leak into the
+        // new episode (same index number, different episode).
+        prefetchFailedForEpisode = nil
+        prefetchRetryUsedForEpisode = nil
         externalCues = []
         externalSubName = ""
         externalCues2 = []
@@ -1801,8 +1832,15 @@ struct PlayerView: View {
         prefetching.insert(target)
         let line = activeLine
         Task {
-            if case .ok(let url, let header) = await episodeResolver(line, target) {
+            let result = await episodeResolver(line, target)
+            if case .ok(let url, let header) = result {
                 if activeLine == line { resolved[target] = (url, header) }
+            } else if activeLine == line, index + 1 == target {
+                // v2.17: remember the miss (with a diagnostic line
+                // so the hit rate is observable) — the progress
+                // handler re-arms one retry later in the episode.
+                prefetchFailedForEpisode = index
+                Diagnostics.log("播放", "下集预解析失败 · \(title) 第\(target + 1)集，进度到阈值+15% 时重试一次")
             }
             prefetching.remove(target)
         }

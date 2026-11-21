@@ -177,7 +177,8 @@ final class LocalProxyServer {
             return (400, "text/plain; charset=utf-8", Data("bad hls request".utf8), [:])
         }
         let headers = HLSAdFilter.decodeHeaders(query["hdrs"])
-        let (status, type, data, _) = HLSAdFilter.fetch(url: url, headers: headers, range: nil)
+        // v2.17: playlist fetch on the start path — 8s budget.
+        let (status, type, data, _) = HLSAdFilter.fetch(url: url, headers: headers, range: nil, timeout: 8)
         guard status == 200 else {
             return (status, type, data, [:])
         }
@@ -199,8 +200,11 @@ final class LocalProxyServer {
             return (400, "text/plain; charset=utf-8", Data("bad segment request".utf8), [:])
         }
         let headers = HLSAdFilter.decodeHeaders(query["hdrs"])
+        // v2.17: segment fetch — 15s budget (was a flat 20s for
+        // both playlist and segment); a dead segment 502s and the
+        // engine retries instead of hanging the episode.
         let (status, type, data, responseHeaders) =
-            HLSAdFilter.fetch(url: url, headers: headers, range: range)
+            HLSAdFilter.fetch(url: url, headers: headers, range: range, timeout: 15)
         var extra: [String: String] = [:]
         for (key, value) in responseHeaders
         where ["content-range", "accept-ranges"].contains(key.lowercased()) {
