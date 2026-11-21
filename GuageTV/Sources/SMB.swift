@@ -55,14 +55,47 @@ enum SMBClient {
         guard let manager = SMB2Manager(url: url, credential: credential) else {
             throw messageError("SMB 连接初始化失败：\(server.host)")
         }
+        // v2.24: AMSMB2 单次操作默认 60 秒超时——死 NAS 要等满
+        // 一分钟才报错，浏览体验太差；局域网内 30 秒绰绰有余，
+        // 播放的分块读（8MB）同样够用，超时后由 describe 报中文。
+        manager.timeout = 30
         return manager
+    }
+
+    /// Map a libsmb2 / AMSMB2 failure to a Chinese reason (v2.24):
+    /// the raw localizedDescription is an English POSIX string on
+    /// most devices ("Operation timed out") and names no cause.
+    /// Callers prefix the action ("读取目录失败：…").
+    static func describe(_ error: Error) -> String {
+        let code: POSIXError.Code?
+        if let posix = error as? POSIXError {
+            code = posix.code
+        } else {
+            let ns = error as NSError
+            code = ns.domain == NSPOSIXErrorDomain
+                ? POSIXError.Code(rawValue: ns.code) : nil
+        }
+        switch code {
+        case .ETIMEDOUT:
+            return "连接超时（30 秒），请确认 NAS 已开机且在同一局域网"
+        case .ECONNREFUSED:
+            return "连接被拒绝，请确认 NAS 的 SMB 服务已开启、端口未被防火墙拦截"
+        case .EHOSTUNREACH, .ENETUNREACH:
+            return "找不到 NAS 主机，请确认 IP/主机名正确且在同一局域网"
+        case .EACCES:
+            return "用户名或密码不对，或该账号无权访问此共享"
+        case .ENOENT:
+            return "找不到该共享或文件，请确认共享名与路径"
+        default:
+            return error.localizedDescription
+        }
     }
 
     static func listShares(_ manager: SMB2Manager) async throws -> [(name: String, comment: String)] {
         do {
             return try await manager.listShares()
         } catch {
-            throw messageError("SMB 读取共享列表失败：\(error.localizedDescription)")
+            throw messageError("SMB 读取共享列表失败：\(describe(error))")
         }
     }
 
@@ -82,7 +115,7 @@ enum SMBClient {
             }
             return entries.sorted { ($0.isFolder ? 0 : 1, $0.name) < ($1.isFolder ? 0 : 1, $1.name) }
         } catch {
-            throw messageError("SMB 读取目录失败：\(error.localizedDescription)")
+            throw messageError("SMB 读取目录失败：\(describe(error))")
         }
     }
 
@@ -123,8 +156,20 @@ enum SMBProxy {
     /// extension heuristic still picks mpv for mkv & friends.
     static func prepare(server: SMBServer, share: String,
                         path: String, fileName: String) async throws -> String {
-        _ = LocalProxyServer.shared.ensureStarted()
-        guard let root = LocalProxyServer.shared.rootBase else {
+        // v2.24 audit: ensureStarted() can block up to 2s on the
+        // listener handshake, and prepare() runs on the caller's
+        // actor (often main) — never wait there. Fast path when
+        // the server is already up; otherwise start it off-thread.
+        let root: String?
+        if let running = LocalProxyServer.shared.rootIfRunning {
+            root = running
+        } else {
+            root = await Task.detached(priority: .userInitiated) {
+                _ = LocalProxyServer.shared.ensureStarted()
+                return LocalProxyServer.shared.rootBase
+            }.value
+        }
+        guard let root else {
             throw SMBClient.messageError("本机代理启动失败，无法播放 SMB 文件")
         }
         let manager = try SMBClient.makeManager(server)
@@ -157,7 +202,7 @@ enum SMBProxy {
         } catch let error as NSError where error.domain == "GuageSMB" {
             throw error
         } catch {
-            throw SMBClient.messageError("SMB 播放准备失败：\(error.localizedDescription)")
+            throw SMBClient.messageError("SMB 播放准备失败：\(SMBClient.describe(error))")
         }
     }
 
@@ -199,7 +244,7 @@ enum SMBProxy {
         switch fetched {
         case .failure(let error):
             return (502, "text/plain; charset=utf-8",
-                    Data("SMB 读取失败：\(error.localizedDescription)".utf8), [:])
+                    Data("SMB 读取失败：\(SMBClient.describe(error))".utf8), [:])
         case .success(let data):
             let ext = (path as NSString).pathExtension.lowercased()
             let type = ext == "mp4" || ext == "m4v" ? "video/mp4"

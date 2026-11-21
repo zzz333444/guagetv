@@ -388,7 +388,17 @@ final class JSRuntime {
                 if mapped.timedOut { result["timedOut"] = true }
             }
         }.resume()
-        semaphore.wait()
+        // v2.24 audit: this wait used to be unbounded — if the
+        // session never called back (torn down mid-flight), the JS
+        // serial queue hung forever. The request itself carries a
+        // timeout, so cap the wait a little past it and report a
+        // timeout instead of the empty fake-200 placeholder.
+        if semaphore.wait(timeout: .now() + request.timeoutInterval + 5) == .timedOut {
+            var failed = empty
+            failed["error"] = "请求超时"
+            failed["timedOut"] = true
+            return failed
+        }
         return result
     }
 

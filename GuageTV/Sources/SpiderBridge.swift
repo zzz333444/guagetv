@@ -152,8 +152,21 @@ final class SpiderBridge {
     private var proxyBaseSent = false
 
     private func ensureProxyBase() {
-        guard !proxyBaseSent, let base = LocalProxyServer.shared.ensureStarted() else { return }
-        proxyBaseSent = (try? PythonRuntime.shared.invoke("set_proxy_base", [base])) != nil
+        guard !proxyBaseSent else { return }
+        if let base = LocalProxyServer.shared.rootIfRunning {
+            proxyBaseSent = (try? PythonRuntime.shared.invoke("set_proxy_base", [base])) != nil
+            return
+        }
+        // v2.24 audit: first start can block up to 2s on the
+        // listener handshake, and loadSpider often runs on main —
+        // never wait there. Start it off-thread and bind as soon
+        // as it is up; PythonRuntime serializes invoke() on its
+        // own queue, so calling from here is safe.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self, !self.proxyBaseSent,
+                  let base = LocalProxyServer.shared.ensureStarted() else { return }
+            self.proxyBaseSent = (try? PythonRuntime.shared.invoke("set_proxy_base", [base])) != nil
+        }
     }
 
     /// localProxy dispatch for LocalProxyServer; returns the

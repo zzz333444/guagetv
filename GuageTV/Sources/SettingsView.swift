@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.23 · 直播与下载补强"
+    static let buildLabel = "v2.24 · 稳定扫荡三轮"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.24", title: "稳定扫荡三轮", lines: [
+            "全仓强制解包复查：try!/as!/显式 ! 仍为零（仅剩 required init?(coder:) 里那个约定俗成的 fatalError 桩）；SMB.swift 与 AMSMB2 调用点专项检查——AMSMB2 单次操作默认 60 秒超时，现建连接时改 30 秒，死 NAS 不再等满一分钟才报错；超时/拒连/找不到主机/账号无权/共享不存在五类失败改报中文原因，不再是英文 POSIX 原文",
+            "主线程阻塞审计：四处信号量等待逐个核过——JS 串行队列（guage.jsruntime）与 HLS 代理后台队列、SMB 60 秒分块读（代理全局后台队列）均不在主线程；揪出一处真问题：本机代理首次启动的 2 秒封顶等待被两个调用点直接同步等在主线程上（py 蜘蛛首次加载的 ensureProxyBase、SMB 播放准备的 prepare），现改为后台启动、就绪后再绑定/再取地址，首屏与点按不再有最长 2 秒的卡顿窗口；JS 同步取数的等待此前无上限（会话中途被拆会永久卡住 JS 串行队列），现按请求超时 +5 秒封顶、超时报中文「请求超时」而不是空的假 200",
+            "低内存与弱网三条路径回归：海报缓存内存分级（6GB 以上 160MB、4GB 以上 120MB、其余 48MB）与内存警告只清内存层、磁盘 150MB 最旧优先淘汰均复核无误；mpv 缓存按内存分级（≥4GB 用 256MiB、以下 128MiB）与 120 秒缓存、cache-pause 均复核无误；JarProxy 冷启动 patient 模式（浏览类调用 300 秒重试预算、其余两次尝试）复核无误",
+        ]),
         Entry(version: "v2.23", title: "直播与下载补强", lines: [
             "直播 EPG 进度条刷新对齐到整分钟：节目起止都在整分钟上，此前 TimelineView 从进页那一刻起每 60 秒一拍，「正在播」在节目交接后最多晚一分钟才翻页、进度条也跟着跳变；现节拍从下一个整分钟起拍，交接时刻正好重绘",
             "直播分组折叠与当前分组按源分别持久化：此前全源共用一个折叠开关，在 A 源折叠会把 B 源也折叠起来、选中分组每次进页都回到第一组；现每个直播源各存各的折叠状态与选中分组（源名 + 源地址区分同名源），重进回到上次停的分组",
