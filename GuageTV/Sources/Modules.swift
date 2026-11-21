@@ -1884,10 +1884,12 @@ struct FWDWidgetView: View {
         Group {
             if loading {
                 ScrollView(showsIndicators: false) {
+                    // v2.21: cross-fades when the column lands.
                     SkeletonPosterGrid()
                         .padding(.horizontal, 18)
                         .padding(.top, 12)
                         .padding(.bottom, 110)
+                        .transition(.opacity)
                 }
             } else if let errorText, items.isEmpty {
                 EmptyStateView(icon: "wifi.exclamationmark",
@@ -1900,6 +1902,7 @@ struct FWDWidgetView: View {
                 content
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(meta.title.isEmpty ? record.id : meta.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -2067,7 +2070,7 @@ struct FWDWidgetView: View {
                         .padding(.horizontal, 13).padding(.vertical, 7)
                         .background(idx == selected ? Color.white : Theme.glass, in: Capsule())
                         .foregroundStyle(idx == selected ? .black : Theme.text.opacity(0.85))
-                        .onTapGesture { onPick(idx) }
+                        .onTapGesture { Haptics.selection(); onPick(idx) }
                 }
             }
         }

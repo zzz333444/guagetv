@@ -1057,7 +1057,7 @@ struct PlayerView: View {
                      : timeLabel(duration))
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white)
-                    .onTapGesture { showRemaining.toggle(); pokeChrome() }
+                    .onTapGesture { Haptics.tap(); showRemaining.toggle(); pokeChrome() }
             }
             HStack(spacing: compact ? 10 : 24) {
                 Button { togglePlay(); pokeChrome() } label: {
@@ -1913,6 +1913,9 @@ struct PlayerView: View {
             if failoverToNextLine() {
                 recoveryStep = 1
             } else {
+                // v2.21: the ladder is exhausted — this is a real
+                // failure, not a retry, so it gets the error buzz.
+                Haptics.error()
                 showToast("播放失败：" + message)
             }
         }

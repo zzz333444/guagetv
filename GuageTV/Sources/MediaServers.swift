@@ -397,6 +397,7 @@ struct WebDAVBrowserView: View {
                 SkeletonRowList(count: 6)
                     .padding(.horizontal, 18)
                     .padding(.top, 12)
+                    .transition(.opacity)
             } else if let errorText {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
             } else {
@@ -431,6 +432,7 @@ struct WebDAVBrowserView: View {
                 .listStyle(.plain)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .navigationTitle(path.isEmpty ? server.name : (path.split(separator: "/").last.map(String.init) ?? server.name))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in

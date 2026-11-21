@@ -81,6 +81,7 @@ struct WatchlistView: View {
                         } label: {
                             row(entry)
                         }
+                        .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
@@ -97,6 +98,7 @@ struct WatchlistView: View {
             if !sortedFavourites.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        Haptics.tap()
                         notifyEnabled.toggle()
                         if notifyEnabled { WatchNotify.requestAuthorizationIfNeeded() }
                     } label: {
@@ -105,7 +107,7 @@ struct WatchlistView: View {
                     .foregroundStyle(Theme.text)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(checking ? "检测中…" : "检测更新") { runCheck() }
+                    Button(checking ? "检测中…" : "检测更新") { Haptics.tap(); runCheck() }
                         .disabled(checking)
                         .foregroundStyle(Theme.text)
                 }

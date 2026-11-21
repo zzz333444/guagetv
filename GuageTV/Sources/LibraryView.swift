@@ -146,6 +146,9 @@ struct LibraryView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    // v2.21: NavigationLink itself fires no haptic —
+                    // tap the card, feel the tap.
+                    .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                 }
 
                 ForEach(cardSections, id: \.id) { section in
@@ -187,6 +190,7 @@ struct LibraryView: View {
                                 sourceCard(site)
                             }
                             .buttonStyle(.plain)
+                            .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                         }
                     }
                 } else {
@@ -217,6 +221,7 @@ struct LibraryView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                         }
                     }
                 }
@@ -914,7 +919,7 @@ private struct LineCardView: View, Equatable {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(model.isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
-        .onTapGesture { onTap() }
+        .onTapGesture { Haptics.tap(); onTap() }
         .contextMenu {
             if let onRefresh {
                 Button {

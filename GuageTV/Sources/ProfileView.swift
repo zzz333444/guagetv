@@ -133,7 +133,7 @@ struct ProfileView: View {
                         RoundedRectangle(cornerRadius: 3)
                             .fill(fill)
                             .aspectRatio(1, contentMode: .fit)
-                            .onTapGesture { heatCellTapped(i) }
+                            .onTapGesture { Haptics.tap(); heatCellTapped(i) }
                     }
                 }
                 HStack(spacing: 4) {

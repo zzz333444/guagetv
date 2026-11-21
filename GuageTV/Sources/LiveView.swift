@@ -96,6 +96,7 @@ struct LiveView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .transition(.opacity)
             } else if let errorText {
                 // R8 (v1.85): bare error text → shared empty state
                 // with a retry action (load() is idempotent).
@@ -123,6 +124,7 @@ struct LiveView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(live.name)
         .navigationBarTitleDisplayMode(.inline)

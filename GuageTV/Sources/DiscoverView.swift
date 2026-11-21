@@ -52,8 +52,10 @@ struct DiscoverView: View {
                             .padding(.horizontal, 18)
                             .padding(.top, 90)
                     } else if loading {
-                        SkeletonHero()
-                        SkeletonPosterGrid().padding(.horizontal, 18)
+                        // v2.21: skeleton fades out instead of
+                        // vanishing the instant the feed lands.
+                        SkeletonHero().transition(.opacity)
+                        SkeletonPosterGrid().padding(.horizontal, 18).transition(.opacity)
                     } else if trending.isEmpty {
                         EmptyStateView(
                             icon: "wifi.exclamationmark",
@@ -73,6 +75,7 @@ struct DiscoverView: View {
                     }
                 }
                 .padding(.bottom, 110)   // clear the floating tab bar
+                .animation(.easeOut(duration: 0.25), value: loading)
             }
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
             .background(AmbientBackground(imageURL: heroArt))
@@ -415,7 +418,7 @@ struct DiscoverView: View {
         }
         .frame(width: 112)
         .contentShape(Rectangle())
-        .onTapGesture { openSearch(for: item.title) }
+        .onTapGesture { Haptics.tap(); openSearch(for: item.title) }
         .contextMenu {
             Button {
                 openSearch(for: item.title)
@@ -482,7 +485,7 @@ private struct TMDBGridView: View {
                         .foregroundStyle(Theme.textDim)
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { onSearch(item) }
+                    .onTapGesture { Haptics.tap(); onSearch(item) }
                     .contextMenu {
                         Button {
                             onSearch(item)
@@ -514,6 +517,9 @@ private struct TMDBDetailSheet: View {
     var item: TMDBClient.TMDBTitle
     var onSearch: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// v2.21: the sheet itself slides in from the system; the
+    /// content fades in behind it so text/art doesn't hard-pop.
+    @State private var appeared = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -582,6 +588,8 @@ private struct TMDBDetailSheet: View {
             }
             .padding(18)
             .padding(.bottom, 20)
+            .opacity(appeared ? 1 : 0)
+            .onAppear { withAnimation(.easeOut(duration: 0.3)) { appeared = true } }
         }
         .background(Theme.bg)
         .presentationDetents([.medium, .large])

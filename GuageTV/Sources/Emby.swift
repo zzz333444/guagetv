@@ -408,6 +408,7 @@ struct EmbyHomeView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 110)
                 }
+                .transition(.opacity)
             } else if let errorText {
                 EmptyStateView(icon: "wifi.exclamationmark",
                                title: "Emby 没连上",
@@ -420,6 +421,7 @@ struct EmbyHomeView: View {
                 content
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle("Emby")
         .navigationBarTitleDisplayMode(.inline)
@@ -485,6 +487,7 @@ struct EmbyHomeView: View {
                         }
                     if !searchText.isEmpty {
                         Button {
+                            Haptics.tap()
                             searchText = ""; searchResults = []; searchedKeyword = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
@@ -492,7 +495,7 @@ struct EmbyHomeView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Button("搜索") { Task { await search() } }
+                    Button("搜索") { Haptics.tap(); Task { await search() } }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.accent)
                         .disabled(searchText.trimmingCharacters(in: .whitespaces).isEmpty || searching)
@@ -500,6 +503,7 @@ struct EmbyHomeView: View {
                 if searching {
                     SkeletonRowList(count: 3)
                         .padding(.vertical, 8)
+                        .transition(.opacity)
                 } else if !searchedKeyword.isEmpty && searchResults.isEmpty {
                     EmptyStateView(icon: "magnifyingglass",
                                    title: "没有找到与「\(searchedKeyword)」相关的内容",
@@ -575,6 +579,7 @@ struct EmbyHomeView: View {
             .padding(.top, 12)
             .padding(.bottom, 110)
         }
+        .animation(.easeOut(duration: 0.25), value: searching)
     }
 
     private func sectionTitle(_ text: String) -> some View {
@@ -825,6 +830,7 @@ struct EmbyLibraryView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 110)
                 }
+                .transition(.opacity)
             } else if let errorText {
                 EmptyStateView(icon: "wifi.exclamationmark",
                                title: "媒体库没拉到",
@@ -843,7 +849,7 @@ struct EmbyLibraryView: View {
                                     .padding(.horizontal, 11).padding(.vertical, 6)
                                     .background(typeFilter == option.0 ? Color.white : Theme.glass, in: Capsule())
                                     .foregroundStyle(typeFilter == option.0 ? .black : Theme.text.opacity(0.85))
-                                    .onTapGesture { typeFilter = option.0 }
+                                    .onTapGesture { Haptics.selection(); typeFilter = option.0 }
                             }
                             Spacer()
                         }
@@ -892,6 +898,7 @@ struct EmbyLibraryView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(library.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -900,6 +907,7 @@ struct EmbyLibraryView: View {
                 Menu {
                     ForEach(SortMode.allCases, id: \.self) { mode in
                         Button {
+                            Haptics.selection()
                             sortMode = mode
                         } label: {
                             if mode == sortMode {
@@ -990,6 +998,7 @@ struct EmbySeriesView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 110)
                 }
+                .transition(.opacity)
             } else if let errorText {
                 EmptyStateView(icon: "wifi.exclamationmark",
                                title: "剧集没拉到",
@@ -1024,6 +1033,7 @@ struct EmbySeriesView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("接下来").font(.headline).foregroundStyle(Theme.text)
                                 Button {
+                                    Haptics.medium()
                                     Task { await playSingle(next) }
                                 } label: {
                                     HStack(spacing: 8) {
@@ -1054,12 +1064,13 @@ struct EmbySeriesView: View {
                                         .padding(.horizontal, 14).padding(.vertical, 7)
                                         .background(selectedSeason?.id == season.id ? Color.white : Theme.glass, in: Capsule())
                                         .foregroundStyle(selectedSeason?.id == season.id ? .black : Theme.text.opacity(0.85))
-                                        .onTapGesture { Task { await pickSeason(season) } }
+                                        .onTapGesture { Haptics.selection(); Task { await pickSeason(season) } }
                                 }
                             }
                         }
                         ForEach(episodes) { ep in
                             Button {
+                                Haptics.medium()
                                 Task { await playFrom(ep) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -1100,6 +1111,7 @@ struct EmbySeriesView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(series.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -1204,8 +1216,10 @@ struct EmbyPlayLoader: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
                 }
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: selection == nil)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(item.name)
         .navigationBarTitleDisplayMode(.inline)

@@ -196,6 +196,7 @@ struct DLNACastView: View {
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.top, 12)
+                    .transition(.opacity)
                 } else if devices.isEmpty {
                     Text("没找到 DLNA 设备。确认电视开着、和手机连同一个 Wi-Fi，且电视的投屏/DLNA 功能已开。")
                         .font(.subheadline).foregroundStyle(Theme.textDim)
@@ -218,6 +219,7 @@ struct DLNACastView: View {
                     .listStyle(.plain)
                 }
             }
+            .animation(.easeOut(duration: 0.25), value: searching)
             .background(Theme.bg)
             .navigationTitle("DLNA 投屏")
             .navigationBarTitleDisplayMode(.inline)

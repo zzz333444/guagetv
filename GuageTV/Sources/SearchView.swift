@@ -104,6 +104,7 @@ struct SearchView: View {
                 statusRow
                 content
             }
+            .animation(.easeOut(duration: 0.25), value: searching)
             .background(AmbientBackground(imageURL: nil))
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -291,9 +292,11 @@ struct SearchView: View {
         } else if searching && results.isEmpty {
             // v2.12: bare spinner → poster-grid skeleton (search
             // results render as posters).
+            // v2.21: cross-fades when results land.
             SkeletonPosterGrid()
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
+                .transition(.opacity)
         } else if !results.isEmpty {
             // Results branch MUST outrank the !searched branch below:
             // `searched` stays false for the whole run, so ordering
@@ -1172,7 +1175,7 @@ private struct FlowChips: View {
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(Theme.glass, in: Capsule())
                     .foregroundStyle(Theme.text)
-                    .onTapGesture { onTap(word) }
+                    .onTapGesture { Haptics.tap(); onTap(word) }
             }
         }
     }
@@ -1193,8 +1196,8 @@ private struct DeletableFlowChips: View {
                     Text(word)
                         .font(.subheadline)
                         .lineLimit(1)
-                        .onTapGesture { onTap(word) }
-                    Button { onDelete(word) } label: {
+                        .onTapGesture { Haptics.tap(); onTap(word) }
+                    Button { Haptics.tap(); onDelete(word) } label: {
                         Image(systemName: "xmark")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(Theme.textDim)

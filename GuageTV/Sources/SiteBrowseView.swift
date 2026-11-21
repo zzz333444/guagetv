@@ -68,6 +68,7 @@ struct DetailLoaderView: View {
             } else {
                 // v2.12: bare spinner → detail-shaped skeleton
                 // (hero + rows), matching what DetailView shows.
+                // v2.21: fades out when the detail lands.
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 14) {
                         SkeletonHero()
@@ -77,8 +78,10 @@ struct DetailLoaderView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 110)
                 }
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: detail == nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
         .task {
@@ -213,6 +216,9 @@ struct SiteBrowseView: View {
             if !currentFilterGroups.isEmpty { filterRows }
             content
         }
+        // v2.21: skeleton/content swap cross-fades instead of
+        // flashing on every class/filter change.
+        .animation(.easeOut(duration: 0.25), value: loading)
     }
 
     /// One chip row per filter group the site declares for this
@@ -234,6 +240,7 @@ struct SiteBrowseView: View {
                                 .background(active ? Color.white : Theme.glass, in: Capsule())
                                 .foregroundStyle(active ? .black : Theme.text.opacity(0.85))
                                 .onTapGesture {
+                                    Haptics.selection()
                                     selectedFilters[group.key] = option.value
                                     Task { await reloadWithFilters() }
                                 }
@@ -280,7 +287,7 @@ struct SiteBrowseView: View {
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(selectedTid == tid ? Color.white : Theme.glass, in: Capsule())
             .foregroundStyle(selectedTid == tid ? .black : Theme.text.opacity(0.85))
-            .onTapGesture { Task { await selectClass(tid) } }
+            .onTapGesture { Haptics.selection(); Task { await selectClass(tid) } }
     }
 
     @ViewBuilder
@@ -290,6 +297,7 @@ struct SiteBrowseView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
                 .padding(.bottom, 110)
+                .transition(.opacity)
         } else if let errorText {
             Spacer()
             VStack(spacing: 12) {

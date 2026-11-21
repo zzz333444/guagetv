@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.20 · Rex 细节核查三轮"
+    static let buildLabel = "v2.21 · 动效与手感"
 
     var body: some View {
         NavigationStack {
@@ -119,7 +119,7 @@ struct SettingsView: View {
                                 // versions behind the real changelog.
                                 // Derive it from buildLabel so it can
                                 // never go stale again.
-                                value: Self.buildLabel.components(separatedBy: " ").first ?? "v2.20") {
+                                value: Self.buildLabel.components(separatedBy: " ").first ?? "v2.21") {
                             ChangelogView()
                         }
                         rexDivider()
@@ -722,7 +722,15 @@ struct TMDBSettingsView: View {
                         .font(.footnote.monospaced())
                     HStack(spacing: 10) {
                         Button("测试连接并保存") {
-                            Task { tmdbTestNote = await TMDBClient.testConnection() }
+                            Haptics.tap()
+                            Task {
+                                tmdbTestNote = await TMDBClient.testConnection()
+                                // v2.21: the note is the verdict —
+                                // success gets the success buzz, any
+                                // failure the error buzz.
+                                if tmdbTestNote.hasPrefix("连接成功") { Haptics.success() }
+                                else { Haptics.error() }
+                            }
                         }
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 18).padding(.vertical, 8)
@@ -1078,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.21", title: "动效与手感", lines: [
+            "页面转场：发现页 TMDB 详情 sheet 的内容 0.3 秒淡入（sheet 本身仍走系统滑入，不硬造共享元素过渡）；发现页 hero 轮播 0.45 秒缓动、点按海报已有轻触感均复核无误；资源库三处 NavigationLink（Python 分组卡、点播源卡、直播源卡）与追剧页行跳转此前点按无触感，现补轻触感",
+            "触感统一：点按用轻触感、选择类（分类 chips、筛选值、季选择、模块 chips、Emby 类型筛选）用 selection 刻度、播放类（播放/续播/Emby 集数播放）用 medium、完成用 success、失败用 error；补上此前全仓漏掉的：底栏与 iPad 侧栏的搜索悬浮钮、线路卡点按、分类/筛选 chips、搜索热搜与历史 chips（含单条删除 ×）、追剧页提醒开关与检测更新、热力格点按、播放器剩余时间切换、Emby 搜索/清空/排序/播放、TMDB 测试连接（成功 success、失败 error）、播放失败阶梯走到头（换线也无路可走时）补 error 震动",
+            "滥用收敛：播放器视频区点按显隐 chrome 不加震动——这是全 App 点得最频繁的手势，每次都震是噪音；其余 HistoryView 的 14 处轻触感逐条核对，均在真实点按/选择动作上，无空转调用",
+            "底栏与胶囊复核：切换 0.22 秒 easeInOut、紧凑模式（只图标）、搜索悬浮钮开关均已实现且无改动；胶囊选中态在切换动画内同步变色",
+            "骨架屏不闪烁：全 App 19 处骨架统一加淡出——SkeletonHero / SkeletonPosterGrid / SkeletonRowList / ColdStartSpinner 出现与消失均为 0.25 秒 easeOut 交叉淡入淡出；覆盖发现页、CMS/py/JS/jar 四个浏览页（含详情加载骨架）、搜索页、模块页、直播页、Emby 首页/搜索/媒体库/剧集页/播放取流页、播出日历、WebDAV、DLNA、SMB 两页",
+        ]),
         Entry(version: "v2.20", title: "Rex 细节核查三轮", lines: [
             "玻璃规格收进同一套 Theme 值：新增 cardRadius 20 / innerCardRadius 16 / posterRadius 12 与 cardTint 淡白覆膜，GlassCard、GlassPanel、posterFrame 与媒体信息卡全部走这套常量；详情页「播放资源」线路卡由 14 改 16、补淡白覆膜，媒体信息卡同样补覆膜——之前两处是扁平 Theme.glass + 细描边，放在资源库的 LightGlassCard 旁边像灰色实块",
             "发现页 hero 指示点改当前页拉长胶囊（18×7），其余仍为 7pt 圆点；一排等大圆点扫一眼看不出停在哪页",

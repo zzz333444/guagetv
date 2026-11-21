@@ -175,7 +175,7 @@ struct ContentView: View {
             tabButton(index: 3, icon: "gearshape.fill", label: "设置")
             Spacer()
             if showSearchTab {
-                Button { showSearch = true } label: {
+                Button { Haptics.tap(); showSearch = true } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Theme.text)
@@ -201,7 +201,7 @@ struct ContentView: View {
             .glassCapsule()
 
             if showSearchTab {
-                Button { showSearch = true } label: {
+                Button { Haptics.tap(); showSearch = true } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Theme.text)

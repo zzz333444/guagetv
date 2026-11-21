@@ -36,10 +36,12 @@ struct PySiteBrowseView: View {
                 }
             } else if loading {
                 // v2.12: bare spinner → poster-grid skeleton.
+                // v2.21: cross-fades instead of flashing.
                 SkeletonPosterGrid()
                     .padding(.horizontal, 18)
                     .padding(.top, 6)
                     .padding(.bottom, 110)
+                    .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
                     if !classes.isEmpty { classChips }
@@ -47,6 +49,7 @@ struct PySiteBrowseView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: items.first?.pic))
         .task { await prepare() }
     }
@@ -70,7 +73,7 @@ struct PySiteBrowseView: View {
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(selectedTid == tid ? Color.white : Theme.glass, in: Capsule())
             .foregroundStyle(selectedTid == tid ? .black : Theme.text.opacity(0.85))
-            .onTapGesture { Task { await selectClass(tid) } }
+            .onTapGesture { Haptics.selection(); Task { await selectClass(tid) } }
     }
 
     private var grid: some View {
@@ -335,6 +338,7 @@ struct PyDetailLoaderView: View {
                 }
             } else {
                 // v2.12: bare spinner → detail-shaped skeleton.
+                // v2.21: fades out when the detail lands.
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 14) {
                         SkeletonHero()
@@ -344,8 +348,10 @@ struct PyDetailLoaderView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 110)
                 }
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: detail == nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
         .task {

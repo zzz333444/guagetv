@@ -319,7 +319,9 @@ struct JarSiteBrowseView: View {
                     .padding(18)
                 }
             } else if loading {
-                ColdStartSpinner(since: loadSince)
+                // v2.21: cold-start spinner fades out when the
+                // grid lands instead of vanishing mid-spin.
+                ColdStartSpinner(since: loadSince).transition(.opacity)
             } else {
                 VStack(spacing: 0) {
                     if !classes.isEmpty { classChips }
@@ -327,6 +329,7 @@ struct JarSiteBrowseView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: items.first?.pic))
         .task {
             JarProxyClient.warmActiveLine()
@@ -353,7 +356,7 @@ struct JarSiteBrowseView: View {
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(selectedTid == tid ? Color.white : Theme.glass, in: Capsule())
             .foregroundStyle(selectedTid == tid ? .black : Theme.text.opacity(0.85))
-            .onTapGesture { Task { await selectClass(tid) } }
+            .onTapGesture { Haptics.selection(); Task { await selectClass(tid) } }
     }
 
     private var grid: some View {
@@ -490,9 +493,11 @@ struct JarDetailLoaderView: View {
                     .padding(18)
                 }
             } else {
-                ColdStartSpinner(since: loadSince)
+                // v2.21: same fade as the other detail loaders.
+                ColdStartSpinner(since: loadSince).transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: detail == nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
         .task {

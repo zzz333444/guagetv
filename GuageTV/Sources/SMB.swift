@@ -252,6 +252,7 @@ struct SMBSharesView: View {
                 SkeletonRowList(count: 5)
                     .padding(.horizontal, 18)
                     .padding(.top, 12)
+                    .transition(.opacity)
             } else if let errorText {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
             } else if let manager {
@@ -275,6 +276,7 @@ struct SMBSharesView: View {
                 .listStyle(.plain)
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .navigationTitle(server.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -312,6 +314,7 @@ struct SMBBrowserView: View {
                 SkeletonRowList(count: 6)
                     .padding(.horizontal, 18)
                     .padding(.top, 12)
+                    .transition(.opacity)
             } else if let errorText {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim).padding(24)
             } else {
@@ -356,6 +359,7 @@ struct SMBBrowserView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .navigationTitle(path.isEmpty ? share : (path.split(separator: "/").last.map(String.init) ?? share))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in

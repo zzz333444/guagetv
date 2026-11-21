@@ -48,6 +48,7 @@ struct BroadcastCalendarView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 110)
                 }
+                .transition(.opacity)
             } else if record == nil || dailyModule == nil {
                 VStack {
                     Spacer()
@@ -72,6 +73,7 @@ struct BroadcastCalendarView: View {
                 content
             }
         }
+        .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle("播出日历")
         .navigationBarTitleDisplayMode(.inline)
