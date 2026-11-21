@@ -20,6 +20,13 @@ struct DiscoverView: View {
     @State private var heroIndex = 0
     @State private var logos: [Int: String] = [:]
     @State private var lastHeroTouch = Date()
+    /// v2.16 direction-aware prefetch: the index of the last row
+    /// seen, plus the two cancellable prefetch batches (rows and
+    /// hero art travel on separate handles so the 6.5 s hero
+    /// auto-advance never cancels a row prefetch mid-scroll).
+    @State private var lastRowSeen = -1
+    @State private var rowPrefetchTask: Task<Void, Never>?
+    @State private var heroPrefetchTask: Task<Void, Never>?
     @State private var searchSeed = ""
     @State private var showSearch = false
     @State private var detailItem: TMDBClient.TMDBTitle?
@@ -58,11 +65,11 @@ struct DiscoverView: View {
                             .padding(.top, 90)
                     } else {
                         hero
-                        posterRow("本周热门", week)
-                        posterRow("正在热映", nowPlaying)
-                        posterRow("热门电影", movies)
-                        posterRow("热门剧集", shows)
-                        posterRow("高分佳作", top)
+                        posterRow("本周热门", week, rowIndex: 0)
+                        posterRow("正在热映", nowPlaying, rowIndex: 1)
+                        posterRow("热门电影", movies, rowIndex: 2)
+                        posterRow("热门剧集", shows, rowIndex: 3)
+                        posterRow("高分佳作", top, rowIndex: 4)
                     }
                 }
                 .padding(.bottom, 110)   // clear the floating tab bar
@@ -79,6 +86,10 @@ struct DiscoverView: View {
         }
         .task { await load() }
         .task { await heroAutoAdvance() }
+        .onDisappear {
+            rowPrefetchTask?.cancel()
+            heroPrefetchTask?.cancel()
+        }
     }
 
     // MARK: Data
@@ -182,14 +193,41 @@ struct DiscoverView: View {
 
     /// Warm the poster cache for the art the user is about to
     /// scroll past, so rows and hero pages don't flash in.
+    /// v2.16: routed through the cancellable PosterCache.prefetch
+    /// batch — a newer batch supersedes the old one, so art for
+    /// rows the user already scrolled past stops downloading.
     private func prefetchPosters(_ urls: [String]) {
         let targets = Array(Set(urls.filter { !$0.isEmpty })).prefix(10)
         guard !targets.isEmpty else { return }
-        Task.detached(priority: .utility) {
-            for url in targets {
-                _ = await PosterCache.shared.load(url)
-            }
-        }
+        heroPrefetchTask?.cancel()
+        heroPrefetchTask = PosterCache.shared.prefetch(Array(targets))
+    }
+
+    /// v2.16 direction-aware row prefetch: a row appearing means
+    /// the user scrolled to it, so warm the *next* row in the same
+    /// direction — the row below when scrolling down, the row above
+    /// when scrolling back up. Replacing the previous batch cancels
+    /// art for rows that scrolled off-screen.
+    private func rowAppeared(_ index: Int) {
+        defer { lastRowSeen = index }
+        guard index != lastRowSeen else { return }
+        let rows = [week, nowPlaying, movies, shows, top]
+        let target = index > lastRowSeen ? index + 1 : index - 1
+        guard rows.indices.contains(target) else { return }
+        rowPrefetchTask?.cancel()
+        rowPrefetchTask = PosterCache.shared.prefetch(
+            Array(rows[target].prefix(8).map(\.poster)))
+    }
+
+    /// v2.16: warm the next hero page's art (900 px) when the
+    /// carousel moves, so the auto-advance never lands on a blank.
+    private func prefetchNextHeroArt() {
+        guard !heroItems.isEmpty else { return }
+        let next = heroItems[(heroIndex + 1) % heroItems.count]
+        let art = next.backdrop.isEmpty ? next.poster : next.backdrop
+        guard !art.isEmpty else { return }
+        heroPrefetchTask?.cancel()
+        heroPrefetchTask = PosterCache.shared.prefetch([art], maxPixelSize: 900)
     }
 
     /// A title tap: seed the search sheet and let SearchView
@@ -223,7 +261,10 @@ struct DiscoverView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 540)
-            .onChange(of: heroIndex) { _, _ in lastHeroTouch = Date() }
+            .onChange(of: heroIndex) { _, _ in
+                lastHeroTouch = Date()
+                prefetchNextHeroArt()
+            }
 
             // Dot indicators (Rex: small dots under the synopsis).
             HStack(spacing: 5) {
@@ -313,7 +354,7 @@ struct DiscoverView: View {
     // MARK: Poster rows
 
     @ViewBuilder
-    private func posterRow(_ title: String, _ items: [TMDBClient.TMDBTitle]) -> some View {
+    private func posterRow(_ title: String, _ items: [TMDBClient.TMDBTitle], rowIndex: Int) -> some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -343,6 +384,7 @@ struct DiscoverView: View {
                     .padding(.horizontal, 18)
                 }
             }
+            .onAppear { rowAppeared(rowIndex) }
         }
     }
 
@@ -476,7 +518,7 @@ private struct TMDBDetailSheet: View {
                 ZStack(alignment: .bottomLeading) {
                     let art = item.backdrop.isEmpty ? item.poster : item.backdrop
                     if !art.isEmpty {
-                        PosterImage(urlString: art)
+                        PosterImage(urlString: art, pixelSize: 900)
                             .frame(height: 260).clipped()
                     } else {
                         Rectangle().fill(Theme.glass).frame(height: 260)

@@ -1456,7 +1456,7 @@ struct ModulesView: View {
                     } label: {
                         HStack(spacing: 12) {
                             if !record.meta.icon.isEmpty {
-                                PosterImage(urlString: record.meta.icon)
+                                PosterImage(urlString: record.meta.icon, pixelSize: 240)
                                     .frame(width: 38, height: 38)
                                     .clipShape(RoundedRectangle(cornerRadius: 9))
                             } else {
@@ -1679,7 +1679,7 @@ struct ModulesView: View {
     private func catalogCard(_ entry: FWDCatalogEntry) -> some View {
         HStack(spacing: 12) {
             if !entry.icon.isEmpty {
-                PosterImage(urlString: entry.icon)
+                PosterImage(urlString: entry.icon, pixelSize: 240)
                     .frame(width: 38, height: 38)
                     .clipShape(RoundedRectangle(cornerRadius: 9))
             } else {
@@ -2189,7 +2189,7 @@ struct FWDDetailView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                PosterImage(urlString: full.backdropURL)
+                PosterImage(urlString: full.backdropURL, pixelSize: 900)
                     .aspectRatio(16/9, contentMode: .fill)
                     .frame(maxWidth: .infinity)
                     .clipped()

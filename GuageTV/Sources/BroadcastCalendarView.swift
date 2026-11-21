@@ -148,7 +148,7 @@ struct BroadcastCalendarView: View {
                                 detailItem = item
                             } label: {
                                 HStack(alignment: .top, spacing: 12) {
-                                    PosterImage(urlString: item.posterURL)
+                                    PosterImage(urlString: item.posterURL, pixelSize: 240)
                                         .frame(width: 54, height: 76)
                                         .posterFrame()
                                     VStack(alignment: .leading, spacing: 4) {

@@ -64,10 +64,12 @@ final class PosterCache {
     private var warningObserver: NSObjectProtocol?
 
     init() {
-        // Memory level only: posters are downsampled thumbnails, so
-        // an 80 MB cost cap bounds the resident set without starving
-        // grids. Cost is supplied per image at insert time.
-        memory.totalCostLimit = 80 * 1024 * 1024
+        // v2.16 memory tiering: the old flat 80 MB cap starved
+        // big-memory phones and squeezed small ones. Tier by
+        // physical memory — 6 GiB+ gets 160 MB, 4 GiB+ 120 MB,
+        // anything smaller 48 MB. Cost is supplied per image at
+        // insert time, so the cap actually binds the resident set.
+        memory.totalCostLimit = Self.memoryLimitBytes()
         warningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil, queue: .main) { [weak self] _ in
@@ -94,6 +96,36 @@ final class PosterCache {
 
     /// Drop decoded posters from memory (disk level untouched).
     func clearMemory() { memory.removeAllObjects() }
+
+    /// v2.16 memory tier (see init): 6 GiB+ → 160 MB, 4 GiB+ →
+    /// 120 MB, smaller devices → 48 MB.
+    private static func memoryLimitBytes() -> Int {
+        let gib: UInt64 = 1 << 30
+        switch ProcessInfo.processInfo.physicalMemory {
+        case 6 * gib...: return 160 * 1024 * 1024
+        case 4 * gib...: return 120 * 1024 * 1024
+        default: return 48 * 1024 * 1024
+        }
+    }
+
+    /// Cancellable prefetch batch (v2.16): one sequential utility
+    /// task over the URLs. Cancelling the returned task stops the
+    /// queue — URLs not yet started never fetch — so a fast scroll
+    /// doesn't leave a fan-out downloading art the user already
+    /// passed. A URL already in memory/disk returns instantly from
+    /// load, so a prefetch never re-downloads. Note the single
+    /// in-flight download is not aborted mid-flight (it is shared
+    /// with on-screen cells through PosterStore); only the pending
+    /// queue is dropped.
+    func prefetch(_ urls: [String], maxPixelSize: Int = 480) -> Task<Void, Never> {
+        let targets = Array(Set(urls.filter { !$0.isEmpty }))
+        return Task.detached(priority: .utility) {
+            for url in targets {
+                guard !Task.isCancelled else { return }
+                _ = await self.load(url, maxPixelSize: maxPixelSize)
+            }
+        }
+    }
 
     /// Approx resident bytes of a decoded image, so totalCostLimit
     /// actually binds: width × height × scale² × 4 bytes per pixel.

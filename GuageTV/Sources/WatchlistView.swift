@@ -142,7 +142,7 @@ struct WatchlistView: View {
         HStack(spacing: 12) {
             // v2.11: 有更新的海报右上角挂红点（与「有更新」胶囊并列）。
             ZStack(alignment: .topTrailing) {
-                PosterImage(urlString: entry.pic)
+                PosterImage(urlString: entry.pic, pixelSize: 240)
                     .frame(width: 46, height: 69)
                     .posterFrame()
                 if entry.hasUpdate {

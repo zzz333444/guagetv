@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.15 · 冷启动与首屏二轮"
+    static let buildLabel = "v2.16 · 滚动与图片二轮"
 
     var body: some View {
         NavigationStack {
@@ -1070,6 +1070,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.16", title: "滚动与图片二轮", lines: [
+            "海报按显示尺寸分级解码：详情大图、TMDB 详情横幅与模块详情背景升到 900px；演职员头像、模块图标、直播台标与 46pt 小缩略图降到 240px；其余网格保持 480px，环境光仍为 240px",
+            "海报内存缓存按设备物理内存分级：6GB 以上 160MB、4GB 以上 120MB、其余 48MB；内存警告仍整清内存层、磁盘层不受影响",
+            "长列表预取改方向感知：发现页行出现时预取滚动方向上的下一行、hero 轮播预取下一页大图，离开页面或新批次到达时取消未开始的预取；资源库 Emby 预取同样走可取消批次",
+        ]),
         Entry(version: "v2.15", title: "冷启动与首屏二轮", lines: [
             "启动路径再审计：设置页的缓存容量统计与记录页的存储用量统计不再冷启动时跑，点开对应 tab 才算；App 启动时的崩溃自愈目录清理改后台线程",
             "发现页缓存策略复核：过期缓存照样先出屏（不再先看骨架）、缓存读写离主线程；六个 TMDB 栏目到一个上屏一个，不再等最慢的那个；hero 标题图改并发拉取",

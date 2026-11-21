@@ -272,7 +272,7 @@ struct HistoryView: View {
                     .foregroundStyle(selectedHistoryIDs.contains(entry.id)
                                      ? Theme.accent : Theme.textDim)
             }
-            PosterImage(urlString: entry.pic)
+            PosterImage(urlString: entry.pic, pixelSize: 240)
                 .frame(width: 46, height: 69)
                 .posterFrame()
             VStack(alignment: .leading, spacing: 4) {
@@ -556,7 +556,7 @@ struct HistoryView: View {
             else { expandedDownloadGroups.insert(group.key) }
         } label: {
             HStack(spacing: 12) {
-                PosterImage(urlString: group.items.first?.pic ?? "")
+                PosterImage(urlString: group.items.first?.pic ?? "", pixelSize: 240)
                     .frame(width: 46, height: 69)
                     .posterFrame()
                 VStack(alignment: .leading, spacing: 4) {
@@ -591,7 +591,7 @@ struct HistoryView: View {
                     .foregroundStyle(selectedDownloadIDs.contains(item.id)
                                      ? Theme.accent : Theme.textDim)
             }
-            PosterImage(urlString: item.pic)
+            PosterImage(urlString: item.pic, pixelSize: 240)
                 .frame(width: 46, height: 69)
                 .posterFrame()
             VStack(alignment: .leading, spacing: 4) {

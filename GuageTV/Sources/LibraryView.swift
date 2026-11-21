@@ -55,6 +55,9 @@ struct LibraryView: View {
     /// else a favourite's. The library used to sit on a flat static
     /// gradient while every other tab glowed (v1.74 glass pass).
     @ObservedObject private var history = HistoryStore.shared
+    /// v2.16: the Emby poster prefetch batch handle — leaving the
+    /// page cancels the pending queue (see prefetchEmbyPosters).
+    @State private var embyPrefetchTask: Task<Void, Never>?
 
     private var ambientPic: String? {
         history.continueWatching.first?.pic ?? history.favourites.first?.pic
@@ -236,6 +239,7 @@ struct LibraryView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: lineToast)
         .onAppear { refreshLibrary() }
+        .onDisappear { embyPrefetchTask?.cancel() }
         .alert("线路备注名", isPresented: Binding(get: { renamingEntry != nil },
                                                 set: { if !$0 { renamingEntry = nil } })) {
             TextField("备注名（留空恢复原名）", text: $renameText)
@@ -480,6 +484,10 @@ struct LibraryView: View {
     /// error or block the library. Line cards and source cards have
     /// no poster URL (icon letter only), so there is nothing else
     /// on this page to warm.
+    /// v2.16: routed through the cancellable PosterCache.prefetch
+    /// batch (replacing the old un-cancellable detached task) and
+    /// re-fetched at 480 px — the Emby grids are 480 px cells;
+    /// leaving the page cancels the pending queue.
     private static let embyPrefetchTimestampKey = "libraryEmbyPrefetch.ts"
 
     private func prefetchEmbyPosters() {
@@ -488,7 +496,11 @@ struct LibraryView: View {
         guard Date().timeIntervalSince1970 - last > 600 else { return }
         UserDefaults.standard.set(Date().timeIntervalSince1970,
                                   forKey: Self.embyPrefetchTimestampKey)
-        Task.detached(priority: .utility) {
+        embyPrefetchTask?.cancel()
+        // A plain Task (not detached) inherits the main actor, so
+        // the embyPrefetchTask assignment below stays on the main
+        // thread; the EmbyClient awaits suspend off-thread.
+        embyPrefetchTask = Task(priority: .utility) {
             let resume = (try? await EmbyClient.resume()) ?? []
             let favorites = (try? await EmbyClient.favorites()) ?? []
             let latest = (try? await EmbyClient.latest()) ?? []
@@ -496,9 +508,8 @@ struct LibraryView: View {
                 (Array(resume.prefix(5)) + Array(favorites.prefix(5)) + Array(latest.prefix(5)))
                     .map { EmbyClient.imageURL(itemID: $0.id) }
             )).prefix(14)
-            for url in urls {
-                _ = await PosterCache.shared.load(url)
-            }
+            guard !Task.isCancelled else { return }
+            embyPrefetchTask = PosterCache.shared.prefetch(Array(urls))
         }
     }
 

@@ -320,8 +320,9 @@ struct LiveView: View {
             if !channel.logo.isEmpty {
                 // R8 (v1.85): bare AsyncImage decoded channel logos
                 // at full resolution with no cache cap; PosterImage
-                // goes through the 80 MB / ≤900 px downsampled cache.
-                PosterImage(urlString: channel.logo, fit: true)
+                // goes through the downsampled cache (240 px: the
+                // logo only ever shows at 44×30 pt).
+                PosterImage(urlString: channel.logo, fit: true, pixelSize: 240)
             } else {
                 Image(systemName: "tv").foregroundStyle(Theme.textDim)
             }

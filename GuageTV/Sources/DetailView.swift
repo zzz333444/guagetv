@@ -233,7 +233,7 @@ struct DetailView: View {
     private var heroHeader: some View {
         ZStack(alignment: .bottom) {
             if !heroPic.isEmpty {
-                PosterImage(urlString: heroPic)
+                PosterImage(urlString: heroPic, pixelSize: 900)
                     .frame(height: 500)
                     .clipped()
                     .mask(
@@ -462,7 +462,7 @@ struct DetailView: View {
                             showSimilarSearch = true
                         } label: {
                             VStack(spacing: 5) {
-                                PosterImage(urlString: person.profile)
+                                PosterImage(urlString: person.profile, pixelSize: 240)
                                     .frame(width: 58, height: 58)
                                     .clipShape(Circle())
                                     .background(Circle().fill(Theme.glass))
