@@ -119,6 +119,16 @@ final class LocalProxyServer {
         if components.path.hasPrefix("/seg/") {
             return handleSegment(components, range: range)
         }
+        if components.path.hasPrefix("/smb/") {
+            // SMB/NAS playback (v2.14): /smb/<token>/<filename>,
+            // served from the registered AMSMB2 connection.
+            let token = String(components.path.dropFirst("/smb/".count))
+                .components(separatedBy: "/").first ?? ""
+            guard !token.isEmpty else {
+                return (404, "text/plain; charset=utf-8", Data("missing token".utf8), [:])
+            }
+            return SMBProxy.serve(token: token, range: range)
+        }
         guard components.path.hasPrefix("/proxy/") else {
             return (404, "text/plain; charset=utf-8", Data("not found".utf8), [:])
         }

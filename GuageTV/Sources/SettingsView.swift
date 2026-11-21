@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.13 · 稳定扫荡与更新日志"
+    static let buildLabel = "v2.14 · SMB/NAS 播放"
 
     var body: some View {
         NavigationStack {
@@ -1057,6 +1057,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.14", title: "SMB/NAS 播放", lines: [
+            "新增 SMB/NAS 支持：设置 → 媒体服务器里添加 SMB 服务器（主机/用户名/密码，只存本机），资源库「本地与网络」出现入口",
+            "进服务器先列共享文件夹，逐层浏览目录，视频文件带大小显示，点按直接播放",
+            "播放走本机代理转发（AMSMB2 开源库，LGPL 合规动态链接）：按 HTTP Range 分块取流，支持拖动进度；mkv 等格式仍自动走 mpv 引擎",
+            "SMB 服务器配置纳入备份与恢复范围",
+        ]),
         Entry(version: "v2.13", title: "稳定扫荡与更新日志", lines: [
             "全仓复查：强制解包与 try!/as! 仍为零（仅剩 WKWebView 协议签名的隐式解包）；三处信号量等待均不在主线程（JS 专用串行队列、代理后台队列、2 秒封顶的本地代理启动）",
             "WebDAV 文件夹浏览与 Emby 单片解析页的整页裸转圈换成与页面结构一致的骨架屏；其余加载态已在前面各轮统一",

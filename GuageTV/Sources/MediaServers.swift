@@ -23,6 +23,12 @@ struct MediaServerSettingsView: View {
     @State private var davUser = ""
     @State private var davPassword = ""
 
+    @AppStorage("smb.servers") private var smbJSON = "[]"
+    @State private var smbName = ""
+    @State private var smbHost = ""
+    @State private var smbUser = ""
+    @State private var smbPassword = ""
+
     struct DAVServer: Codable, Identifiable {
         var name: String
         var url: String
@@ -156,6 +162,42 @@ struct MediaServerSettingsView: View {
                     .disabled(davURL.isEmpty)
                 }
             }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("SMB / NAS").font(.headline).foregroundStyle(Theme.text)
+                    ForEach(SMBServer.list(from: smbJSON)) { server in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name).font(.subheadline).foregroundStyle(Theme.text)
+                                Text(server.host).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                            }
+                            Spacer()
+                            Button("删除") { removeSMB(server) }
+                                .font(.footnote)
+                                .foregroundStyle(.red.opacity(0.85))
+                        }
+                    }
+                    field("名称，如 家里 NAS", text: $smbName)
+                    field("主机，如 192.168.1.10 或 nas.local", text: $smbHost)
+                    field("用户名（可空 = guest）", text: $smbUser)
+                    SecureField("密码（可空）", text: $smbPassword)
+                        .font(.subheadline)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(10)
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    Button {
+                        addSMB()
+                    } label: {
+                        Label("添加 SMB 服务器", systemImage: "plus.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .disabled(smbHost.isEmpty)
+                    Text("添加后从资源库页的「本地与网络」进入，选共享文件夹浏览、点视频直接播（走本机代理转发，支持拖动）。密码只存本机。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
+            }
         }
         .onAppear { refreshServers() }
     }
@@ -214,6 +256,22 @@ struct MediaServerSettingsView: View {
            let json = String(data: data, encoding: .utf8) {
             webdavJSON = json
         }
+    }
+
+    private func addSMB() {
+        var servers = SMBServer.list(from: smbJSON)
+        let host = smbHost.trimmingCharacters(in: .whitespaces)
+        servers.append(SMBServer(
+            name: smbName.isEmpty ? host : smbName,
+            host: host, user: smbUser, password: smbPassword))
+        smbJSON = SMBServer.json(from: servers)
+        smbName = ""; smbHost = ""; smbUser = ""; smbPassword = ""
+    }
+
+    private func removeSMB(_ server: SMBServer) {
+        var servers = SMBServer.list(from: smbJSON)
+        servers.removeAll { $0.id == server.id }
+        smbJSON = SMBServer.json(from: servers)
     }
 }
 
@@ -477,6 +535,7 @@ struct LocalFilesView: View {
 /// files. Added from LibraryView.
 struct MediaHubSection: View {
     @AppStorage("webdav.servers") private var webdavJSON = "[]"
+    @AppStorage("smb.servers") private var smbJSON = "[]"
     /// Emby movie/series totals for the Library card (v1.91);
     /// nil = not loaded yet, (nil, nil) = server didn't answer.
     @State private var embyCounts: (movies: Int?, series: Int?)?
@@ -500,6 +559,12 @@ struct MediaHubSection: View {
                 }
                 .buttonStyle(.plain)
             }
+            ForEach(SMBServer.list(from: smbJSON)) { server in
+                NavigationLink { SMBSharesView(server: server) } label: {
+                    hubRow(icon: "server.rack", title: server.name, value: "SMB · \(server.host)")
+                }
+                .buttonStyle(.plain)
+            }
             NavigationLink { LocalFilesView() } label: {
                 hubRow(icon: "folder", title: "本地视频", value: "导入手机里的视频文件")
             }
@@ -509,7 +574,7 @@ struct MediaHubSection: View {
             }
             .buttonStyle(.plain)
             if !EmbyClient.configured {
-                Text("Emby / WebDAV 在「设置 → 媒体服务器」里添加。")
+                Text("Emby / WebDAV / SMB 在「设置 → 媒体服务器」里添加。")
                     .font(.caption).foregroundStyle(Theme.textDim)
             }
         }

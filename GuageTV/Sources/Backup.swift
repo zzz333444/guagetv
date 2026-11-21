@@ -16,7 +16,7 @@ enum BackupStore {
         "subtitles.", "player.", "gesture.", "homeLayout.",
         "mpvRenderer", "enginePreference", "videoGravity",
         "skipIntro", "skipOutro", "subtitleScale", "seekStep",
-        "themeMode", "tabShow", "appLock.", "emby.", "webdav.",
+        "themeMode", "tabShow", "appLock.", "emby.", "webdav.", "smb.",
         "activeConfigID", "homeConfigID",
     ]
 
