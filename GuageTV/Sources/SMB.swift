@@ -73,7 +73,7 @@ enum SMBClient {
         } else {
             let ns = error as NSError
             code = ns.domain == NSPOSIXErrorDomain
-                ? POSIXError.Code(rawValue: ns.code) : nil
+                ? POSIXError.Code(rawValue: Int32(ns.code)) : nil
         }
         switch code {
         case .ETIMEDOUT:
