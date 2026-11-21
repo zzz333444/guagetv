@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.17 · 播放器起播与切集二轮"
+    static let buildLabel = "v2.18 · Rex 官方模块全量自测三轮"
 
     var body: some View {
         NavigationStack {
@@ -1070,6 +1070,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.18", title: "Rex 官方模块全量自测三轮", lines: [
+            "Node 沙盒全量复测两官方模块 17 个栏目：bangumi 5/5 通过（每日播出 23 条、近期注目 22 条、排行榜 47 条、年度新番 41 条、分类 47 条）；rex-tmdb 走 Widget.http 的 5 栏全过（地区剧集/综艺各 40 条、热门/最新电影各 20 条，片单 0 条是 TMDB 官网对服务器抓取回 Cloudflare 挑战页的老问题）",
+            "rex-tmdb 其余 7 个 tmdb.get 栏目无密钥时仍报中文「未配置 TMDB 密钥（设置 → TMDB）」、0–1ms 快速失败，没有英文 TypeError；用无效密钥桩测有密钥路径：直连与 JarProxy 转发两路都返回 TMDB 401「Invalid API key」，错误对象被原样抛出、不再是 TypeError；转发线路实测可达（401 证明代理已通 TMDB）",
+            "模块自检升级为逐栏自检：原来只测每模块首栏、其余栏目死掉也看不见，现全部栏目逐个实跑、逐栏计时（毫秒/秒），结果行带「✓/△/✗ 栏目名：N 条 · 用时」，模块卡片留「X/Y 栏 · 共 N 条 · 总用时」；逐栏明细随自检结果持久化，重启后仍在",
+            "官方模块源与 11 月 21 日版逐字节一致（md5 相同），本次无模块自身改动；harness 逐栏耗时已记入 result.json",
+        ]),
         Entry(version: "v2.17", title: "播放器起播与切集二轮", lines: [
             "mpv 起播探测按容器分流：HLS（.m3u8）播放列表是纯文本、TS 分片几 KB 即可探明，探测收紧到 512KB / 1 秒，首帧更快；MP4 等容器保持 2MB / 2 秒，探测过浅漏流反而要重试",
             "下集预解析失败不再整集作废：进度到阈值 +15%（短剧 65%、长剧 85%）时重试一次，重试也失败才放弃，切集不再等同步解析；失败记一条诊断日志，命中率可查",

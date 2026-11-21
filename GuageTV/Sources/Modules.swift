@@ -290,6 +290,19 @@ enum FWDStore {
         var time: Date
         var ok: Bool
         var summary: String
+        /// v2.18: per-column detail (title, pass/fail, item
+        /// count or error, duration in ms). Optional so
+        /// results saved by older builds still decode.
+        var columns: [ColumnCheck]? = nil
+    }
+
+    /// One list column's self-check outcome (v2.18).
+    struct ColumnCheck: Codable {
+        var title: String
+        var ok: Bool
+        var count: Int
+        var error: String
+        var ms: Int
     }
 
     private static let checkResultsKey = "fwd.checkResults.v1"
@@ -1581,10 +1594,13 @@ struct ModulesView: View {
         }
     }
 
-    /// In-app module self-check (v1.76): TMDB key presence, both
-    /// TMDB routes, and every imported module's first list column
+    /// In-app module self-check (v1.76, v2.18): TMDB key presence,
+    /// both TMDB routes, and EVERY imported module's list columns
     /// with real calls — the same checks support would run, in
-    /// the user's own network, reported in plain language.
+    /// the user's own network, reported in plain language. Each
+    /// column is timed; the per-column outcomes (pass/fail, item
+    /// count or error, duration) persist with the result so the
+    /// module card keeps them after a restart.
     private func runSelfCheck() async {
         checking = true
         checkLines = []
@@ -1608,33 +1624,77 @@ struct ModulesView: View {
             checkLines.append("（还没有导入任何模块）")
         }
         for record in records {
-            guard let module = record.meta.listModules.first,
-                  let source = FWDStore.source(for: record) else { continue }
+            guard let source = FWDStore.source(for: record) else { continue }
             let title = record.meta.title.isEmpty ? record.id : record.meta.title
-            do {
-                let result = try await FWDRuntime(widgetID: record.id)
-                    .call(function: module.functionName,
-                          params: fwdDefaultParams(meta: record.meta, module: module),
-                          source: source)
-                let n = (result as? [[String: Any]])?.count ?? 0
-                checkLines.append(n > 0
-                    ? "✓ \(title)：「\(module.title)」出 \(n) 条"
-                    : "△ \(title)：「\(module.title)」返回 0 条")
-                // v1.94: leave the conclusion on the card.
-                FWDStore.saveCheckResult(
-                    FWDStore.CheckResult(time: Date(), ok: n > 0,
-                                         summary: n > 0 ? "「\(module.title)」出 \(n) 条"
-                                                        : "「\(module.title)」返回 0 条"),
-                    for: record.id)
-            } catch {
-                checkLines.append("✗ \(title)：\(error.localizedDescription)")
-                FWDStore.saveCheckResult(
-                    FWDStore.CheckResult(time: Date(), ok: false,
-                                         summary: error.localizedDescription),
-                    for: record.id)
+            // v2.18: check EVERY list column, not just the first
+            // one, and time each — a dead 2nd column used to hide
+            // behind a healthy 1st. Columns run sequentially on
+            // the app's serial JS queue; a full official module
+            // takes ~10 s in the Node harness.
+            var cols: [FWDStore.ColumnCheck] = []
+            var totalItems = 0
+            var totalMs = 0
+            for module in record.meta.listModules {
+                let start = Date()
+                do {
+                    let result = try await FWDRuntime(widgetID: record.id)
+                        .call(function: module.functionName,
+                              params: fwdDefaultParams(meta: record.meta, module: module),
+                              source: source)
+                    let n = Self.fwdResultCount(result)
+                    let ms = Int(Date().timeIntervalSince(start) * 1000)
+                    totalItems += n
+                    totalMs += ms
+                    cols.append(FWDStore.ColumnCheck(title: module.title, ok: n > 0,
+                                                     count: n, error: "", ms: ms))
+                    checkLines.append(n > 0
+                        ? "✓ \(title)「\(module.title)」：\(n) 条 · \(Self.checkDurationText(ms))"
+                        : "△ \(title)「\(module.title)」：返回 0 条 · \(Self.checkDurationText(ms))")
+                } catch {
+                    let ms = Int(Date().timeIntervalSince(start) * 1000)
+                    totalMs += ms
+                    cols.append(FWDStore.ColumnCheck(title: module.title, ok: false,
+                                                     count: 0,
+                                                     error: error.localizedDescription, ms: ms))
+                    checkLines.append("✗ \(title)「\(module.title)」：\(error.localizedDescription) · \(Self.checkDurationText(ms))")
+                }
             }
+            if cols.isEmpty {
+                checkLines.append("△ \(title)：没有可自检的栏目")
+                continue
+            }
+            let passed = cols.filter { $0.ok }.count
+            // ok = no column threw AND at least one returned
+            // items — a module whose only blemish is a 0-item
+            // column (e.g. TMDB's Cloudflare-blocked list) still
+            // shows its per-column detail on the card line.
+            let ok = cols.allSatisfy { $0.error.isEmpty } && totalItems > 0
+            let summary = "\(passed)/\(cols.count) 栏 · 共 \(totalItems) 条 · \(Self.checkDurationText(totalMs))"
+            // v1.94: leave the conclusion on the card.
+            FWDStore.saveCheckResult(
+                FWDStore.CheckResult(time: Date(), ok: ok, summary: summary, columns: cols),
+                for: record.id)
         }
         checkVersion += 1
+    }
+
+    /// Item count of a module column result: a bare array, or a
+    /// dict wrapping one under items/list/data/results.
+    private static func fwdResultCount(_ result: Any?) -> Int {
+        if let array = result as? [Any] { return array.count }
+        if let dict = result as? [String: Any] {
+            for key in ["items", "list", "data", "results"] {
+                if let array = dict[key] as? [Any] { return array.count }
+            }
+        }
+        return 0
+    }
+
+    /// "650ms" under a second, "1.2s" above — used by the
+    /// self-check lines and the per-module card line.
+    private static func checkDurationText(_ ms: Int) -> String {
+        if ms < 1000 { return "\(ms)ms" }
+        return String(format: "%.1fs", Double(ms) / 1000.0)
     }
 
     /// Any JSON back — even a TMDB 401 error body — proves the
