@@ -44,13 +44,18 @@ enum SelfHeal {
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: flagKey) {
             SpiderBridge.shared.resetBreaker()
-            let support = FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            let spiders = support.appendingPathComponent("spiders")
-            if let names = try? FileManager.default.contentsOfDirectory(atPath: spiders.path) {
-                for name in names where name.hasSuffix(".meta") {
-                    try? FileManager.default.removeItem(
-                        at: spiders.appendingPathComponent(name))
+            // v2.15 startup: the spiders-directory sweep used to run
+            // on the main thread inside the App init, before the
+            // first frame. It is pure cleanup — move it off-main.
+            DispatchQueue.global(qos: .utility).async {
+                let support = FileManager.default
+                    .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                let spiders = support.appendingPathComponent("spiders")
+                if let names = try? FileManager.default.contentsOfDirectory(atPath: spiders.path) {
+                    for name in names where name.hasSuffix(".meta") {
+                        try? FileManager.default.removeItem(
+                            at: spiders.appendingPathComponent(name))
+                    }
                 }
             }
             Diagnostics.log("自愈", "检测到上次异常退出，已重置蜘蛛熔断并刷新蜘蛛缓存")

@@ -90,37 +90,77 @@ final class HistoryStore: ObservableObject {
 
     @Published private(set) var entries: [Entry] = []
 
+    /// Single combined store (v2.15): history entries + the daily
+    /// watch ledger used to live in two files (history.json,
+    /// daily-watch.json) — two disk reads and two JSON decodes on
+    /// every cold start, two atomic writes on every heartbeat.
+    /// One file, one read, one decode, one write. Legacy files are
+    /// migrated on first load and removed after the combined file
+    /// lands; a corrupt combined file falls back to the legacy pair.
+    private struct CombinedStore: Codable {
+        var entries: [Entry]
+        var dailyWatched: [String: Double]
+    }
+
+    private let storeURL: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("history-store.json")
+    }()
+
     private let fileURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("history.json")
     }()
 
+    private let dailyFileURL: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("daily-watch.json")
+    }()
+
     init() {
         // v2.03 startup: ContentView mounts all four tabs at launch,
-        // so this singleton used to JSON-decode history.json +
-        // daily-watch.json on the main thread before the first frame.
-        // Decode happens on a background thread now; the published
-        // lists land on the main actor when ready. Until then save()
-        // is a no-op (diskLoaded guard) so an early write cannot
-        // clobber the not-yet-loaded files with empty lists.
+        // so this singleton used to JSON-decode on the main thread
+        // before the first frame. Decode happens on a background
+        // thread now; the published lists land on the main actor when
+        // ready. Until then save() is a no-op (diskLoaded guard) so
+        // an early write cannot clobber the not-yet-loaded files
+        // with empty lists.
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            let entries: [Entry] = {
-                guard let data = try? Data(contentsOf: self.fileURL),
-                      let decoded = try? JSONDecoder().decode([Entry].self, from: data)
-                else { return [] }
-                return decoded
+            var migratedFromLegacy = false
+            let store: CombinedStore = {
+                if let data = try? Data(contentsOf: self.storeURL),
+                   let decoded = try? JSONDecoder().decode(CombinedStore.self, from: data) {
+                    return decoded
+                }
+                // Legacy pair: read both, then persist combined once.
+                migratedFromLegacy = true
+                let entries: [Entry] = {
+                    guard let data = try? Data(contentsOf: self.fileURL),
+                          let decoded = try? JSONDecoder().decode([Entry].self, from: data)
+                    else { return [] }
+                    return decoded
+                }()
+                let daily: [String: Double] = {
+                    guard let data = try? Data(contentsOf: self.dailyFileURL),
+                          let decoded = try? JSONDecoder().decode([String: Double].self, from: data)
+                    else { return [:] }
+                    return decoded
+                }()
+                return CombinedStore(entries: entries, dailyWatched: daily)
             }()
-            let daily: [String: Double] = {
-                guard let data = try? Data(contentsOf: self.dailyFileURL),
-                      let decoded = try? JSONDecoder().decode([String: Double].self, from: data)
-                else { return [:] }
-                return decoded
-            }()
+            if migratedFromLegacy,
+               let data = try? JSONEncoder().encode(store) {
+                try? data.write(to: self.storeURL, options: .atomic)
+                try? FileManager.default.removeItem(at: self.fileURL)
+                try? FileManager.default.removeItem(at: self.dailyFileURL)
+            }
             await MainActor.run {
-                self.entries = entries
-                self.dailyWatched = daily
+                self.entries = store.entries
+                self.dailyWatched = store.dailyWatched
                 self.diskLoaded = true
             }
         }
@@ -130,10 +170,26 @@ final class HistoryStore: ObservableObject {
     /// saveDaily() stay quiet until then (see init).
     private var diskLoaded = false
 
-    private func saveDaily() {
+    /// Last combined write, for the saveDaily() throttle below.
+    private var lastPersist = Date.distantPast
+
+    /// The single write path: one encode + one atomic write of the
+    /// combined store (v2.15; previously save() and saveDaily()
+    /// each wrote their own file).
+    private func persist() {
         guard diskLoaded else { return }
-        guard let data = try? JSONEncoder().encode(dailyWatched) else { return }
-        try? data.write(to: dailyFileURL, options: .atomic)
+        let store = CombinedStore(entries: entries, dailyWatched: dailyWatched)
+        guard let data = try? JSONEncoder().encode(store) else { return }
+        try? data.write(to: storeURL, options: .atomic)
+        lastPersist = Date()
+    }
+
+    private func saveDaily() {
+        // The heartbeat calls saveDaily() then save() back to back;
+        // the save() right after already persists the ledger, so a
+        // standalone daily write is throttled to one per 30s.
+        guard diskLoaded, Date().timeIntervalSince(lastPersist) > 30 else { return }
+        persist()
     }
 
     func record(_ entry: Entry) {
@@ -285,15 +341,9 @@ final class HistoryStore: ObservableObject {
 
     /// Daily watch-time ledger (v1.79): "yyyy-MM-dd" → seconds actually
     /// watched that day. Drives the Profile heatmap and the
-    /// week/month stats; kept in its own file so old history.json
-    /// entries keep loading untouched.
+    /// week/month stats; v2.15 stores it in the combined
+    /// history-store.json (see the top of this file).
     private(set) var dailyWatched: [String: Double] = [:]
-
-    private let dailyFileURL: URL = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("daily-watch.json")
-    }()
 
     private static func dayKey(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
@@ -301,9 +351,7 @@ final class HistoryStore: ObservableObject {
     }
 
     private func save() {
-        guard diskLoaded else { return }
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        persist()
     }
 }
 

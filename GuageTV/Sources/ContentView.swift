@@ -147,13 +147,19 @@ struct ContentView: View {
             DiscoverView(config: config)
                 .opacity(tab == 0 ? 1 : 0)
                 .allowsHitTesting(tab == 0)
-            HistoryView()
+            // v2.15 startup: all four tabs stay mounted, so the
+            // hidden tabs' .task work used to run at cold start too
+            // (HistoryView walked the downloads/poster dirs,
+            // SettingsView walked the whole cache tree). Both now
+            // wait for isActive — their disk walks start only when
+            // the user actually opens that tab.
+            HistoryView(isActive: tab == 1)
                 .opacity(tab == 1 ? 1 : 0)
                 .allowsHitTesting(tab == 1)
             LibraryView(config: $config) { tab = 3 }
                 .opacity(tab == 2 ? 1 : 0)
                 .allowsHitTesting(tab == 2)
-            SettingsView(config: $config)
+            SettingsView(config: $config, isActive: tab == 3)
                 .opacity(tab == 3 ? 1 : 0)
                 .allowsHitTesting(tab == 3)
         }

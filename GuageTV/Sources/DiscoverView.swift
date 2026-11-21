@@ -83,13 +83,20 @@ struct DiscoverView: View {
 
     // MARK: Data
 
-    /// v2.03 staged load: a cached feed (12h) paints instantly —
+    /// v2.03 staged load: a cached feed paints instantly —
     /// no skeleton, no waiting on the network — and the refresh
     /// swaps in behind it. Only a first-ever launch with no cache
     /// still shows the skeleton while the six lists load.
+    /// v2.15: the cache read + JSON decode used to run on the main
+    /// actor (.task is main-isolated), blocking the first frame on
+    /// a cold disk read. It now runs detached; the paint still
+    /// lands on the main actor.
     private func load() async {
         guard TMDBClient.isOn else { loading = false; return }
-        if let cache = TMDBClient.loadDiscoverCache() {
+        let cache = await Task.detached(priority: .userInitiated) {
+            TMDBClient.loadDiscoverCache()
+        }.value
+        if let cache {
             apply(cache)
             loading = false
             await refresh()
@@ -109,30 +116,67 @@ struct DiscoverView: View {
         top = cache.top
     }
 
+    /// v2.15 incremental refresh: the old version awaited all six
+    /// TMDB lists before applying any of them, so one slow endpoint
+    /// held the whole page (and the hero carousel) hostage. Each
+    /// list now paints the moment it lands; a failed list leaves
+    /// the painted cache/row untouched. The cache write (encode +
+    /// disk) moved off the main actor, and the hero title-artwork
+    /// fetches run concurrently instead of eight serial awaits.
+    @State private var refreshGeneration = 0
+
     private func refresh() async {
-        async let t = TMDBClient.trending()
-        async let w = TMDBClient.trendingWeek()
-        async let np = TMDBClient.nowPlaying()
-        async let m = TMDBClient.popularMovies()
-        async let s = TMDBClient.popularTV()
-        async let tp = TMDBClient.topRated()
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        await withTaskGroup(of: (Int, [TMDBClient.TMDBTitle]).self) { group in
+            group.addTask { (0, await TMDBClient.trending()) }
+            group.addTask { (1, await TMDBClient.trendingWeek()) }
+            group.addTask { (2, await TMDBClient.nowPlaying()) }
+            group.addTask { (3, await TMDBClient.popularMovies()) }
+            group.addTask { (4, await TMDBClient.popularTV()) }
+            group.addTask { (5, await TMDBClient.topRated()) }
+            for await (key, titles) in group {
+                // A newer refresh supersedes this one — stop painting.
+                guard generation == refreshGeneration, !titles.isEmpty else { continue }
+                applyList(key, titles)
+            }
+        }
+        guard generation == refreshGeneration, !trending.isEmpty else { return }
         let fresh = TMDBClient.DiscoverCache(
             savedAt: Date().timeIntervalSince1970,
-            trending: await t, week: await w, movies: await m,
-            shows: await s, top: await tp, nowPlaying: await np)
-        // A failed refresh leaves the painted cache untouched —
-        // never blank a good screen for a bad network.
-        guard !fresh.trending.isEmpty else { return }
-        apply(fresh)
-        TMDBClient.saveDiscoverCache(fresh)
+            trending: trending, week: week, movies: movies,
+            shows: shows, top: top, nowPlaying: nowPlaying)
+        Task.detached(priority: .utility) { TMDBClient.saveDiscoverCache(fresh) }
         // v2.03 prefetch throttling: hero art + the first row only,
         // 10 URLs max — the old 14-URL fan-out fired on every load
         // including cache repaints.
         prefetchPosters(heroItems.map { $0.backdrop.isEmpty ? $0.poster : $0.backdrop }
             + week.prefix(4).map(\.poster))
         // Title artwork for the hero pages, fetched once per title.
-        for item in heroItems where logos[item.id] == nil {
-            logos[item.id] = await TMDBClient.logo(for: item)
+        let missing = heroItems.filter { logos[$0.id] == nil }
+        guard !missing.isEmpty else { return }
+        await withTaskGroup(of: (Int, String).self) { group in
+            for item in missing {
+                group.addTask { (item.id, await TMDBClient.logo(for: item)) }
+            }
+            for await (id, url) in group {
+                guard generation == refreshGeneration else { continue }
+                logos[id] = url
+            }
+        }
+    }
+
+    /// One list arriving early paints its row immediately instead
+    /// of waiting for the other five (see refresh()).
+    private func applyList(_ key: Int, _ titles: [TMDBClient.TMDBTitle]) {
+        switch key {
+        case 0: trending = titles
+        case 1: week = titles
+        case 2: nowPlaying = titles
+        case 3: movies = titles
+        case 4: shows = titles
+        case 5: top = titles
+        default: break
         }
     }
 

@@ -7,6 +7,12 @@ import SwiftUI
 struct HistoryView: View {
     @StateObject private var history = HistoryStore.shared
     @StateObject private var downloads = DownloadManager.shared
+    /// v2.15 startup: this view is mounted at launch (hidden tab),
+    /// so the storage-size walk in refreshStorage() used to run
+    /// before the first frame. It now waits until the tab is
+    /// actually opened (ContentView passes isActive).
+    var isActive: Bool = false
+    @State private var storageWalkStarted = false
     /// ONE item-cover only: stacking two .fullScreenCover(item:) on
     /// the same view crashed the tab on open (v1.13 regression).
     private enum PlayRoute: Identifiable {
@@ -474,7 +480,14 @@ struct HistoryView: View {
         }
         .padding(14)
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
-        .task { await refreshStorage() }
+        .onChange(of: isActive) { active in
+            // v2.15: start the disk walk only on first open of the
+            // tab, not at cold start when this view is mounted hidden.
+            if active, !storageWalkStarted {
+                storageWalkStarted = true
+                Task { await refreshStorage() }
+            }
+        }
         .onChange(of: downloads.items.count) { _ in Task { await refreshStorage() } }
     }
 

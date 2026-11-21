@@ -295,8 +295,11 @@ enum TMDBClient {
     /// The six Discover lists, cached on disk so a cold start paints
     /// last session's rows instantly and the network refresh swaps in
     /// behind them — the page no longer waits on six TMDB round-trips
-    /// before showing anything. 12h TTL; a stale cache still paints
-    /// (better than a skeleton) and is refreshed right after.
+    /// before showing anything. v2.15: a stale cache still paints
+    /// (a 13-hour-old feed beats a skeleton); load() always
+    /// refreshes right after painting, so the age gate that used
+    /// to blank the screen is gone — freshness is the refresh's
+    /// job, not the cache's.
     struct DiscoverCache: Codable {
         var savedAt: TimeInterval
         var trending: [TMDBTitle]
@@ -315,7 +318,7 @@ enum TMDBClient {
     static func loadDiscoverCache() -> DiscoverCache? {
         guard let data = try? Data(contentsOf: discoverCacheURL),
               let cache = try? JSONDecoder().decode(DiscoverCache.self, from: data),
-              Date().timeIntervalSince1970 - cache.savedAt < 12 * 3600 else { return nil }
+              !cache.trending.isEmpty else { return nil }
         return cache
     }
 

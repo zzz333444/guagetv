@@ -7,6 +7,11 @@ import UniformTypeIdentifiers
 /// all persisted with AppStorage and honoured by the player.
 struct SettingsView: View {
     @Binding var config: TVBoxConfig?
+    /// v2.15 startup: mounted at launch in a hidden tab — the
+    /// cache-size walk (totalSize walks URLCache/tmp/caches) used
+    /// to run before the first frame. It now waits for isActive.
+    var isActive: Bool = false
+    @State private var cacheWalkStarted = false
     @AppStorage("jarProxyURL") private var jarProxyURL = ""
     @AppStorage("tmdb.enabled") private var tmdbEnabled = false
     @State private var entries: [ConfigLibrary.Entry] = []
@@ -24,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.14 · SMB/NAS 播放"
+    static let buildLabel = "v2.15 · 冷启动与首屏二轮"
 
     var body: some View {
         NavigationStack {
@@ -124,7 +129,15 @@ struct SettingsView: View {
             }
             .background(AmbientBackground(imageURL: nil))
             .onAppear { entries = ConfigLibrary.entries() }
-            .task { cacheSummary = CacheManager.format(await CacheManager.totalSize()) }
+            .onChange(of: isActive) { active in
+                // v2.15: the cache-size disk walk starts only when
+                // the settings tab is actually opened, not at cold
+                // start while this view is mounted hidden.
+                if active, !cacheWalkStarted {
+                    cacheWalkStarted = true
+                    Task { cacheSummary = CacheManager.format(await CacheManager.totalSize()) }
+                }
+            }
         }
     }
 
@@ -1057,6 +1070,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.15", title: "冷启动与首屏二轮", lines: [
+            "启动路径再审计：设置页的缓存容量统计与记录页的存储用量统计不再冷启动时跑，点开对应 tab 才算；App 启动时的崩溃自愈目录清理改后台线程",
+            "发现页缓存策略复核：过期缓存照样先出屏（不再先看骨架）、缓存读写离主线程；六个 TMDB 栏目到一个上屏一个，不再等最慢的那个；hero 标题图改并发拉取",
+            "历史记录与每日观看台账合并成单个 history-store.json：冷启动一次读盘一次解码，旧两文件首次启动自动迁移；播放心跳写盘节流到 30 秒一次",
+            "已核查无需改动：配置后台加载、JarProxy 预热后台化、订阅配置后台刷新、发现页 12 小时分级加载与海报预取节流（均为 v2.03 已实现）",
+        ]),
         Entry(version: "v2.14", title: "SMB/NAS 播放", lines: [
             "新增 SMB/NAS 支持：设置 → 媒体服务器里添加 SMB 服务器（主机/用户名/密码，只存本机），资源库「本地与网络」出现入口",
             "进服务器先列共享文件夹，逐层浏览目录，视频文件带大小显示，点按直接播放",
