@@ -12,6 +12,13 @@ packages:
   FFmpegKit:
     url: https://github.com/kingslay/FFmpegKit.git
     from: 9.0.2
+  # AMSMB2 (v2.14): SMB2/3 client for NAS browsing/playback.
+  # Wrapper code is MIT; it links libsmb2 (LGPL v2.1) — the SPM
+  # product is a dynamic library, which is the LGPL-compliant
+  # way to ship it.
+  AMSMB2:
+    url: https://github.com/amosavian/AMSMB2.git
+    from: 4.0.3
 targets:
   GuageTV:
     type: application
@@ -19,6 +26,8 @@ targets:
     dependencies:
       - package: FFmpegKit
         product: libmpv
+      - package: AMSMB2
+        product: AMSMB2
     postBuildScripts:
       - name: Install Python stdlib
         script: bash "$PROJECT_DIR/scripts/install_python_nosign.sh"
@@ -34,13 +43,13 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "2.13"
-        CFBundleVersion: "213"
+        CFBundleShortVersionString: "2.14"
+        CFBundleVersion: "214"
         UIBackgroundModes:
           - audio
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
         NSFaceIDUsageDescription: 用面容 ID 解锁呱壳
-        NSLocalNetworkUsageDescription: 连接局域网里的 Emby / WebDAV 服务器和 DLNA 电视
+        NSLocalNetworkUsageDescription: 连接局域网里的 Emby / WebDAV / SMB 服务器和 DLNA 电视
         NSSpeechRecognitionUsageDescription: 语音搜索片名
         NSMicrophoneUsageDescription: 语音搜索需要使用麦克风
         UILaunchScreen:
