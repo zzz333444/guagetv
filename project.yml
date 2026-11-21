@@ -28,6 +28,11 @@ targets:
         product: libmpv
       - package: AMSMB2
         product: AMSMB2
+        # XcodeGen only links SPM products by default; without
+        # embed the dynamic AMSMB2.framework is missing from the
+        # IPA and dyld kills the app at launch (caught in v2.14
+        # package verification, CI #291 build).
+        embed: true
     postBuildScripts:
       - name: Install Python stdlib
         script: bash "$PROJECT_DIR/scripts/install_python_nosign.sh"
