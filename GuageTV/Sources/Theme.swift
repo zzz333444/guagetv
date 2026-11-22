@@ -284,7 +284,10 @@ struct MediaInfoCard: View {
 /// pages have no portrait URLs, so initials stand in — same
 /// header, same spacing, same glass language.
 struct CastRowView: View {
-    var people: [(name: String, role: String)]
+    // v2.27: avatar added (Rex guide peoples: {id, title,
+    // avatar, role}). Callers without avatars pass "" and
+    // get the old initial-letter circle.
+    var people: [(name: String, role: String, avatar: String)]
 
     var body: some View {
         if !people.isEmpty {
@@ -295,12 +298,20 @@ struct CastRowView: View {
                         ForEach(Array(people.enumerated()), id: \.offset) { pair in
                             let person = pair.element
                             VStack(spacing: 5) {
-                                Text(String(person.name.prefix(1)))
-                                    .font(.headline)
-                                    .foregroundStyle(Theme.text)
-                                    .frame(width: 58, height: 58)
-                                    .background(Circle().fill(Theme.glass))
-                                    .clipShape(Circle())
+                                if person.avatar.isEmpty {
+                                    Text(String(person.name.prefix(1)))
+                                        .font(.headline)
+                                        .foregroundStyle(Theme.text)
+                                        .frame(width: 58, height: 58)
+                                        .background(Circle().fill(Theme.glass))
+                                        .clipShape(Circle())
+                                } else {
+                                    PosterImage(urlString: person.avatar, pixelSize: 120)
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 58, height: 58)
+                                        .background(Circle().fill(Theme.glass))
+                                        .clipShape(Circle())
+                                }
                                 Text(person.name)
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(Theme.text)

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.26 · 模块·元数据与参数规则对齐"
+    static let buildLabel = "v2.27 · 模块·返回字段与详情搜索对齐"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.27", title: "模块·返回字段与详情搜索对齐", lines: [
+            "返回字段按 Rex 官方规范（guide 0.0.7 返回数据章）逐项补齐解码：subtitle（卡片副标题）、backdropPaths（剧照组）、detailPoster、coverRatio、duration（秒数）、genreItems、language、season、previewUrl、trailers、playerType、customHeaders/headers、外挂字幕 externalSubtitles、音乐 tracks；peoples 补 id 与 avatar，演职员行有头像时显示头像、无头像时仍显示首字圆圈",
+            "详情按 guide 详情章复核：loadDetail 只收裸 link 字符串（已是现状，harness 实测 argument 为纯字符串）；TMDB 条目带 link 时详情结果合并进列表条目、不再整项替换（旧逻辑会丢掉海报与评分）；loadDetail 返回空数组 [] 视为“无补充详情”不再弹错，只返回 null 才报错；详情页集数优先用 tracks、回退 episodeItems/childItems",
+            "搜索按 guide 搜索章复核：keyword/page 经同一组合规则传入（harness 实测 argument {keyword, page: \"1\", language}）；修掉搜索后“加载更多”错跑栏目翻页的 bug——搜索翻页走自己的 searchPage，失败回滚页码；搜索无 page 参数声明时不显示加载更多",
+            "详情页加料：集数卡加副行（集副标题或时长）、相关推荐卡无年份评分时用卡片副标题兜底不留空、详情标题下显示副标题、媒体信息加语言行；列表卡显示卡片副标题；直出 videoUrl 与 loadResource/loadDetail 取流时带上条目自带的 customHeaders",
+            "官方 harness（离线 fixtures）实测 tmdb.js 三入口全通：loadPopular / loadDetail / search 均 0 issues，validate.mjs 校验 0 问题；loadDetail 返回的 backdropPaths、genreItems、relatedItems 三个字段是本轮之前未解码的，已补齐",
+        ]),
         Entry(version: "v2.26", title: "模块·元数据与参数规则对齐", lines: [
             "模块元数据与参数按 Rex 官方规范（guide 0.0.7）逐条对齐：belongTo 分组（隐藏参数不显示、不补默认值，显式保存值仍传入）、enumeration/input/count/page/offset/folder/constant 各类默认值、globalParams 注入顺序、language/timezone 仅声明时注入、page 按 startPage 换算、全部参数值改传字符串",
             "参数组合收进统一函数 fwdCombineParams，栏目、自检、搜索三处同规则；栏目参数 UI 按 belongTo 隐藏；搜索入口同样走组合规则，不再只拼 keyword/page",

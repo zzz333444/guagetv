@@ -210,32 +210,103 @@ struct FWDRecord: Codable, Identifiable {
 
 // MARK: - VideoItem
 
+/// One subtitle track from a module (`externalSubtitles`
+/// on an item, or a `loadSubtitle` entry — guide's 资源与字幕
+/// chapter). Decoded in v2.27; playback consumption lands
+/// in R3 alongside loadResource.
+struct FWDSubtitle {
+    var url: String = ""
+    var title: String = ""
+    var language: String = ""
+    var isDefault: Bool = false
+    var customHeaders: [String: String] = [:]
+
+    init(_ d: [String: Any]) {
+        func str(_ key: String) -> String {
+            if let s = d[key] as? String { return s }
+            if let n = d[key] as? NSNumber { return n.stringValue }
+            return ""
+        }
+        url = str("url")
+        title = str("title")
+        // The subtitle entry spells it `lang`; the item field
+        // spells it `language` — accept both.
+        language = str("language").isEmpty ? str("lang") : str("language")
+        if let b = d["isDefault"] as? Bool { isDefault = b }
+        else if let n = d["isDefault"] as? NSNumber { isDefault = n.boolValue }
+        else if let s = d["isDefault"] as? String { isDefault = s == "true" || s == "1" }
+        if let dict = d["customHeaders"] as? [String: Any] ?? d["headers"] as? [String: Any] {
+            for (k, v) in dict { customHeaders[k] = String(describing: v) }
+        }
+    }
+}
+
 struct FWDItem: Identifiable {
     var id: String = ""
     var type: String = ""
     var title: String = ""
+    /// Card subtitle (guide: NOT a subtitle track — the
+    /// subtitle track field is `externalSubtitles`). v2.27:
+    /// previously never decoded, so cards had no subtitle.
+    var subtitle: String = ""
     var poster: String = ""
     var backdrop: String = ""
+    /// Detail-page stills (guide: 剧照用 backdropPaths).
+    /// v2.27: previously never decoded — the official
+    /// tmdb.js loadDetail returns exactly this field.
+    var backdropPaths: [String] = []
+    /// Detail-page poster (guide 图片章). v2.27.
+    var detailPoster: String = ""
     var cover: String = ""
+    var coverRatio: Double = 0
     var releaseDate: String = ""
     var rating: String = ""
     var overview: String = ""
     var mediaType: String = ""
     var link: String = ""
     var videoUrl: String = ""
+    /// Playback duration in seconds (guide: `duration` is
+    /// a number). v2.27: previously only durationText existed.
+    var duration: Int?
     var durationText: String = ""
     var genreTitle: String = ""
+    /// Genre list (guide: [{id, title}]). v2.27: the
+    /// official tmdb.js loadDetail returns genreItems, and
+    /// the old code only ever read the flat genreTitle.
+    var genreItems: [(id: String, title: String)] = []
+    var language: String = ""
+    var season: Int?
     var episode: Int?
+    /// Preview / trailer (guide 播放章). Decoded v2.27;
+    /// a trailer player entry is out of this round's scope.
+    var previewUrl: String = ""
+    var trailers: [(coverUrl: String, videoUrl: String)] = []
+    /// Engine preference from the module (`system` / `app` /
+    /// empty = auto). Decoded v2.27; honoured by R3.
+    var playerType: String = ""
+    /// Per-item request headers (guide: `customHeaders`,
+    /// alias `headers`) — playback and image loads carry
+    /// them. v2.27: previously only loadResource results
+    /// read headers; a direct videoUrl played headerless.
+    var customHeaders: [String: String] = [:]
+    var externalSubtitles: [FWDSubtitle] = []
     var episodeItems: [FWDItem] = []
+    /// Music / audiobook tracks (guide 0.0.7: clients prefer
+    /// valid `tracks`, falling back to `episodeItems`).
+    /// Decoded v2.27; the detail page's episode list reads
+    /// tracks first. Music UI stays R4's job.
+    var tracks: [FWDItem] = []
     var relatedItems: [FWDItem] = []
     var childItems: [FWDItem] = []
-    var peoples: [(name: String, role: String)] = []
+    /// Guide: [{id, title, avatar, role}]. v2.27: id and
+    /// avatar were dropped; the cast row now shows avatars.
+    var peoples: [(id: String, name: String, role: String, avatar: String)] = []
 
     var posterURL: String {
-        [poster, backdrop, cover].first { !$0.isEmpty } ?? ""
+        [poster, detailPoster, backdrop, cover].first { !$0.isEmpty } ?? ""
     }
     var backdropURL: String {
-        [backdrop, cover, poster].first { !$0.isEmpty } ?? ""
+        [backdropPaths.first ?? "", backdrop, cover, poster].first { !$0.isEmpty } ?? ""
     }
 
     /// One-line "year · ★rating" caption for recommendation cards.
@@ -253,15 +324,27 @@ struct FWDItem: Identifiable {
         id = str("id")
         type = str("type")
         title = str("title")
+        subtitle = str("subtitle")
         poster = str("posterPath").isEmpty ? (str("posterUrl").isEmpty ? str("poster_url") : str("posterUrl")) : str("posterPath")
         backdrop = str("backdropPath")
+        backdropPaths = (d["backdropPaths"] as? [Any] ?? []).compactMap {
+            if let s = $0 as? String { return s }
+            if let n = $0 as? NSNumber { return n.stringValue }
+            return nil
+        }
+        detailPoster = str("detailPoster")
         cover = str("coverUrl")
+        if let n = d["coverRatio"] as? NSNumber { coverRatio = n.doubleValue }
         // TMDB items carry raw image paths; expand them here so
         // every display slot downstream sees absolute URLs.
         if type == "tmdb" {
             if poster.hasPrefix("/") { poster = TMDBClient.imageURL(poster, size: "w500") }
             if backdrop.hasPrefix("/") { backdrop = TMDBClient.imageURL(backdrop, size: "w780") }
             if cover.hasPrefix("/") { cover = TMDBClient.imageURL(cover, size: "w500") }
+            if detailPoster.hasPrefix("/") { detailPoster = TMDBClient.imageURL(detailPoster, size: "w500") }
+            backdropPaths = backdropPaths.map {
+                $0.hasPrefix("/") ? TMDBClient.imageURL($0, size: "original") : $0
+            }
         }
         releaseDate = str("releaseDate")
         rating = str("rating")
@@ -269,16 +352,89 @@ struct FWDItem: Identifiable {
         mediaType = str("mediaType")
         link = str("link")
         videoUrl = str("videoUrl")
+        if let n = d["duration"] as? NSNumber { duration = n.intValue }
+        else if let s = d["duration"] as? String, let v = Int(s) { duration = v }
         durationText = str("durationText")
         genreTitle = str("genreTitle")
+        genreItems = (d["genreItems"] as? [[String: Any]] ?? []).map {
+            (id: ($0["id"] as? String) ?? (($0["id"] as? NSNumber)?.stringValue ?? ""),
+             title: ($0["title"] as? String) ?? "")
+        }.filter { !$0.id.isEmpty || !$0.title.isEmpty }
+        if genreTitle.isEmpty, !genreItems.isEmpty {
+            genreTitle = genreItems.map(\.title).filter { !$0.isEmpty }.joined(separator: " / ")
+        }
+        language = str("language")
+        if let n = d["season"] as? NSNumber { season = n.intValue }
         if let n = d["episode"] as? NSNumber { episode = n.intValue }
+        previewUrl = str("previewUrl")
+        trailers = (d["trailers"] as? [[String: Any]] ?? []).map {
+            (coverUrl: ($0["coverUrl"] as? String) ?? "",
+             videoUrl: ($0["videoUrl"] as? String) ?? "")
+        }.filter { !$0.videoUrl.isEmpty }
+        playerType = str("playerType")
+        if let dict = d["customHeaders"] as? [String: Any] ?? d["headers"] as? [String: Any] {
+            for (k, v) in dict { customHeaders[k] = String(describing: v) }
+        }
+        externalSubtitles = (d["externalSubtitles"] as? [[String: Any]] ?? []).map(FWDSubtitle.init)
         episodeItems = (d["episodeItems"] as? [[String: Any]] ?? []).map(FWDItem.init)
+        tracks = (d["tracks"] as? [[String: Any]] ?? []).map(FWDItem.init)
         relatedItems = (d["relatedItems"] as? [[String: Any]] ?? []).map(FWDItem.init)
         childItems = (d["childItems"] as? [[String: Any]] ?? []).map(FWDItem.init)
         peoples = (d["peoples"] as? [[String: Any]] ?? []).map {
-            (name: ($0["title"] as? String) ?? "", role: ($0["role"] as? String) ?? "")
+            (id: ($0["id"] as? String) ?? (($0["id"] as? NSNumber)?.stringValue ?? ""),
+             name: ($0["title"] as? String) ?? (($0["name"] as? String) ?? ""),
+             role: ($0["role"] as? String) ?? "",
+             avatar: ($0["avatar"] as? String) ?? "")
         }.filter { !$0.name.isEmpty }
         if id.isEmpty { id = link.isEmpty ? title : link }
+    }
+
+    /// Merge a loadDetail result into the thin list item
+    /// (guide 详情章: a TMDB item carrying a `link` gets its
+    /// loadDetail result MERGED into the built-in detail page).
+    /// v2.27: the old code replaced the whole item, so a
+    /// detail dict without poster/rating silently dropped the
+    /// list item's TMDB fields. Merge rule: the detail fills
+    /// what the list item lacks; non-empty detail arrays win;
+    /// id/type stay the list item's (the TMDB id must survive).
+    /// An id the list item only derived from its link is
+    /// replaced by the detail's stable id.
+    func mergedDetail(_ d: FWDItem) -> FWDItem {
+        var out = self
+        func fill(_ keyPath: WritableKeyPath<FWDItem, String>, with value: String) {
+            if out[keyPath: keyPath].isEmpty { out[keyPath: keyPath] = value }
+        }
+        fill(\.subtitle, with: d.subtitle)
+        fill(\.poster, with: d.poster)
+        fill(\.backdrop, with: d.backdrop)
+        fill(\.detailPoster, with: d.detailPoster)
+        fill(\.releaseDate, with: d.releaseDate)
+        fill(\.rating, with: d.rating)
+        fill(\.overview, with: d.overview)
+        fill(\.mediaType, with: d.mediaType)
+        fill(\.link, with: d.link)
+        fill(\.videoUrl, with: d.videoUrl)
+        fill(\.durationText, with: d.durationText)
+        fill(\.genreTitle, with: d.genreTitle)
+        fill(\.language, with: d.language)
+        fill(\.previewUrl, with: d.previewUrl)
+        fill(\.playerType, with: d.playerType)
+        if out.backdropPaths.isEmpty { out.backdropPaths = d.backdropPaths }
+        if out.coverRatio == 0 { out.coverRatio = d.coverRatio }
+        if out.duration == nil { out.duration = d.duration }
+        if out.genreItems.isEmpty { out.genreItems = d.genreItems }
+        if out.season == nil { out.season = d.season }
+        if out.episode == nil { out.episode = d.episode }
+        if out.trailers.isEmpty { out.trailers = d.trailers }
+        if out.episodeItems.isEmpty { out.episodeItems = d.episodeItems }
+        if out.tracks.isEmpty { out.tracks = d.tracks }
+        if out.relatedItems.isEmpty { out.relatedItems = d.relatedItems }
+        if out.childItems.isEmpty { out.childItems = d.childItems }
+        if out.peoples.isEmpty { out.peoples = d.peoples }
+        if out.externalSubtitles.isEmpty { out.externalSubtitles = d.externalSubtitles }
+        for (k, v) in d.customHeaders where out.customHeaders[k] == nil { out.customHeaders[k] = v }
+        if !d.id.isEmpty, (out.id.isEmpty || out.id == out.link) { out.id = d.id }
+        return out
     }
 }
 
@@ -2261,6 +2417,13 @@ struct FWDWidgetView: View {
     /// the column (the old retry called load(reset:) and the
     /// search failure just came back as an empty column).
     @State private var lastSearchKeyword: String?
+    /// v2.27: the page the current module search is on.
+    /// Search used to share the column's `page`, and the
+    /// "加载更多" button then ran the COLUMN's loadMore —
+    /// appending column rows to search results. Search
+    /// paging now walks its own page (guide: search params
+    /// take keyword + page, same rules as columns).
+    @State private var searchPage = 1
 
     private var meta: FWDMeta { record.meta }
     private var listModules: [FWDModuleEntry] { meta.listModules }
@@ -2269,6 +2432,16 @@ struct FWDWidgetView: View {
     }
     private var hasPageParam: Bool {
         currentModule?.params.contains { $0.type == "page" || $0.name == "page" } ?? false
+    }
+
+    /// v2.27: while a search is showing, "加载更多" pages
+    /// the SEARCH (it declares its own page param); otherwise
+    /// it pages the current column.
+    private var canLoadMore: Bool {
+        if lastSearchKeyword != nil {
+            return meta.searchParams.contains { $0.type == "page" || $0.name == "page" }
+        }
+        return hasPageParam
     }
 
     var body: some View {
@@ -2383,7 +2556,7 @@ struct FWDWidgetView: View {
                 } else {
                     posterGrid(items)
                 }
-                if hasPageParam && !items.isEmpty {
+                if canLoadMore && !items.isEmpty {
                     Button {
                         Task { await loadMore() }
                     } label: {
@@ -2484,6 +2657,16 @@ struct FWDWidgetView: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(Theme.text)
                             .lineLimit(1)
+                        // v2.27: the guide's `subtitle` is the
+                        // card subtitle — show it when the
+                        // module sent one; the year·rating line
+                        // stays as its own row below it.
+                        if !item.subtitle.isEmpty {
+                            Text(item.subtitle)
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textDim)
+                                .lineLimit(1)
+                        }
                         if !item.releaseDate.isEmpty || !item.rating.isEmpty {
                             Text([String(item.releaseDate.prefix(4)),
                                   item.rating.isEmpty ? "" : "★\(item.rating)"]
@@ -2547,7 +2730,7 @@ struct FWDWidgetView: View {
             loading = false
             return false
         }
-        if reset { loading = true; errorText = nil; lastSearchKeyword = nil }
+        if reset { loading = true; errorText = nil; lastSearchKeyword = nil; searchPage = 1 }
         let params = buildParams(for: module, page: page)
         // v2.26: TTL honours the ENTRY's declared cacheDuration
         // (Rex guide); the legacy top-level value is only a
@@ -2586,6 +2769,17 @@ struct FWDWidgetView: View {
     }
 
     private func loadMore() async {
+        // v2.27: a search showing means the button pages the
+        // search, not the column (see searchPage).
+        if lastSearchKeyword != nil {
+            loadingMore = true
+            searchPage += 1
+            if await performSearch(append: true) == false {
+                searchPage = max(1, searchPage - 1)
+            }
+            loadingMore = false
+            return
+        }
         loadingMore = true
         page += 1
         if await load(reset: false) == false {
@@ -2611,28 +2805,46 @@ struct FWDWidgetView: View {
         let keyword = (keyword ?? searchText).trimmingCharacters(in: .whitespaces)
         guard !keyword.isEmpty else { return }
         lastSearchKeyword = keyword
+        searchPage = 1
         loading = true
         errorText = nil
-        // v2.26: search params go through the same combiner
+        await performSearch(append: false)
+        loading = false
+    }
+
+    /// One search request at the current `searchPage`.
+    /// Returns false on failure so loadMore can roll the
+    /// page back (same contract as load, v2.06).
+    @discardableResult
+    private func performSearch(append: Bool) async -> Bool {
+        guard let fn = meta.searchFunction,
+              let source = FWDStore.source(for: record),
+              let keyword = lastSearchKeyword else { return false }
+        // v2.27: search params go through the same combiner
         // as columns (guide: search is a top-level entry with
         // the same param rules). keyword is the caller value;
         // the query/searchKeyword aliases stay for modules
-        // written against the older convention.
+        // written against the older convention. page walks
+        // searchPage so "加载更多" fetches the next page.
         let searchEntry = FWDModuleEntry(id: "search", title: "", functionName: fn,
                                          type: "", params: meta.searchParams)
-        var params: [String: Any] = fwdCombineParams(
+        let params: [String: Any] = fwdCombineParams(
             meta: meta, entry: searchEntry,
             caller: ["keyword": keyword, "query": keyword, "searchKeyword": keyword],
-            page: 1, savedGlobals: FWDStore.savedGlobalParams(for: record.id))
+            page: searchPage, savedGlobals: FWDStore.savedGlobalParams(for: record.id))
         do {
             let result = try await FWDRuntime(widgetID: record.id)
                 .call(function: fn, params: params, source: source)
-            items = (result as? [[String: Any]] ?? []).map(FWDItem.init)
+            let rows = (result as? [[String: Any]] ?? []).map(FWDItem.init)
+            items = append ? items + rows : rows
             errorText = nil
+            return true
         } catch {
-            errorText = "搜索失败：\(error.localizedDescription)"
+            errorText = append
+                ? "加载更多失败：\(error.localizedDescription)"
+                : "搜索失败：\(error.localizedDescription)"
+            return false
         }
-        loading = false
     }
 }
 
@@ -2670,7 +2882,10 @@ struct FWDDetailView: View {
     }
 
     private var meta: FWDMeta { record.meta }
+    /// Guide 0.0.7 (music): valid `tracks` win, falling
+    /// back to `episodeItems`, then `childItems`. v2.27.
     private var episodes: [FWDItem] {
+        if !full.tracks.isEmpty { return full.tracks }
         if !full.episodeItems.isEmpty { return full.episodeItems }
         if !full.childItems.isEmpty { return full.childItems }
         return []
@@ -2685,6 +2900,7 @@ struct FWDDetailView: View {
             ("年份", String(full.releaseDate.prefix(4))),
             ("评分", full.rating),
             ("时长", full.durationText),
+            ("语言", full.language),
             ("分类", full.genreTitle),
         ].filter { !$0.value.isEmpty }
     }
@@ -2700,6 +2916,13 @@ struct FWDDetailView: View {
                 Text(full.title)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
+                // v2.27: the guide's card `subtitle`, shown
+                // as the title's sub-line when present.
+                if !full.subtitle.isEmpty {
+                    Text(full.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                }
                 if !metaLine.isEmpty {
                     Text(metaLine).font(.caption).foregroundStyle(Theme.textDim)
                 }
@@ -2727,7 +2950,7 @@ struct FWDDetailView: View {
                         .lineSpacing(4)
                 }
                 MediaInfoCard(rows: fwdMediaInfoRows)
-                CastRowView(people: full.peoples)
+                CastRowView(people: full.peoples.map { (name: $0.name, role: $0.role, avatar: $0.avatar) })
                 if loadingDetail {
                     HStack(spacing: 8) {
                         ProgressView().tint(Theme.text)
@@ -2777,14 +3000,29 @@ struct FWDDetailView: View {
                             Button {
                                 Task { await playEpisode(at: pair.offset) }
                             } label: {
-                                Text(guageEpisodeDisplayName(pair.element.title,
-                                                             index: pair.element.episode.map { $0 - 1 } ?? pair.offset))
-                                    .font(.subheadline)
-                                    .foregroundStyle(Theme.text)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 11)
-                                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                                // v2.27 (R2 加料): episode sub-line
+                                // — the episode's own subtitle, else
+                                // its duration — so a bare "第N集"
+                                // never sits alone when the module
+                                // sent more info.
+                                VStack(alignment: .center, spacing: 3) {
+                                    Text(guageEpisodeDisplayName(pair.element.title,
+                                                                 index: pair.element.episode.map { $0 - 1 } ?? pair.offset))
+                                        .font(.subheadline)
+                                        .foregroundStyle(Theme.text)
+                                        .lineLimit(1)
+                                    let sub = pair.element.subtitle.isEmpty
+                                        ? pair.element.durationText : pair.element.subtitle
+                                    if !sub.isEmpty {
+                                        Text(sub)
+                                            .font(.caption2)
+                                            .foregroundStyle(Theme.textDim)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
                             }
                             .buttonStyle(.plain)
                         }
@@ -2810,8 +3048,15 @@ struct FWDDetailView: View {
                                             .foregroundStyle(Theme.text)
                                             .lineLimit(1)
                                             .frame(width: 92, alignment: .leading)
-                                        if !rel.shortMetaLine.isEmpty {
-                                            Text(rel.shortMetaLine)
+                                        // v2.27 (R2 加料): the year·rating
+                                        // row falls back to the card
+                                        // subtitle when the module sent
+                                        // no year and no rating — no
+                                        // blank second line either way.
+                                        let relMeta = rel.shortMetaLine.isEmpty
+                                            ? rel.subtitle : rel.shortMetaLine
+                                        if !relMeta.isEmpty {
+                                            Text(relMeta)
                                                 .font(.caption2)
                                                 .foregroundStyle(Theme.textDim)
                                                 .lineLimit(1)
@@ -2850,7 +3095,13 @@ struct FWDDetailView: View {
     }
 
     /// Items with a link ask the widget's loadDetail for the full
-    /// record (episodes, playback URL, related titles).
+    /// record (episodes, playback URL, related titles). The call
+    /// takes the bare link string (guide: no params object),
+    /// and the result is MERGED into the list item (v2.27):
+    /// a TMDB item's loadDetail result joins the built-in
+    /// detail page instead of replacing it. An empty array is
+    /// a valid "no detail" answer (guide: return [] — never
+    /// null), so it keeps the list item with no error banner.
     private func enrich() async {
         guard !item.link.isEmpty, meta.hasDetail,
               let source = FWDStore.source(for: record) else { return }
@@ -2860,10 +3111,12 @@ struct FWDDetailView: View {
             let result = try await FWDRuntime(widgetID: record.id)
                 .callString(function: "loadDetail", argument: item.link, source: source)
             if let dict = result as? [String: Any] {
-                full = FWDItem(dict)
+                full = full.mergedDetail(FWDItem(dict))
                 detailError = nil
-            } else if let list = result as? [[String: Any]], let first = list.first {
-                full = FWDItem(first)
+            } else if let list = result as? [[String: Any]] {
+                if let first = list.first {
+                    full = full.mergedDetail(FWDItem(first))
+                }
                 detailError = nil
             } else {
                 detailError = "详情没有返回内容，集数与播放地址为空"
@@ -2876,7 +3129,11 @@ struct FWDDetailView: View {
 
     private func resolve(_ ep: FWDItem) async -> PlayerView.ResolveResult {
         if !ep.videoUrl.isEmpty {
-            return .ok(url: ep.videoUrl, header: [:])
+            // v2.27: an item's own customHeaders ride along
+            // with its direct videoUrl (guide: headers are
+            // carried when playing); previously this played
+            // headerless.
+            return .ok(url: ep.videoUrl, header: ep.customHeaders)
         }
         guard let source = FWDStore.source(for: record) else {
             return .failed("模块文件丢失")
@@ -2897,6 +3154,9 @@ struct FWDDetailView: View {
                         for (k, v) in dict { header[k] = String(describing: v) }
                     }
                 }
+                // v2.27: a resource without its own headers
+                // falls back to the item's customHeaders.
+                for (k, v) in ep.customHeaders where header[k] == nil { header[k] = v }
                 header.removeValue(forKey: "X-Forward-Skip-Redirect-Probe")
                 return .ok(url: url, header: header)
             }
@@ -2907,7 +3167,7 @@ struct FWDDetailView: View {
                let dict = result as? [String: Any] {
                 let detail = FWDItem(dict)
                 if !detail.videoUrl.isEmpty {
-                    return .ok(url: detail.videoUrl, header: [:])
+                    return .ok(url: detail.videoUrl, header: detail.customHeaders)
                 }
             }
         }

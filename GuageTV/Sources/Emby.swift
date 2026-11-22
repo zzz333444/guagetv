@@ -1028,7 +1028,9 @@ struct EmbySeriesView: View {
                                 .lineSpacing(4)
                         }
                         MediaInfoCard(rows: mediaInfoRows)
-                        CastRowView(people: (detailItem ?? series).people)
+                        // v2.27: CastRowView now takes an avatar
+                        // slot; Emby people carry none, pass "".
+                        CastRowView(people: (detailItem ?? series).people.map { (name: $0.name, role: $0.role, avatar: "") })
                         if let next = nextUpItem {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("接下来").font(.headline).foregroundStyle(Theme.text)
