@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.33 · 播放器与动效收尾"
+    static let buildLabel = "v2.34 · 模块搜索并入全局搜索"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,14 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.34", title: "模块搜索并入全局搜索", lines: [
+            "全局搜索新增模块来源：已导入且带 searchFunction 的模块并行参与跨线搜索，结果按模块单独成组、排在站点海报网格上方同一滚动页内；卡片复用搜索页海报样式（橙色角标改挂模块名），点按走模块既有链路 FWDDetailView（loadDetail → loadResource），不新造页面",
+            "模块结果组可折叠/展开：每组带模块名与结果数角标，默认只展开第一组、其余折叠；0 结果的模块收进组底「模块无结果」折叠行（与站点无结果区同一口径），超时/失败的模块不进该区、只计入底部汇总",
+            "超时与熔断沿用搜索框架口径：模块阶段在 CMS/py/JS/Jar 之后串行跑，每模块硬 15 秒上限、连续 3 个超时或失败跳过剩余模块；单模块报错只记该模块一次 miss，不污染整页；模块数计入 (已搜/总数) 进度与「搜完 N 个来源」汇总，命中数含模块结果",
+            "关键词转义复核：关键词以 Swift 字符串进参数表、由 FWDRuntime.call 经 JSON 序列化后再拼进 JS 调用，引号/反斜杠/换行等符号出不了字符串字面量；官方 harness 实测：带引号、反斜杠、空格与单引号的关键词原样到达模块、issues 为 []；tmdb.js 官方示例同法复测通过",
+            "点播链路端到端复核：自写 R9 测试模块（search + loadDetail + loadResource）跑官方 run-module.mjs 离线全通、issues 全为 []——搜索出条目、详情带集数与相关推荐、取流回两条线路（system/app 各一）；validate.mjs 校验该模块 0 问题",
+            "模块搜索调用与模块页自身搜索同一套参数组合（fwdCombineParams：keyword/query/searchKeyword 三别名、第 1 页、已保存全局参数），模块在哪个搜索框被搜到、行为一致；无搜索入口的模块不参与；只有模块、没有站点配置时搜索页也可正常工作",
+        ]),
         Entry(version: "v2.33", title: "播放器与动效收尾", lines: [
             "动画时长全仓统一：此前 0.18 / 0.2 / 0.22 / 0.25 / 0.3 / 0.35 六档字面量散在 16 个文件，同一手势各页手感不一；现收进 Theme 四个常量（animQuick 0.2 展开/切换、animStandard 0.25 内容切换与加载交叉淡入淡出、animFade 0.35 图片淡入、animChrome 0.25 播放器 chrome/HUD/toast），数值与旧版一致、只换名；唯一例外是发现页 hero 自动轮播的 0.45 秒慢切（定时轮播，不参与手势统一）",
             "播放器 chrome 复核：横屏控制层与选集态逐项核对——竖屏紧凑度量（图标 32pt、间距收窄）与横屏宽松度量此前 v1.57 已分档，本轮复核无溢出；chrome/HUD/toast 此前用无参 withAnimation（系统默认曲线），现统一走 animChrome；选集面板的分段 chips 与正倒序切换此前瞬间跳变，现加 animQuick 过渡；详情页选集分段与正倒序同步加动画",

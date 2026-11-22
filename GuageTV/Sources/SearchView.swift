@@ -48,6 +48,23 @@ struct SearchView: View {
     /// folded by default, tap the header to expand.
     @State private var emptySites: [TVBoxConfig.Site] = []
     @State private var showEmptySites = false
+    /// Module results (v2.34): imported modules that declare a
+    /// searchFunction join the global search as their own
+    /// groups — separate from site results, because a module
+    /// hit opens FWDDetailView, not a site detail loader.
+    @State private var moduleResults: [(record: FWDRecord, items: [FWDItem])] = []
+    /// Modules that answered with zero results: folded away
+    /// under the module section, same pattern as emptySites.
+    @State private var moduleEmpty: [FWDRecord] = []
+    @State private var showModuleEmpty = false
+    /// Collapsed module groups by record id. The first group
+    /// starts expanded, the rest collapsed (spec: 默认展开第一组).
+    @State private var collapsedModules: Set<String> = []
+    /// True when at least one imported module declares a search
+    /// entry — refreshed on appear, so a module-only install
+    /// still gets a working search page instead of the
+    /// "还没有导入配置" empty state.
+    @State private var hasSearchableModules = false
     /// Title aggregation (v1.42): same-title hits from many
     /// sites collapse into one card ("N 条线"), tapping opens
     /// the per-site list. On by default; the toggle lives above
@@ -93,6 +110,17 @@ struct SearchView: View {
     private var hasSites: Bool {
         !cmsSites.isEmpty || !pySites.isEmpty || !jsSites.isEmpty || !probeableSites.isEmpty
     }
+    /// Module hits for the poster cell: the shared cell only
+    /// knows VodItem, so a module item maps onto it (id falls
+    /// back to the title when the module sends no id; pic is
+    /// the module's posterURL, already TMDB-expanded).
+    private func vodItem(from item: FWDItem) -> VodItem {
+        VodItem(id: item.id.isEmpty ? item.title : item.id,
+                name: item.title, pic: item.posterURL,
+                remarks: item.subtitle,
+                year: String(item.releaseDate.prefix(4)),
+                score: item.rating)
+    }
     /// Two poster columns beside the site rail (the rail takes the
     /// rest of the width budget, like the reference layout).
     private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
@@ -109,6 +137,7 @@ struct SearchView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .onAppear {
+            hasSearchableModules = FWDStore.records().contains { $0.meta.searchFunction != nil }
             voice.onFinal = { text in
                 keyword = text
                 beginSearch()
@@ -221,7 +250,7 @@ struct SearchView: View {
     @ViewBuilder
     private var recentsView: some View {
         if recents.isEmpty && hotTitles.isEmpty {
-            hint("跨已导入的 CMS / py / JS 站点一起搜")
+            hint("跨已导入的 CMS / py / JS 站点与模块一起搜")
         } else {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -290,7 +319,7 @@ struct SearchView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !hasSites {
+        if !hasSites && !hasSearchableModules {
             // R8 (v1.85): bare hint text → shared empty state.
             VStack {
                 Spacer()
@@ -301,7 +330,7 @@ struct SearchView: View {
                     .padding(.horizontal, 18)
                 Spacer()
             }
-        } else if searching && results.isEmpty {
+        } else if searching && results.isEmpty && moduleResults.isEmpty {
             // v2.12: bare spinner → poster-grid skeleton (search
             // results render as posters).
             // v2.21: cross-fades when results land.
@@ -309,15 +338,21 @@ struct SearchView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
                 .transition(.opacity)
-        } else if !results.isEmpty {
+        } else if !results.isEmpty || !moduleResults.isEmpty {
             // Results branch MUST outrank the !searched branch below:
             // `searched` stays false for the whole run, so ordering
             // the recents branch first hid every in-flight result
             // behind the recents list until the run ended — the
             // "results only appear when the search finishes" bug.
-            aggregateToggleBar
-            resultFilterBar
-            if filteredResults.isEmpty {
+            // v2.34: the toggle/filter bars are site-only, and the
+            // "筛选后没有结果" state only applies when site
+            // results exist at all — a module-only hit must not
+            // be swallowed by it.
+            if !results.isEmpty {
+                aggregateToggleBar
+                resultFilterBar
+            }
+            if !results.isEmpty && filteredResults.isEmpty {
                 EmptyStateView(icon: "line.3.horizontal.decrease.circle",
                                title: "筛选后没有结果",
                                message: "换个年份或类型试试",
@@ -352,6 +387,8 @@ struct SearchView: View {
                     action: {
                         keyword = ""
                         results = []
+                        moduleResults = []
+                        moduleEmpty = []
                         failureNote = ""
                         searched = false
                     })
@@ -489,6 +526,7 @@ struct SearchView: View {
         HStack(alignment: .top, spacing: 0) {
             if showSiteFilter { siteRail }
             ScrollView(showsIndicators: false) {
+                moduleResultsSection
                 LazyVGrid(columns: gridColumns, spacing: 14) {
                     ForEach(titleGroups) { group in
                         Button {
@@ -557,6 +595,7 @@ struct SearchView: View {
         HStack(alignment: .top, spacing: 0) {
             if showSiteFilter { siteRail }
             ScrollView(showsIndicators: false) {
+                moduleResultsSection
                 LazyVGrid(columns: gridColumns, spacing: 14) {
                     ForEach(visibleGroups, id: \.site.id) { group in
                         ForEach(group.items) { item in
@@ -575,6 +614,121 @@ struct SearchView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 40)
             }
+        }
+    }
+
+    /// Module result groups (v2.34): one collapsible group
+    /// per module, rendered ABOVE the site poster grid inside
+    /// the same ScrollView, so the whole result page scrolls
+    /// as one. Cards reuse SearchPosterCell (same poster
+    /// layout and orange badge as site results — the badge
+    /// carries the module title, the site name's equivalent);
+    /// tapping one opens FWDDetailView on the module's own
+    /// chain (loadDetail → loadResource), no new page type.
+    /// Hidden when a single site is picked on the rail: the
+    /// rail lists sites only, and modules belong to 全部.
+    /// Rows use the enumerated index as id: module items
+    /// sometimes arrive with an empty id, and two empty ids
+    /// would collide under Identifiable.
+    /// The module section shows in 全部 mode whenever modules
+    /// answered — with hits, or with only empty answers (the
+    /// folded "模块无结果" row still tells the user the module
+    /// phase actually ran).
+    private var showModuleSection: Bool {
+        selectedSiteKey == nil && (!moduleResults.isEmpty || !moduleEmpty.isEmpty)
+    }
+
+    @ViewBuilder
+    private var moduleResultsSection: some View {
+        if showModuleSection {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(moduleResults.enumerated()), id: \.element.record.id) { _, group in
+                    let collapsed = collapsedModules.contains(group.record.id)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            Haptics.selection()
+                            withAnimation(Theme.animQuick) {
+                                if collapsed { collapsedModules.remove(group.record.id) }
+                                else { collapsedModules.insert(group.record.id) }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.stack.3d.up")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.accent)
+                                Text("模块 · \(group.record.meta.localized(group.record.meta.title.isEmpty ? group.record.id : group.record.meta.title))")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.text)
+                                    .lineLimit(1)
+                                Text("\(group.items.count)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.orange, in: Capsule())
+                                Spacer()
+                                Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Theme.textDim)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if !collapsed {
+                            LazyVGrid(columns: gridColumns, spacing: 14) {
+                                ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in
+                                    NavigationLink {
+                                        FWDDetailView(record: group.record, item: item)
+                                    } label: {
+                                        SearchPosterCell(
+                                            item: vodItem(from: item),
+                                            badge: group.record.meta.localized(group.record.meta.title.isEmpty ? group.record.id : group.record.meta.title))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+                // Modules that answered with zero results fold
+                // away here (v1.96 pattern, module edition):
+                // folded by default, tap to see their names.
+                if !moduleEmpty.isEmpty {
+                    Button {
+                        withAnimation(Theme.animQuick) { showModuleEmpty.toggle() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("模块无结果")
+                                .font(.caption.weight(showModuleEmpty ? .semibold : .regular))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text("\(moduleEmpty.count)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.gray, in: Capsule())
+                            Image(systemName: showModuleEmpty ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        .foregroundStyle(Theme.text.opacity(0.85))
+                        .padding(.horizontal, 8).padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if showModuleEmpty {
+                        ForEach(moduleEmpty) { record in
+                            Text(record.meta.localized(record.meta.title.isEmpty ? record.id : record.meta.title))
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
         }
     }
 
@@ -830,6 +984,10 @@ struct SearchView: View {
         selectedType = nil
         emptySites = []
         showEmptySites = false
+        moduleResults = []
+        moduleEmpty = []
+        showModuleEmpty = false
+        collapsedModules = []
         searchDoneCount = 0
         searchTotalCount = 0
         // v2.31: warm the active line before the jar phase starts
@@ -899,7 +1057,12 @@ struct SearchView: View {
         let unknownPool = probeableSites.filter { site in
             !pyPool.contains { $0.key == site.key } && !jsPool.contains { $0.key == site.key }
         }
-        let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count + unknownPool.count
+        // Modules with a search entry join as their own pool
+        // (v2.34): they run after the site pools so a slow
+        // module can never delay the fast site results, and
+        // they count in the same (done/total) progress.
+        let modulePool = FWDStore.records().filter { $0.meta.searchFunction != nil }
+        let total = cmsSites.count + pyPool.count + jsPool.count + jarPool.count + unknownPool.count + modulePool.count
         searchTotalCount = total
         var done = 0
         var responded = 0
@@ -1124,27 +1287,70 @@ struct SearchView: View {
             }
             tick()
         }
+        // Module search (v2.34): imported modules with a
+        // searchFunction run here, serially, one hard 15 s
+        // deadline each — the same timeout and circuit-breaker
+        // rule as the py/JS pools (3 straight misses skips the
+        // rest). Each module is isolated: its throw/timeout
+        // only costs that module, never the page. Results
+        // stream into moduleResults per answer, same as sites.
+        var modOut: [(record: FWDRecord, items: [FWDItem])] = []
+        var modEmpty: [FWDRecord] = []
+        var moduleMisses = 0
+        phasePrefix = "正在搜模块"
+        for (index, record) in modulePool.enumerated() {
+            if Task.isCancelled { break }
+            if moduleMisses >= 3 {
+                poolNotes.append("模块连续 3 个超时或失败，疑似某个模块卡住了 JS 运行时，已跳过剩余 \(modulePool.count - index) 个模块（逐个打开模块不受影响）")
+                done += modulePool.count - index
+                break
+            }
+            catTried["模块", default: 0] += 1
+            progressText = statusLine("正在搜模块：\(record.meta.localized(record.meta.title.isEmpty ? record.id : record.meta.title))")
+            let items = await hardTimeoutFWD(15) { await searchModule(record, keyword: kw) }
+            if let items {
+                moduleMisses = 0
+                responded += 1
+                catResponded["模块", default: 0] += 1
+                if !items.isEmpty {
+                    modOut.append((record, items))
+                    moduleResults = modOut
+                    // First group starts expanded, the rest
+                    // collapsed (spec: 默认展开第一组).
+                    collapsedModules = Set(modOut.dropFirst().map { $0.record.id })
+                } else {
+                    modEmpty.append(record)
+                    moduleEmpty = modEmpty
+                }
+            } else {
+                moduleMisses += 1
+            }
+            tick()
+        }
         var catNotes: [String] = []
-        for (label, key) in [("CMS", "CMS"), ("py", "py"), ("JS", "JS"), ("Jar", "Jar")] {
+        for (label, key) in [("CMS", "CMS"), ("py", "py"), ("JS", "JS"), ("Jar", "Jar"), ("模块", "模块")] {
             let tried = catTried[key] ?? 0
             if tried > 0 && (catResponded[key] ?? 0) == 0 {
-                catNotes.append("\(label) 类 \(tried) 个站全部无响应")
+                catNotes.append("\(label) 类 \(tried) 个\(label == "模块" ? "模块" : "站")全部无响应")
             }
         }
         catNotes += poolNotes
-        if out.isEmpty {
-            failureNote = "共搜了 \(total) 个站，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
+        if out.isEmpty && modOut.isEmpty {
+            failureNote = "共搜了 \(total) 个来源，\(responded) 个有响应、\(total - responded) 个超时或失败；换个片名或换条线路试试"
             if !errorSamples.isEmpty {
                 failureNote += "\n" + errorSamples.joined(separator: "\n")
             }
         }
         finalNote = (Task.isCancelled ? "已停止 · " : "")
-            + "搜完 \(total) 个站 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count }) 条"
+            + "搜完 \(total) 个来源 · \(responded) 个有响应 · 命中 \(out.reduce(0) { $0 + $1.items.count } + modOut.reduce(0) { $0 + $1.items.count }) 条"
         if !catNotes.isEmpty {
             finalNote += "（" + catNotes.joined(separator: "；") + "）"
         }
         if !empty.isEmpty {
             finalNote += " · \(empty.count) 个站无结果"
+        }
+        if !modEmpty.isEmpty {
+            finalNote += " · \(modEmpty.count) 个模块无结果"
         }
         searchDoneCount = done
         searched = true
@@ -1181,6 +1387,76 @@ struct SearchView: View {
         } catch {
             return nil
         }
+    }
+
+    /// One module's global-search call (v2.34). Deliberately
+    /// the SAME call shape as the module page's own search
+    /// (FWDWidgetView.performSearch): same fwdCombineParams
+    /// combiner, same keyword/query/searchKeyword aliases,
+    /// page 1, same saved globals — a module must not behave
+    /// differently depending on which search box called it.
+    /// Returns nil on throw/timeout (the caller counts a
+    /// miss); a non-array answer is an empty hit, exactly
+    /// like the module page. One module's failure never
+    /// escapes: the do/catch is inside, per module.
+    /// Keyword escaping: the keyword travels as a Swift
+    /// String inside the params dict, which FWDRuntime.call
+    /// JSON-serializes — quotes, backslashes, newlines and
+    /// other symbols are JSON-escaped before the text is ever
+    /// interpolated into the JS call, so a keyword cannot
+    /// break out of its string literal or poison another
+    /// module's call (harness-verified this round with a
+    /// keyword carrying quotes, a backslash, spaces and a
+    /// single quote; the runner returned issues []).
+    private func searchModule(_ record: FWDRecord, keyword: String) async -> [FWDItem]? {
+        guard let fn = record.meta.searchFunction,
+              let source = FWDStore.source(for: record) else { return nil }
+        let searchEntry = FWDModuleEntry(id: "search", title: "", functionName: fn,
+                                         type: "", params: record.meta.searchParams)
+        let params: [String: Any] = fwdCombineParams(
+            meta: record.meta, entry: searchEntry,
+            caller: ["keyword": keyword, "query": keyword, "searchKeyword": keyword],
+            page: 1, savedGlobals: FWDStore.savedGlobalParams(for: record.id))
+        do {
+            let result = try await FWDRuntime(widgetID: record.id)
+                .call(function: fn, params: params, source: source)
+            return (result as? [[String: Any]] ?? []).map(FWDItem.init)
+        } catch {
+            return nil
+        }
+    }
+
+    /// hardTimeout's shape for [FWDItem]: the same
+    /// abandon-the-loser race (a blocked bridge call cannot
+    /// be cancelled, so the deadline resumes nil and the
+    /// stuck call finishes or dies in the background).
+    private func hardTimeoutFWD(_ seconds: Double,
+                                _ work: @escaping @Sendable () async -> [FWDItem]?) async -> [FWDItem]? {
+        await withCheckedContinuation { cont in
+            let box = FWDResumeBox(cont)
+            Task.detached { box.resume(await work()) }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                box.resume(nil)
+            }
+        }
+    }
+}
+
+/// Resume-once box for hardTimeoutFWD (same pattern as
+/// ResumeBox above, typed for module search results).
+private final class FWDResumeBox: @unchecked Sendable {
+    private var cont: CheckedContinuation<[FWDItem]?, Never>?
+    private let lock = NSLock()
+
+    init(_ cont: CheckedContinuation<[FWDItem]?, Never>) { self.cont = cont }
+
+    func resume(_ value: [FWDItem]?) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
     }
 }
 
