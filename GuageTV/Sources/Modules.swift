@@ -157,6 +157,43 @@ struct FWDMeta {
     var continuousPlay: Bool = false
     var i18n: [String: [String: String]] = [:]
 
+    /// v2.29 (Rex guide i18n 章): the module's own display
+    /// text in the user's language — module title, entry
+    /// titles, param titles, option titles, placeholder hints.
+    /// Lookup order per guide: exact locale code → script
+    /// system (zh-TW/zh-HK/zh-MO → zh-Hant; zh-CN/zh-SG →
+    /// zh-Hans) → base language → original text. Returned
+    /// DATA (item titles, descriptions) is never translated.
+    func localized(_ text: String) -> String {
+        fwdLocalized(text, i18n: i18n)
+    }
+
+    /// v2.29: the module's effective content type. A valid
+    /// declared contentType wins over any user choice (guide);
+    /// when the module declares nothing (or an unknown value),
+    /// the user's per-module choice applies, else "".
+    var effectiveContentType: String {
+        let known = ["video", "music", "audiobook", "shortDrama"]
+        if known.contains(contentType) { return contentType }
+        let chosen = FWDStore.contentTypeOverride(for: id)
+        return known.contains(chosen) ? chosen : ""
+    }
+    /// True when the effective type comes from the user's own
+    /// choice rather than the module's declaration.
+    var contentTypeIsUserChosen: Bool {
+        let known = ["video", "music", "audiobook", "shortDrama"]
+        return !known.contains(contentType) && !effectiveContentType.isEmpty
+    }
+    var contentTypeLabel: String {
+        switch effectiveContentType {
+        case "video": return "视频"
+        case "music": return "音乐"
+        case "audiobook": return "听书"
+        case "shortDrama": return "短剧"
+        default: return ""
+        }
+    }
+
     /// Entries the browse UI can render as lists: everything that
     /// is not a stream resolver, a subtitle feed or a danmu feed.
     var listModules: [FWDModuleEntry] {
@@ -386,6 +423,12 @@ struct FWDItem: Identifiable {
     /// valid `tracks`, falling back to `episodeItems`).
     /// Decoded v2.27; the detail page's episode list reads
     /// tracks first. Music UI stays R4's job.
+    /// Dynamic cover video for album detail (guide 0.0.7
+    /// 音乐章: `albumMotionArtwork`, an HTTP(S) video URL).
+    /// Decoded v2.29; the detail page notes its presence in
+    /// the media-info card (no inline video hero — the App
+    /// has no motion-cover surface yet).
+    var albumMotionArtwork: String = ""
     var tracks: [FWDItem] = []
     var relatedItems: [FWDItem] = []
     var childItems: [FWDItem] = []
@@ -469,6 +512,7 @@ struct FWDItem: Identifiable {
         externalSubtitles = (d["externalSubtitles"] as? [[String: Any]] ?? []).map(FWDSubtitle.init)
         episodeItems = (d["episodeItems"] as? [[String: Any]] ?? []).map(FWDItem.init)
         tracks = (d["tracks"] as? [[String: Any]] ?? []).map(FWDItem.init)
+        albumMotionArtwork = str("albumMotionArtwork")
         relatedItems = (d["relatedItems"] as? [[String: Any]] ?? []).map(FWDItem.init)
         childItems = (d["childItems"] as? [[String: Any]] ?? []).map(FWDItem.init)
         peoples = (d["peoples"] as? [[String: Any]] ?? []).map {
@@ -510,6 +554,7 @@ struct FWDItem: Identifiable {
         fill(\.language, with: d.language)
         fill(\.previewUrl, with: d.previewUrl)
         fill(\.playerType, with: d.playerType)
+        fill(\.albumMotionArtwork, with: d.albumMotionArtwork)
         if out.backdropPaths.isEmpty { out.backdropPaths = d.backdropPaths }
         if out.coverRatio == 0 { out.coverRatio = d.coverRatio }
         if out.duration == nil { out.duration = d.duration }
@@ -640,6 +685,114 @@ enum FWDStore {
         }
     }
 
+    /// v2.29 (Rex guide 内容类型章): the user's per-module
+    /// content-type choice. Only consulted when the module
+    /// itself declares no valid contentType — a valid
+    /// declaration always wins over this value.
+    static func contentTypeOverride(for recordID: String) -> String {
+        UserDefaults.standard.string(forKey: "fwd.contentTypeOverride.\(recordID)") ?? ""
+    }
+
+    static func saveContentTypeOverride(_ value: String, for recordID: String) {
+        let key = "fwd.contentTypeOverride.\(recordID)"
+        if value.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+
+    /// v2.29: one subscription batch import, reported per
+    /// link. Policy (guide-aligned, now explicit): a link
+    /// whose module id already exists OVERWRITES the old
+    /// record (file rewritten, same id); a failed link never
+    /// blocks the rest; duplicates in one subscription are
+    /// fetched once.
+    struct ImportOutcome {
+        var imported: Int = 0
+        var overwritten: Int = 0
+        var failures: [String] = []
+
+        /// Back-compat for the old count-returning importers:
+        /// a batch that landed nothing still throws, with the
+        /// per-link causes attached instead of one bare line.
+        func importedOrThrow() throws -> Int {
+            guard imported > 0 else {
+                throw StoreFailure(message: failures.isEmpty
+                    ? "订阅里的模块都没导入成功"
+                    : "订阅里的模块都没导入成功：" + failures.joined(separator: "；"))
+            }
+            return imported
+        }
+    }
+
+    /// Shared link extraction for .fwd subscriptions (JSON
+    /// under widgets / modules / urls / list, entries as
+    /// strings or {url|link|src} objects; else plain-text
+    /// http lines). Deduplicated, order preserved.
+    static func subscriptionLinks(from text: String) -> [String] {
+        var links: [String] = []
+        if let data = text.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["widgets", "modules", "urls", "list"] {
+                if let arr = json[key] as? [Any] {
+                    for entry in arr {
+                        if let s = entry as? String { links.append(s) }
+                        if let o = entry as? [String: Any] {
+                            for k in ["url", "link", "src"] {
+                                if let s = o[k] as? String { links.append(s); break }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if links.isEmpty {
+            links = text.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { $0.hasPrefix("http") }
+        }
+        var seen = Set<String>()
+        return links.filter { seen.insert($0).inserted }
+    }
+
+    static func importLinks(_ links: [String]) async -> ImportOutcome {
+        var outcome = ImportOutcome()
+        for link in links {
+            let before = Set(records().map(\.id))
+            guard let u = URL(string: link),
+                  let (d, _) = try? await URLSession.shared.data(from: u),
+                  let js = String(data: d, encoding: .utf8) else {
+                outcome.failures.append("\(URL(string: link)?.lastPathComponent ?? link)：下载失败")
+                continue
+            }
+            do {
+                let record = try importModule(source: js, origin: link)
+                outcome.imported += 1
+                if before.contains(record.id) { outcome.overwritten += 1 }
+            } catch {
+                outcome.failures.append("\(URL(string: link)?.lastPathComponent ?? link)：\(error.localizedDescription)")
+            }
+        }
+        return outcome
+    }
+
+    /// One-line Chinese summary for a batch outcome, for the
+    /// Modules page note line (imported / overwritten /
+    /// per-link failures, never a bare count that hides a
+    /// partial failure).
+    static func importOutcomeText(_ outcome: ImportOutcome) -> String {
+        var parts: [String] = []
+        if outcome.imported > 0 {
+            parts.append("已导入 \(outcome.imported) 个模块"
+                         + (outcome.overwritten > 0 ? "（其中 \(outcome.overwritten) 个覆盖同名旧版）" : ""))
+        }
+        if !outcome.failures.isEmpty {
+            parts.append("失败 \(outcome.failures.count) 个：" + outcome.failures.joined(separator: "；"))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     static func delete(_ record: FWDRecord) {
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(record.fileName))
         save(records().filter { $0.id != record.id })
@@ -712,6 +865,12 @@ enum FWDStore {
     /// entries as strings or {url} objects; plain-text line lists
     /// also accepted). Returns how many modules landed.
     static func importRemote(_ urlString: String) async throws -> Int {
+        try await importRemoteDetailed(urlString).importedOrThrow()
+    }
+
+    /// v2.29: the batch outcome (imported / overwritten /
+    /// per-link failures) instead of a bare count.
+    static func importRemoteDetailed(_ urlString: String) async throws -> ImportOutcome {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else {
             throw StoreFailure(message: "链接无效")
@@ -721,90 +880,41 @@ enum FWDStore {
             throw StoreFailure(message: "下载内容无法读取")
         }
         if text.contains("WidgetMetadata") || text.hasPrefix("FWENC1") {
-            _ = try importModule(source: text, origin: trimmed)
-            return 1
+            let before = Set(records().map(\.id))
+            let record = try importModule(source: text, origin: trimmed)
+            var outcome = ImportOutcome(imported: 1)
+            if before.contains(record.id) { outcome.overwritten = 1 }
+            return outcome
         }
-        var links: [String] = []
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            for key in ["widgets", "modules", "urls", "list"] {
-                if let arr = json[key] as? [Any] {
-                    for entry in arr {
-                        if let s = entry as? String { links.append(s) }
-                        if let o = entry as? [String: Any] {
-                            for k in ["url", "link", "src"] {
-                                if let s = o[k] as? String { links.append(s); break }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if links.isEmpty {
-            links = text.components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { $0.hasPrefix("http") }
-        }
+        let links = subscriptionLinks(from: text)
         guard !links.isEmpty else {
             throw StoreFailure(message: "订阅里没找到模块链接")
         }
-        var imported = 0
-        for link in links {
-            guard let u = URL(string: link),
-                  let (d, _) = try? await URLSession.shared.data(from: u),
-                  let js = String(data: d, encoding: .utf8),
-                  (try? importModule(source: js, origin: link)) != nil else { continue }
-            imported += 1
-        }
-        guard imported > 0 else {
-            throw StoreFailure(message: "订阅里的模块都没导入成功")
-        }
-        return imported
+        return await importLinks(links)
     }
 
     /// Local-file counterpart of importRemote: the picked file is
     /// either a module .js (imported directly) or a .fwd / text
     /// subscription (its links are fetched and imported).
     static func importFileText(_ text: String, origin: String) async throws -> Int {
+        try await importFileTextDetailed(text, origin: origin).importedOrThrow()
+    }
+
+    /// v2.29: batch outcome for a picked file (see
+    /// importRemoteDetailed).
+    static func importFileTextDetailed(_ text: String, origin: String) async throws -> ImportOutcome {
         if text.contains("WidgetMetadata") || text.hasPrefix("FWENC1") {
-            _ = try importModule(source: text, origin: origin)
-            return 1
+            let before = Set(records().map(\.id))
+            let record = try importModule(source: text, origin: origin)
+            var outcome = ImportOutcome(imported: 1)
+            if before.contains(record.id) { outcome.overwritten = 1 }
+            return outcome
         }
-        var links: [String] = []
-        if let data = text.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            for key in ["widgets", "modules", "urls", "list"] {
-                if let arr = json[key] as? [Any] {
-                    for entry in arr {
-                        if let s = entry as? String { links.append(s) }
-                        if let o = entry as? [String: Any] {
-                            for k in ["url", "link", "src"] {
-                                if let s = o[k] as? String { links.append(s); break }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if links.isEmpty {
-            links = text.components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { $0.hasPrefix("http") }
-        }
+        let links = subscriptionLinks(from: text)
         guard !links.isEmpty else {
             throw StoreFailure(message: "文件里没找到模块或订阅链接")
         }
-        var imported = 0
-        for link in links {
-            guard let u = URL(string: link),
-                  let (d, _) = try? await URLSession.shared.data(from: u),
-                  let js = String(data: d, encoding: .utf8),
-                  (try? importModule(source: js, origin: link)) != nil else { continue }
-            imported += 1
-        }
-        guard imported > 0 else {
-            throw StoreFailure(message: "订阅里的模块都没导入成功")
-        }
-        return imported
+        return await importLinks(links)
     }
 }
 
@@ -1122,11 +1232,22 @@ final class FWDRuntime {
         if let lastException {
             throw FWDfailure(message: "宿主接口安装失败：\(lastException)", kind: .script)
         }
+        // v2.29 (guide i18n 章): the module's translation table
+        // and the host's locale fallback list, read by the
+        // shim's Widget.i18n at call time. Set AFTER the module
+        // source runs (the table lives on WidgetMetadata) but
+        // BEFORE any entry function is invoked, so entry code
+        // always sees the real table.
+        if let localesData = try? JSONSerialization.data(withJSONObject: fwdLocaleCandidates()),
+           let localesText = String(data: localesData, encoding: .utf8) {
+            ctx.evaluateScript("globalThis.__fwdLocales = \(localesText);")
+        }
         lastException = nil
         ctx.evaluateScript(source)
         if let lastException {
             throw FWDfailure(message: "模块加载失败：\(lastException)", kind: .script)
         }
+        ctx.evaluateScript("globalThis.__fwdI18nTable = (globalThis.WidgetMetadata && globalThis.WidgetMetadata.i18n) || {};")
         return ctx
     }
 
@@ -1505,6 +1626,26 @@ final class FWDRuntime {
                     get: function(ns, k) { var s = __fwdCacheGet(String(ns), String(k)); return s == null ? null : JSON.parse(s); },
                     set: function(ns, k, v) { __fwdCacheSet(String(ns), String(k), JSON.stringify(v === undefined ? null : v)); },
                     remove: function(ns, k) { __fwdCacheRemove(String(ns), String(k)); }
+                },
+                // v2.29 (guide i18n 章): Widget.i18n("文案") looks
+                // the string up in WidgetMetadata.i18n, same order
+                // as the host's fwdLocalized — exact locale code,
+                // then script system, then base language — and
+                // returns the original text when nothing matches.
+                // __fwdI18nTable / __fwdLocales are set by the
+                // host right after the module source is evaluated.
+                i18n: function(s) {
+                    var text = String(s == null ? '' : s);
+                    var table = globalThis.__fwdI18nTable || {};
+                    var locales = globalThis.__fwdLocales || [];
+                    function norm(k) { return String(k).toLowerCase().replace(/_/g, '-'); }
+                    var byNorm = {};
+                    Object.keys(table).forEach(function(k) { byNorm[norm(k)] = table[k]; });
+                    for (var i = 0; i < locales.length; i++) {
+                        var row = byNorm[norm(locales[i])];
+                        if (row && row[text]) return row[text];
+                    }
+                    return text;
                 }
             };
         })();
@@ -1954,6 +2095,43 @@ enum FWDCatalog {
             icon: "https://assets.rexnow.tv/scripts/rex-icon.png",
             requiresTMDBKey: false
         ),
+        // v2.29: the three official guide examples, so they can
+        // be imported in one tap and then covered by the same
+        // self-check as any other module (R4: five modules,
+        // one regression table).
+        FWDCatalogEntry(
+            id: "rex.example.music",
+            title: "音乐目录示例",
+            version: "1.3.0",
+            author: "Rex",
+            description: "官方音乐模块示例：专辑（tracks/兼容双格式）、歌单、流派、电台、歌手；离线数据可直接跑",
+            url: "https://modules.rexnow.app/examples/music-demo.js",
+            columnCount: 8,
+            icon: "https://assets.rexnow.tv/scripts/rex-icon.png",
+            requiresTMDBKey: false
+        ),
+        FWDCatalogEntry(
+            id: "rex.example.tmdb",
+            title: "TMDB 发现示例",
+            version: "1.0.0",
+            author: "Rex",
+            description: "官方 TMDB 示例：热门电影、独立详情与关键词搜索；自带 en 多语言词典",
+            url: "https://modules.rexnow.app/examples/tmdb.js",
+            columnCount: 1,
+            icon: "https://assets.rexnow.tv/scripts/rex-icon.png",
+            requiresTMDBKey: true
+        ),
+        FWDCatalogEntry(
+            id: "rex.example.danmu",
+            title: "弹幕三段链示例",
+            version: "1.0.0",
+            author: "Rex",
+            description: "官方弹幕示例：搜索番剧 → 加载分集 → 加载弹幕；默认离线 fixtures",
+            url: "https://modules.rexnow.app/examples/danmu.js",
+            columnCount: 3,
+            icon: "https://assets.rexnow.tv/scripts/rex-icon.png",
+            requiresTMDBKey: false
+        ),
     ]
 
     /// Entries not yet imported (matched by module id).
@@ -2106,13 +2284,26 @@ struct ModulesView: View {
                             }
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 6) {
-                                    Text(record.meta.title.isEmpty ? record.id : record.meta.title)
+                                    Text(record.meta.localized(record.meta.title.isEmpty ? record.id : record.meta.title))
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(Theme.text).lineLimit(1)
                                     // v1.83: badge packages that carry a danmu module —
                                     // their titles play with live danmaku (FWDDanmu.fetch).
                                     if FWDDanmu.hasDanmu(record.meta) {
                                         Text("弹幕")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(Theme.accent)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Theme.glass, in: Capsule())
+                                    }
+                                    // v2.29 (guide 内容类型章): the effective
+                                    // content type — declared by the module,
+                                    // or the user's own choice when the
+                                    // module declares none ("·自选").
+                                    if !record.meta.contentTypeLabel.isEmpty {
+                                        Text(record.meta.contentTypeLabel
+                                             + (record.meta.contentTypeIsUserChosen ? "·自选" : ""))
                                             .font(.caption2.weight(.semibold))
                                             .foregroundStyle(Theme.accent)
                                             .padding(.horizontal, 6)
@@ -2145,6 +2336,31 @@ struct ModulesView: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
+                        // v2.29 (guide 内容类型章): a module that
+                        // declares no valid contentType leaves the
+                        // choice to the user — pick it here. A valid
+                        // declaration always wins, so no picker is
+                        // offered for those modules.
+                        if !["video", "music", "audiobook", "shortDrama"].contains(record.meta.contentType) {
+                            Menu("内容类型（模块未声明，自选）") {
+                                ForEach([("video", "视频"), ("music", "音乐"),
+                                         ("audiobook", "听书"), ("shortDrama", "短剧")], id: \.0) { pair in
+                                    Button {
+                                        FWDStore.saveContentTypeOverride(pair.0, for: record.id)
+                                        records = FWDStore.records()
+                                    } label: {
+                                        Label(pair.1 + (FWDStore.contentTypeOverride(for: record.id) == pair.0 ? " ✓" : ""),
+                                              systemImage: "tag")
+                                    }
+                                }
+                                Button {
+                                    FWDStore.saveContentTypeOverride("", for: record.id)
+                                    records = FWDStore.records()
+                                } label: {
+                                    Label("清除自选", systemImage: "xmark.circle")
+                                }
+                            }
+                        }
                         Button(role: .destructive) {
                             FWDStore.delete(record)
                             records = FWDStore.records()
@@ -2153,7 +2369,7 @@ struct ModulesView: View {
                         }
                     }
                 }
-                Text("支持 Forward 规范的 JS 模块（WidgetMetadata）。加密模块（FWENC1）内容已加密、无法导入，请向模块作者索取未加密版本；同包的弹幕模块会在播放时自动匹配弹幕。")
+                Text("支持 Forward 规范的 JS 模块（WidgetMetadata）。加密模块（FWENC1）内容已加密、无法导入，请向模块作者索取未加密版本；同包的弹幕模块会在播放时自动匹配弹幕。订阅（.fwd）批量导入：重复 id 覆盖同名旧版，失败的链接不影响其余模块，导入结果会逐条列出。")
                     .font(.caption2).foregroundStyle(Theme.textDim)
             }
             .padding(.horizontal, 18)
@@ -2183,7 +2399,7 @@ struct ModulesView: View {
                     importing = true
                     Task {
                         defer { importing = false }
-                        var okCount = 0
+                        var outcomes: [FWDStore.ImportOutcome] = []
                         var failures: [String] = []
                         for url in urls {
                             do {
@@ -2191,19 +2407,28 @@ struct ModulesView: View {
                                 guard let text = String(data: data, encoding: .utf8) else {
                                     throw FWDStore.StoreFailure(message: "文件无法读取")
                                 }
-                                okCount += try await FWDStore.importFileText(
-                                    text, origin: url.lastPathComponent)
+                                outcomes.append(try await FWDStore.importFileTextDetailed(
+                                    text, origin: url.lastPathComponent))
                             } catch {
                                 failures.append("\(url.lastPathComponent)：\(error.localizedDescription)")
                             }
                         }
                         records = FWDStore.records()
+                        // v2.29: a batch outcome per file (imported /
+                        // overwritten / per-link failures), so a
+                        // half-failed subscription is visible instead
+                        // of hiding behind a bare count.
+                        let total = FWDStore.ImportOutcome(
+                            imported: outcomes.reduce(0) { $0 + $1.imported },
+                            overwritten: outcomes.reduce(0) { $0 + $1.overwritten },
+                            failures: outcomes.flatMap(\.failures))
                         var parts: [String] = []
-                        if okCount > 0 { parts.append("已导入 \(okCount) 个模块") }
-                        if !failures.isEmpty { parts.append("失败：" + failures.joined(separator: "；")) }
+                        let summary = FWDStore.importOutcomeText(total)
+                        if !summary.isEmpty { parts.append(summary) }
+                        if !failures.isEmpty { parts.append("失败：\n" + failures.joined(separator: "；")) }
                         note = parts.joined(separator: " · ")
-                        if okCount > 0 { Haptics.success() }
-                        else if !failures.isEmpty { Haptics.error() }
+                        if total.imported > 0 { Haptics.success() }
+                        else if !failures.isEmpty || !total.failures.isEmpty { Haptics.error() }
                     }
                 },
                 onCancel: { })
@@ -2217,8 +2442,8 @@ struct ModulesView: View {
                 Task {
                     defer { importing = false }
                     do {
-                        let count = try await FWDStore.importRemote(target)
-                        note = "已导入 \(count) 个模块"
+                        let outcome = try await FWDStore.importRemoteDetailed(target)
+                        note = FWDStore.importOutcomeText(outcome)
                         records = FWDStore.records()
                     } catch {
                         note = "导入失败：\(error.localizedDescription)"
@@ -2304,6 +2529,18 @@ struct ModulesView: View {
             // column (e.g. TMDB's Cloudflare-blocked list) still
             // shows its per-column detail on the card line.
             let ok = cols.allSatisfy { $0.error.isEmpty } && totalItems > 0
+            // v2.29 (R4): the self-check also names what the
+            // content-type / i18n alignment landed on for this
+            // module — declared or user-chosen type, continuous
+            // play preference, how many languages its i18n
+            // dictionary covers. Official examples imported from
+            // the directory go through this same loop.
+            let ctLabel = record.meta.contentTypeLabel
+            checkLines.append("• \(title)：内容类型"
+                              + (ctLabel.isEmpty ? "未声明（长按卡片可自选）" : ctLabel)
+                              + (record.meta.contentTypeIsUserChosen ? "（自选）" : "")
+                              + (record.meta.continuousPlay ? " · 连播偏好开" : "")
+                              + " · 多语言 \(record.meta.i18n.count) 种")
             let summary = "\(passed)/\(cols.count) 栏 · 共 \(totalItems) 条 · \(Self.checkDurationText(totalMs))"
             // v1.94: leave the conclusion on the card.
             FWDStore.saveCheckResult(
@@ -2431,6 +2668,51 @@ struct ModulesView: View {
         .padding(14)
         .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
     }
+}
+
+/// v2.29 — guide i18n 章的查找顺序：完整语言代码 →
+/// 文字体系（zh-TW/zh-HK/zh-MO → zh-Hant；zh-CN/zh-SG →
+/// zh-Hans）→ 基础语言 → 原文。大小写与 `_`/`-` 不敏感。
+/// The JS shim's Widget.i18n runs the same order (its
+/// candidate list is injected by makeContext), so the two
+/// sides can never disagree about which translation wins.
+func fwdLocaleCandidates() -> [String] {
+    var out: [String] = []
+    func add(_ s: String) {
+        let n = s.lowercased().replacingOccurrences(of: "_", with: "-")
+        if !n.isEmpty, !out.contains(n) { out.append(n) }
+    }
+    for lang in Locale.preferredLanguages {
+        add(lang)
+        let lower = lang.lowercased().replacingOccurrences(of: "_", with: "-")
+        if lower.hasPrefix("zh-tw") || lower.hasPrefix("zh-hk") || lower.hasPrefix("zh-mo") {
+            add("zh-Hant")
+        } else if lower.hasPrefix("zh-cn") || lower.hasPrefix("zh-sg") {
+            add("zh-Hans")
+        }
+        if let base = lower.split(separator: "-").first { add(String(base)) }
+    }
+    return out
+}
+
+/// v2.29: seconds → "m:ss" for music track rows (the guide's
+/// `duration` is a second count; durationText stays the
+/// module's own string when present).
+func fwdDurationText(_ item: FWDItem) -> String {
+    guard let s = item.duration, s > 0 else { return "" }
+    return "\(s / 60):\(String(format: "%02d", s % 60))"
+}
+
+func fwdLocalized(_ text: String, i18n: [String: [String: String]]) -> String {
+    guard !text.isEmpty, !i18n.isEmpty else { return text }
+    var byNorm: [String: [String: String]] = [:]
+    for (k, v) in i18n {
+        byNorm[k.lowercased().replacingOccurrences(of: "_", with: "-")] = v
+    }
+    for cand in fwdLocaleCandidates() {
+        if let row = byNorm[cand], let hit = row[text], !hit.isEmpty { return hit }
+    }
+    return text
 }
 
 /// v2.26 — the ONE place module params are combined, following
@@ -2586,7 +2868,7 @@ struct FWDWidgetView: View {
         }
         .animation(.easeOut(duration: 0.25), value: loading)
         .background(AmbientBackground(imageURL: nil))
-        .navigationTitle(meta.title.isEmpty ? record.id : meta.title)
+        .navigationTitle(meta.localized(meta.title.isEmpty ? record.id : meta.title))
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $detailItem) { item in
             FWDDetailView(record: record, item: item)
@@ -2613,7 +2895,7 @@ struct FWDWidgetView: View {
                     }
                 }
                 if listModules.count > 1 {
-                    chipRow(listModules.map(\.title),
+                    chipRow(listModules.map { meta.localized($0.title) },
                             selected: moduleIndex) { idx in
                         moduleIndex = idx
                         page = 1
@@ -2629,7 +2911,7 @@ struct FWDWidgetView: View {
                 if let module = currentModule {
                     ForEach(visibleParams(module.params).filter { $0.type == "enumeration" && !$0.enumOptions.isEmpty },
                             id: \.name) { param in
-                        chipRow(param.enumOptions.map(\.title),
+                        chipRow(param.enumOptions.map { meta.localized($0.title) },
                                 selected: param.enumOptions.firstIndex {
                                     $0.value == (selections[param.name] ?? param.value)
                                 } ?? 0) { idx in
@@ -2705,9 +2987,9 @@ struct FWDWidgetView: View {
     private func inputRow(_ param: FWDParam) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                TextField(param.desc.isEmpty
+                TextField(meta.localized(param.desc.isEmpty
                             ? (param.title.isEmpty ? param.name : param.title)
-                            : param.desc,
+                            : param.desc),
                           text: Binding(
                             get: { selections[param.name] ?? param.value },
                             set: { selections[param.name] = $0 }))
@@ -2729,7 +3011,7 @@ struct FWDWidgetView: View {
                 .foregroundStyle(Theme.accent)
             }
             if !param.placeholders.isEmpty {
-                chipRow(param.placeholders.map(\.title),
+                chipRow(param.placeholders.map { meta.localized($0.title) },
                         selected: param.placeholders.firstIndex {
                             $0.value == (selections[param.name]
                                 ?? param.placeholders.first?.value ?? "")
@@ -2803,14 +3085,43 @@ struct FWDWidgetView: View {
     /// bare catalogue items (the TMDB-type lists most modules
     /// return) go to cross-line search by title, exactly like a
     /// Discover poster tap.
+    /// v2.29 (guide 音乐章): a genre / radio / person item
+    /// drills into the module's OWN parameterized entry —
+    /// musicGenres (genreId), musicRadios (radioId),
+    /// musicArtists (peopleId), or any entry declaring the
+    /// matching *Id param — instead of falling through to
+    /// cross-line search, which could never open a genre page.
     private func open(_ item: FWDItem) {
         Haptics.tap()
+        if let drill = drillTarget(for: item) {
+            moduleIndex = drill.index
+            selections[drill.param] = item.id
+            page = 1
+            lastSearchKeyword = nil
+            Task { await load(reset: true) }
+            return
+        }
         if !item.link.isEmpty || !item.videoUrl.isEmpty || !item.episodeItems.isEmpty {
             detailItem = item
         } else {
             searchSeed = item.title
             showSearch = true
         }
+    }
+
+    private func drillTarget(for item: FWDItem) -> (index: Int, param: String)? {
+        let param: String?
+        switch item.mediaType {
+        case "genre": param = "genreId"
+        case "radio": param = "radioId"
+        default: param = item.type == "person" ? "peopleId" : nil
+        }
+        guard let param else { return nil }
+        for (i, m) in listModules.enumerated()
+        where m.params.contains(where: { $0.name == param }) {
+            return (i, param)
+        }
+        return nil
     }
 
     private func buildParams(for module: FWDModuleEntry, page: Int) -> [String: Any] {
@@ -2994,6 +3305,14 @@ struct FWDDetailView: View {
         /// item's own) — "system" forces the native engine,
         /// "app" the software (mpv) one, empty means auto.
         var playerType: String = ""
+        /// v2.29 (guide 内容类型章): continuous play for this
+        /// session — the module's continuousPlay declaration,
+        /// or music/audiobook content, where track-after-track
+        /// is the expected model. False leaves the user's
+        /// global "自动播放下一集" untouched: the guide's
+        /// default is false, so false must never switch a
+        /// user's setting off.
+        var continuousPlay: Bool = false
         /// v2.28: module subtitles for the opening episode,
         /// plus a per-episode loader (item externalSubtitles
         /// first, then the loadSubtitle entry).
@@ -3029,14 +3348,46 @@ struct FWDDetailView: View {
     /// only fields the module actually sent; empty ones dropped.
     private var fwdMediaInfoRows: [(label: String, value: String)] {
         [
-            ("来源模块", meta.title),
+            ("来源模块", meta.localized(meta.title)),
             ("类型", full.mediaType.isEmpty ? full.type : full.mediaType),
             ("年份", String(full.releaseDate.prefix(4))),
             ("评分", full.rating),
             ("时长", full.durationText),
             ("语言", full.language),
             ("分类", full.genreTitle),
+            // v2.29 (guide 音乐章): albumMotionArtwork is a video
+            // URL, not an image — note its presence rather than
+            // pretending the hero can play it.
+            ("动态封面", full.albumMotionArtwork.isEmpty ? "" : "视频"),
         ].filter { !$0.value.isEmpty }
+    }
+
+    /// v2.29 (guide 音乐章): an album / playlist shows its
+    /// tracks under "曲目", an albumList under "专辑"; video
+    /// detail keeps "选集".
+    private var episodesSectionTitle: String {
+        if full.mediaType == "albumList" { return "专辑" }
+        if !full.tracks.isEmpty || ["album", "playlist"].contains(full.mediaType)
+            || meta.effectiveContentType == "music" { return "曲目" }
+        return "选集"
+    }
+
+    /// True when the episode grid is really a track list.
+    private var isMusicDetail: Bool { episodesSectionTitle == "曲目" }
+
+    /// Track sub-line: the artist line (the track's own
+    /// subtitle) plus its duration, so a song row never shows
+    /// just a bare title. Video episodes keep the old rule
+    /// (subtitle, else duration) unchanged.
+    private func episodeSubline(_ ep: FWDItem) -> String {
+        if isMusicDetail {
+            var parts: [String] = []
+            if !ep.subtitle.isEmpty { parts.append(ep.subtitle) }
+            let dur = ep.durationText.isEmpty ? fwdDurationText(ep) : ep.durationText
+            if !dur.isEmpty { parts.append(dur) }
+            return parts.joined(separator: " · ")
+        }
+        return ep.subtitle.isEmpty ? ep.durationText : ep.subtitle
     }
 
     var body: some View {
@@ -3127,7 +3478,7 @@ struct FWDDetailView: View {
                         .buttonStyle(.plain)
                     }
                 } else {
-                    Text("选集").font(.headline).foregroundStyle(Theme.text)
+                    Text(episodesSectionTitle).font(.headline).foregroundStyle(Theme.text)
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                                         GridItem(.flexible(), spacing: 10)], spacing: 10) {
                         ForEach(Array(episodes.enumerated()), id: \.element.id) { pair in
@@ -3138,15 +3489,15 @@ struct FWDDetailView: View {
                                 // — the episode's own subtitle, else
                                 // its duration — so a bare "第N集"
                                 // never sits alone when the module
-                                // sent more info.
+                                // sent more info. v2.29: music tracks
+                                // show artist + duration instead.
                                 VStack(alignment: .center, spacing: 3) {
                                     Text(guageEpisodeDisplayName(pair.element.title,
                                                                  index: pair.element.episode.map { $0 - 1 } ?? pair.offset))
                                         .font(.subheadline)
                                         .foregroundStyle(Theme.text)
                                         .lineLimit(1)
-                                    let sub = pair.element.subtitle.isEmpty
-                                        ? pair.element.durationText : pair.element.subtitle
+                                    let sub = episodeSubline(pair.element)
                                     if !sub.isEmpty {
                                         Text(sub)
                                             .font(.caption2)
@@ -3219,6 +3570,7 @@ struct FWDDetailView: View {
                        danmakuLoader: sel.danmakuLoader,
                        danmakuForced: sel.danmakuForced,
                        modulePlayerType: sel.playerType,
+                       autoNextOverride: sel.continuousPlay ? true : nil,
                        initialSubtitles: sel.initialSubtitles,
                        subtitleLoader: sel.subtitleLoader)
         }
@@ -3464,6 +3816,8 @@ struct FWDDetailView: View {
             },
             danmakuForced: FWDDanmu.hasDanmu(meta),
             playerType: playerType,
+            continuousPlay: meta.continuousPlay
+                || ["music", "audiobook"].contains(meta.effectiveContentType),
             initialSubtitles: subtitles,
             subtitleLoader: { i in
                 guard list.indices.contains(i) else { return [] }

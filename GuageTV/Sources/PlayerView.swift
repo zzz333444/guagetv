@@ -72,6 +72,12 @@ struct PlayerView: View {
     /// OpenSubtitles (priority: module > online search).
     let initialSubtitles: [FWDSubtitle]
     let subtitleLoader: ((Int) async -> [FWDSubtitle])?
+    /// v2.29 (guide 内容类型章): a per-session auto-next
+    /// override from the module (continuousPlay, or music /
+    /// audiobook content). Non-nil forces auto-next ON for
+    /// this session; nil leaves the user's global
+    /// "自动播放下一集" switch in charge.
+    let autoNextOverride: Bool?
     @State private var availableModuleSubtitles: [FWDSubtitle] = []
     @State private var moduleSubtitleLoadedFor: Int?
     /// Toggle binding for the in-player settings sheet: on =
@@ -169,6 +175,7 @@ struct PlayerView: View {
         self.modulePlayerType = ""
         self.initialSubtitles = []
         self.subtitleLoader = nil
+        self.autoNextOverride = nil
         self.initialLine = 0
         self.initialIndex = 0
         _activeLine = State(initialValue: 0)
@@ -187,7 +194,8 @@ struct PlayerView: View {
          isLive: Bool = false,
          modulePlayerType: String = "",
          initialSubtitles: [FWDSubtitle] = [],
-         subtitleLoader: ((Int) async -> [FWDSubtitle])? = nil) {
+         subtitleLoader: ((Int) async -> [FWDSubtitle])? = nil,
+         autoNextOverride: Bool? = nil) {
         let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
         _episodes = State(initialValue: episodes)
         self.baseHeader = header
@@ -205,6 +213,7 @@ struct PlayerView: View {
         self.modulePlayerType = modulePlayerType
         self.initialSubtitles = initialSubtitles
         self.subtitleLoader = subtitleLoader
+        self.autoNextOverride = autoNextOverride
         self.initialLine = lineIndex
         self.initialIndex = start
         _activeLine = State(initialValue: lineIndex)
@@ -1782,7 +1791,7 @@ struct PlayerView: View {
             showToast("睡眠定时：本集播完，已暂停")
             return
         }
-        guard autoNextEnabled, index < episodes.count - 1 else { return }
+        guard autoNextOverride ?? autoNextEnabled, index < episodes.count - 1 else { return }
         goToEpisode(index + 1)
     }
 

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.28 · 模块资源字幕与弹幕对齐"
+    static let buildLabel = "v2.29 · 模块内容类型与多语言对齐"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,14 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.29", title: "模块内容类型与多语言对齐", lines: [
+            "内容类型按 Rex 官方规范（guide 0.0.7 内容类型章）落地：模块声明的 contentType（video/music/audiobook/shortDrama）在模块卡上显示角标；未声明时由用户长按卡片自选（声明有效时声明优先，自选不生效）；albumMotionArtwork 解码进详情媒体信息行",
+            "多语言按 guide i18n 章落地：模块标题、栏目名、参数名、选项与占位提示按完整语言代码 → 文字体系（zh-TW → zh-Hant）→ 基础语言 → 原文的顺序取词典译文；返回数据本身不翻译；运行时补 Widget.i18n(\"文案\")（真实 JS 已用 Node 抽测：zh-TW 取 zh-Hant、en 取 en、缺词回原文）",
+            "音乐模块按 guide 音乐章落地：官方 music-demo.js 全入口 harness 实测通过（专辑 tracks/兼容双格式、歌单、流派、电台、歌手资料与搜索）；详情页专辑/歌单的曲目区改称「曲目」，曲行显示歌手与时长（秒数转 m:ss）；流派/电台/歌手卡片点按钻进模块自身的 genreId/radioId/peopleId 入口，不再错进跨线搜索；albumList 详情区改称「专辑」",
+            "连播偏好落地：模块声明 continuousPlay 或内容类型为音乐/听书时，本次播放会话强制自动连播（播放器新增单会话覆盖，不动用户全局「自动播放下一集」开关；声明 false 是 guide 默认值，不会关掉用户设置）",
+            "官方示例进模块目录：music-demo / tmdb.js / danmu.js 三个示例一键导入，自检覆盖全部已导入模块（含示例）；订阅（.fwd）批量导入改为逐链路结果：重复 id 覆盖同名旧版、失败链接不拖垮其余、导入结果逐条列出（导入个数/覆盖个数/失败原因）",
+            "全量回归：validate.mjs 对 tmdb.js、danmu.js、music-demo.js、bangumi.js 均为 0 问题；rex-tmdb.js 官方静态校验仍跑不起来（元数据非字面量，R1 已记，以 App 侧校验为准）；harness 离线跑通 tmdb.js 三入口与 danmu.js 三段链；bangumi 官方 live 脚本在本机沙箱被代理 DNS 拦截，未复跑（v2.06 自建 harness 曾 5/5 通过）；rex-tmdb live 需用户 TMDB 密钥，本轮未复跑",
+        ]),
         Entry(version: "v2.28", title: "模块资源字幕与弹幕对齐", lines: [
             "资源与字幕按 Rex 官方规范（guide 0.0.7 资源与字幕章）逐项对齐：loadResource 只认 id/functionName/type 三元组全对的入口（裸 type: stream 换名入口不再被调用）；返回的播放线路数组全解析（name/url/description/playerType/customHeaders），多线路时详情页弹出线路选择器；playerType 落实到播放器（system 走原生引擎、app 走 mpv，手动切引擎与失败换引擎仍优先）；取流参数按 guide 上下文表全改字符串、缺字段不传、title 只给字幕与弹幕入口",
             "字幕接通播放器：条目 externalSubtitles 与 loadSubtitle 入口（三元组识别）合并去重进播放器，isDefault 轨道自动加载（否则首条），字幕菜单新增「模块自带字幕」分组置于在线搜索之上（优先级：模块自带 > OpenSubtitles），点任意轨道即下载（带 customHeaders）解析显示；loadSubtitle 返回 {subtitles:[…]} 包裹也认",
