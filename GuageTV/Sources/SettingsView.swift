@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.35 · 播出日历与追剧联动"
+    static let buildLabel = "v2.36 · 稳定扫荡与备份补全"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,14 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.36", title: "稳定扫荡与备份补全", lines: [
+            "全仓强制解包复查：try!/as! 与显式 ! 仍为零（仅剩 WKWebView 协议签名的隐式解包与 required init 的 fatalError 桩）；DLNA 的 SSDP 端口此前是唯一一处真强制解包（NWEndpoint.Port(rawValue: 1900)!），现改 guard，拿不到端口直接返回空结果、不再赌它一定合法",
+            "备份补上模块：此前备份只含线路、历史与设置，恢复后已导入的模块会静默丢失（模块存在 Application Support/widgets，不在配置库里）；现备份同时打包模块 index.json 与全部 .js 源码 + fwd.* 设置（各模块存储、自检结果、内容类型自选等），恢复时写回并清掉备份里没有的旧模块文件；恢复确认框的概要数字与实际恢复内容对齐（线路按实际写回数、模块只计 .js 文件）",
+            "恢复改为真覆盖：此前恢复只往 configs 目录里写文件，备份里删掉的线路文件会残留在本机；现恢复前先清掉备份里没有的旧线路文件",
+            "诊断页可见性：崩溃自愈、蜘蛛错误分类、起播三段耗时此前只在导出文本里能查到，App 内只能看到一条汇总与计数；现设置 → 关于的诊断卡下方直接列出最近 8 条折叠记录（分类、次数、时间），不用导出也能定位",
+            "主线程阻塞复核通过：四处信号量等待均不在主线程（JS 专用串行队列、代理后台队列、SMB 代理线程、2 秒封顶的本地代理启动，SpiderBridge 与 SMB 的 ensureStarted 调用点已在 v2.24 改走后台）；海报缓存分级（160/120/48 MB）、mpv 分级缓存、JarProxy patient 重试三条路径代码级核查通过，无改动",
+            "模块运行时回归通过：JS 异常分类（超时/网络/脚本/其他四类，中文）、单次调用 60 秒封顶（定时器异常探针提前失败）、子请求 20 秒封顶、存储按模块 id 隔离（sharedCache 按命名空间共享，符合规范），均逐项核对无改动",
+        ]),
         Entry(version: "v2.35", title: "播出日历与追剧联动", lines: [
             "播出日历今日标记：周条上今天所在的周芯片下方挂强调色圆点，一眼能定位今天；选中态切换走 animQuick，不再瞬间跳变；日历条目点按进模块详情的链路复核通过（FWDDetailView 既有链路），详情加载失败时除重试外新增「跨线搜索」兜底——拿片名直接去全局搜索找其他线路的同名资源",
             "追剧联动：追剧的剧在 bangumi 每日放送有当日更新时，追剧页卡片挂绿色「今日更新」胶囊，汇总行同步计数；与站点备注变化的「有更新」是两个独立信号，两者同时成立时并列显示；无 bangumi 模块时静默不显示、不报错；标题比对只做归一化相等或包含（较短一方 ≥4 字才认包含），不做模糊猜测",
@@ -1430,6 +1438,12 @@ final class PingBox: @unchecked Sendable {
 struct AboutView: View {
     @State private var diagCount = Diagnostics.entries().count
     @State private var pyHealth = ""
+    /// v2.36: short clock for the in-app recent-log list below.
+    private static let diagTime: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
 
     var body: some View {
         SettingsPage(title: "关于呱壳") {
@@ -1483,10 +1497,38 @@ struct AboutView: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("诊断日志").font(.headline).foregroundStyle(Theme.text)
-                    Text("记录最近的 py 蜘蛛报错与播放失败（最多 200 条）。哪个站挂了，把日志导出发出来就能直接定位。")
+                    Text("记录最近的 py 蜘蛛报错、模块失败、播放失败与崩溃自愈（最多 200 条，重复的折叠成一行）。哪个站挂了，把日志导出发出来就能直接定位。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                     Text(Diagnostics.timingSummary())
                         .font(.footnote).foregroundStyle(Theme.textDim)
+                    // v2.36: the log used to be export-only — the
+                    // self-heal record, the spider error class and
+                    // the R6 playback timing were all "in the
+                    // diagnostics" but invisible in the app. Show
+                    // the latest folded groups here so a failure
+                    // names itself without an export round-trip.
+                    let recentDiag = Diagnostics.foldedEntries()
+                        .sorted { $0.last > $1.last }.prefix(8)
+                    if !recentDiag.isEmpty {
+                        Divider().background(Theme.glassStroke)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("最近记录").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                            ForEach(Array(recentDiag.enumerated()), id: \.offset) { _, f in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(f.c).font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
+                                        if f.count > 1 {
+                                            Text("×\(f.count)").font(.caption).foregroundStyle(Theme.textDim)
+                                        }
+                                        Spacer()
+                                        Text(Self.diagTime.string(from: Date(timeIntervalSince1970: f.last)))
+                                            .font(.caption).foregroundStyle(Theme.textDim)
+                                    }
+                                    Text(f.m).font(.caption).foregroundStyle(Theme.textDim).lineLimit(2)
+                                }
+                            }
+                        }
+                    }
                     HStack(spacing: 10) {
                         ShareLink(item: Diagnostics.exportText()) {
                             Text("导出日志").font(.subheadline.weight(.semibold))

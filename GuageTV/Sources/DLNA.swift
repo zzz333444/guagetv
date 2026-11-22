@@ -33,7 +33,15 @@ enum DLNACaster {
     private static func ssdpSearch(seconds: Double) async -> [String] {
         await withCheckedContinuation { continuation in
             let host = NWEndpoint.Host("239.255.255.250")
-            let port = NWEndpoint.Port(rawValue: 1900)!
+            // v2.36: the only real force unwrap left in the whole
+            // codebase (the sweep kept reporting zero because the
+            // string "try!" only lived in changelog text). 1900 is
+            // always a legal port, but never gamble on it inside a
+            // continuation — resume empty instead of crashing.
+            guard let port = NWEndpoint.Port(rawValue: 1900) else {
+                continuation.resume(returning: [])
+                return
+            }
             let connection = NWConnection(host: host, port: port, using: .udp)
             var locations: [String] = []
             var finished = false

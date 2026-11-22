@@ -4,7 +4,10 @@ import UniformTypeIdentifiers
 
 /// Backup & restore (v1.41): one JSON file carrying the config
 /// library (entries index + every stored config file + groups +
-/// aliases), the watch history file, and the settings keys
+/// aliases), the imported Forward modules (v2.36 — they live in
+/// Application Support/widgets, not in the config library, so a
+/// backup without them silently lost every module on restore),
+/// the watch history file, and the settings keys
 /// (whitelisted prefixes — credentials the user typed for their
 /// own services included, since the point is surviving a
 /// reinstall on their own phone).
@@ -18,6 +21,11 @@ enum BackupStore {
         "skipIntro", "skipOutro", "subtitleScale", "seekStep",
         "themeMode", "tabShow", "appLock.", "emby.", "webdav.", "smb.",
         "activeConfigID", "homeConfigID",
+        // v2.36: module state — per-module storage, shared cache,
+        // validation notes, saved globals, content-type overrides,
+        // self-check results. The module .js sources themselves
+        // ride in the fwdModules section below, not here.
+        "fwd.",
     ]
 
     private static func supportDir() -> URL {
@@ -40,6 +48,19 @@ enum BackupStore {
             }
         }
         root["configFiles"] = files
+        // Forward modules (v2.36): widgets/index.json + every
+        // module .js file, base64 per file. The column cache lives
+        // in Caches and is regenerable, so it is not backed up.
+        let widgetsDir = supportDir().appendingPathComponent("widgets")
+        var fwdFiles: [String: String] = [:]
+        if let names = try? FileManager.default.contentsOfDirectory(atPath: widgetsDir.path) {
+            for name in names where name.hasSuffix(".js") || name == "index.json" {
+                if let data = try? Data(contentsOf: widgetsDir.appendingPathComponent(name)) {
+                    fwdFiles[name] = data.base64EncodedString()
+                }
+            }
+        }
+        if !fwdFiles.isEmpty { root["fwdModules"] = fwdFiles }
         if let history = try? Data(contentsOf: supportDir().appendingPathComponent("history.json")) {
             root["historyFile"] = history.base64EncodedString()
         }
@@ -101,6 +122,20 @@ enum BackupStore {
         if let files = root["configFiles"] as? [String: String] {
             let configsDir = supportDir().appendingPathComponent("configs")
             try? FileManager.default.createDirectory(at: configsDir, withIntermediateDirectories: true)
+            // v2.36: a restore is a real overwrite, not a merge —
+            // drop config files the backup does not carry, so a
+            // line deleted before the backup was taken does not
+            // come back as a leftover file. (The entries index
+            // itself rides in settings, so it cannot reference a
+            // file removed here.)
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: configsDir.path) {
+                for name in names where name.hasSuffix(".json") {
+                    let id = String(name.dropLast(5))
+                    if files[id] == nil {
+                        try? FileManager.default.removeItem(at: configsDir.appendingPathComponent(name))
+                    }
+                }
+            }
             var restored = 0
             for (id, b64) in files {
                 if let fileData = Data(base64Encoded: b64) {
@@ -110,6 +145,24 @@ enum BackupStore {
                 }
             }
             parts.append("\(restored) 条配置")
+        }
+        if let fwd = root["fwdModules"] as? [String: String] {
+            let widgetsDir = supportDir().appendingPathComponent("widgets")
+            try? FileManager.default.createDirectory(at: widgetsDir, withIntermediateDirectories: true)
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: widgetsDir.path) {
+                for name in names where (name.hasSuffix(".js") || name == "index.json") && fwd[name] == nil {
+                    try? FileManager.default.removeItem(at: widgetsDir.appendingPathComponent(name))
+                }
+            }
+            var restoredModules = 0
+            for (name, b64) in fwd {
+                if let fileData = Data(base64Encoded: b64) {
+                    try? fileData.write(to: widgetsDir.appendingPathComponent(name),
+                                         options: .atomic)
+                    if name.hasSuffix(".js") { restoredModules += 1 }
+                }
+            }
+            parts.append("\(restoredModules) 个模块")
         }
         if let b64 = root["historyFile"] as? String,
            let history = Data(base64Encoded: b64) {
@@ -197,6 +250,13 @@ enum BackupStore {
             parts.append("备份于 " + formatter.string(from: Date(timeIntervalSince1970: ts)))
         }
         if let files = root["configFiles"] as? [String: Any] { parts.append("\(files.count) 条线路配置") }
+        if let fwd = root["fwdModules"] as? [String: Any] {
+            // Only .js files count as modules; index.json is the
+            // module index, not a module (mirrors restore, which
+            // counts only .js files it actually wrote back).
+            let n = fwd.keys.filter { $0.hasSuffix(".js") }.count
+            if n > 0 { parts.append("\(n) 个模块") }
+        }
         if let settings = root["settings"] as? [String: Any] { parts.append("\(settings.count) 项设置") }
         if root["historyFile"] != nil { parts.append("观看历史") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -232,7 +292,7 @@ struct BackupView: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("导出备份").font(.headline).foregroundStyle(Theme.text)
-                    Text("把配置库（全部线路文件、分组、别名）、观看历史和设置打包成一个 JSON 文件。换机或重装后导入即可恢复。文件里含你填过的网盘/Jar 口令等凭证，只发给自己保存。生成后还会自动在本机留一份，见下方列表。")
+                    Text("把配置库（全部线路文件、分组、别名）、已导入的模块、观看历史和设置打包成一个 JSON 文件。换机或重装后导入即可恢复。文件里含你填过的网盘/Jar 口令等凭证，只发给自己保存。生成后还会自动在本机留一份，见下方列表。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                     if let exportURL {
                         ShareLink(item: exportURL) {
