@@ -3570,9 +3570,9 @@ struct FWDDetailView: View {
                        danmakuLoader: sel.danmakuLoader,
                        danmakuForced: sel.danmakuForced,
                        modulePlayerType: sel.playerType,
-                       autoNextOverride: sel.continuousPlay ? true : nil,
                        initialSubtitles: sel.initialSubtitles,
-                       subtitleLoader: sel.subtitleLoader)
+                       subtitleLoader: sel.subtitleLoader,
+                       autoNextOverride: sel.continuousPlay ? true : nil)
         }
         .sheet(isPresented: Binding(
             get: { resourceChoices != nil },
