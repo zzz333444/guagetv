@@ -197,7 +197,7 @@ struct LiveView: View {
         }
         .font(.subheadline)
         .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
         .padding(.horizontal, 18)
         .padding(.top, 10)
     }
@@ -227,7 +227,7 @@ struct LiveView: View {
                 Image(systemName: groupsCollapsed ? "chevron.down" : "chevron.up")
                     .font(.caption.weight(.semibold)).foregroundStyle(Theme.textDim)
                     .padding(6)
-                    .background(Theme.glass, in: Circle())
+                    .glassCircle()
             }
             .buttonStyle(.plain)
         }
@@ -311,7 +311,11 @@ struct LiveView: View {
             }
         }
         .padding(12)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
+        // v2.32: the row was a flat Theme.glass fill at a hand
+        // 14pt radius — now the shared glassPanel recipe
+        // (tint + rim light, no shadow: dense repeated rows)
+        // at Theme.innerCardRadius, like the detail line cards.
+        .glassPanel(cornerRadius: Theme.innerCardRadius, shadow: false)
         .contentShape(Rectangle())
         .onTapGesture { Haptics.medium(); playChannel = channel }
         .contextMenu {

@@ -195,7 +195,7 @@ struct CacheSettingsView: View {
                                 .disabled(busy || !loaded || (sizes[area] ?? 0) == 0)
                             }
                         }
-                        Divider().background(Color.white.opacity(0.12))
+                        Divider().background(Theme.glassStroke)
                         HStack {
                             Text("总计").font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.text)
@@ -223,7 +223,7 @@ struct CacheSettingsView: View {
                         diskRow(title: "海报磁盘缓存", bytes: breakdown?.posterBytes, cap: "上限 150 MB，自动清理最旧的")
                         diskRow(title: "模块栏目缓存", bytes: breakdown?.moduleColumnBytes, cap: "上限 5 MB / 30 条，超期自动清理")
                         diskRow(title: "发现页缓存", bytes: breakdown?.discoverBytes, cap: "单个文件，随刷新整体重写")
-                        Divider().background(Color.white.opacity(0.12))
+                        Divider().background(Theme.glassStroke)
                         HStack {
                             Text("小计").font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.text)

@@ -834,11 +834,11 @@ private struct LightGlassCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(Color.white.opacity(0.05),
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Theme.cardTint,
+                        in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .background(Theme.glass,
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.glassEdge, lineWidth: 1))
         // No drop shadow: this card repeats in the library grids,
         // and a shadow per cell is an offscreen pass per cell while
@@ -928,7 +928,7 @@ private struct LineCardView: View, Equatable {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(model.isActive ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { Haptics.tap(); onTap() }

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.31 · 播放与网络深挖"
+    static let buildLabel = "v2.32 · Rex 细节核查"
 
     var body: some View {
         NavigationStack {
@@ -150,7 +150,7 @@ struct SettingsView: View {
         GlassCard(padding: 16) {
             VStack(spacing: 10) {
                 Image(systemName: icon).font(.title2).foregroundStyle(Theme.text)
-                Text(title).font(.subheadline).foregroundStyle(Theme.text.opacity(0.85))
+                Text(title).font(.subheadline).foregroundStyle(Theme.text)
             }
             .frame(maxWidth: .infinity)
         }
@@ -1086,6 +1086,16 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.32", title: "Rex 细节核查", lines: [
+            "发现页 hero 补播放入口：Rex hero 有白色播放胶囊，旧版只有点按进详情、长按菜单才有跨线搜索；现简介下方直接放白色「播放」胶囊，点即跨线搜索该片",
+            "详情页播放资源卡规格行合并：集数与画质/格式原来是两行小字，现合成一行「共 12 集 · HLS · 1080P」；卡面改走共享 glassPanel，选中态描边改用新常量 Theme.glassStrokeStrong，不再手写 0.45/0.12 两档白边",
+            "玻璃规格全仓收编：Theme 新增 smallRadius（10）、glassStrokeStrong（选中描边）两个常量；全仓手写圆角 10/12/14/16/20 共 30 余处全部改成 Theme.cardRadius/innerCardRadius/posterRadius/smallRadius（数值不变，只换名）；手写白底 0.05/0.07/0.08、Divider 白 0.12、播放器 chrome 描边白 0.15 全部改走 Theme.cardTint/Theme.glass/Theme.glassStroke；详情页删掉与 Theme 共用的 starBar 私有实现，改调共享 StarBarView",
+            "资源库源卡复核：LightGlassCard 的手写 20pt 圆角与 0.05 白底改走 Theme.cardRadius/Theme.cardTint；选中描边圆角同步常量化；状态点（绿点=当前线路）与新鲜度、站点计数三处逐项核对无改动，规格已达标",
+            "设置四宫格复核：图标与文案（播放/音画/操控/字幕）与子页对应关系逐项核对无误；标题色由 text 85% 提为全色，与图标同级；关于页两处手写 Divider 白 0.12 改走 Theme.glassStroke",
+            "模块页对标：自检面板与模块卡的自检行此前全是灰字、通过失败一眼看不出；现按状态着色（✓ 绿 / ✗ 红 / △ 黄，未自检仍灰）；模块卡与官方目录卡的 12pt 手写圆角改走 Theme.posterRadius",
+            "我的页对标复核：热力格空格与图例此前手写白 0.07（浅色模式下几乎看不见），改走 Theme.glass；周历非当日文字此前手写白字（浅色模式白底上看不见），改走主题文字；分割线改走 Theme.glassStroke；热力格、周历、连续天数与近 7 天柱状图的排版密度逐项核对，与 Rex 个人页口径一致无改动",
+            "直播页观感统一：频道行此前是扁平 Theme.glass 底 + 手写 14pt 圆角，现改走共享 glassPanel（无阴影，密集行不掉帧）；搜索框圆角改走 Theme.posterRadius；分组折叠圆钮改走 glassCircle；台标（PosterImage 240px 限流缓存）、当前节目进度条（主题色填充）与分组头三处逐项核对，与全 App 玻璃规格一致",
+        ]),
         Entry(version: "v2.31", title: "播放与网络深挖", lines: [
             "起播三段打点落地：解析（spider playerContent / 解析接口整段）、首帧（打开播放器到首次进入播放状态）、HLS 代理（播放列表与分片上游取回）三段耗时分别计数进诊断聚合（慢阈值：解析 >3 秒、首帧 >5 秒、HLS >2 秒），设置 → 关于新增一行起播打点汇总（各段平均耗时、缓存命中数、最慢一段一目了然），诊断导出文本顶部同步带上这行汇总；最慢一段针对性优化见下两条",
             "HLS 去广告代理加缓存与预取：播放列表内存缓存（直播 2 秒、点播 300 秒，引擎高频轮询不再每次重拉上游）；分片整段内存缓存（上限 32 段 / 48 MB、最旧先淘汰、300 秒 TTL，Range 请求命中整段缓存后由代理再切片）；点播播放列表改写完即后台预取前 3 个分片（预取失败不阻塞播放列表返回）；分片与播放列表请求各走独立后台线程，直播播放列表刷新不再阻塞分片取回（逐项复核：分片请求不在串行队列上）",
@@ -1403,7 +1413,7 @@ struct AboutView: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     aboutRow("应用", "呱壳 GuageTV")
-                    Divider().background(Color.white.opacity(0.12))
+                    Divider().background(Theme.glassStroke)
                     aboutRow("版本", SettingsView.buildLabel)
                 }
             }
@@ -1443,7 +1453,7 @@ struct AboutView: View {
                     if !pyHealth.isEmpty {
                         Text(pyHealth).font(.footnote).foregroundStyle(Theme.textDim)
                     }
-                    Divider().background(Color.white.opacity(0.12))
+                    Divider().background(Theme.glassStroke)
                     aboutRow("JS 运行时", "drpy2 3.9.52 · JavaScriptCore")
                 }
             }
@@ -1646,7 +1656,7 @@ struct PlaySettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     Text("填一个返回弹幕数据的接口地址，用 {title} 和 {ep} 占位剧名和集数；返回 B 站式 XML 或 JSON 数组都能解析。留空则只能在播放页手动加载弹幕文件。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                     // v2.10: 字号/透明度/速度/区域/描边移入独立的
@@ -1666,7 +1676,7 @@ struct PlaySettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                 }
             }
         }
@@ -1836,7 +1846,7 @@ struct SubtitleSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     Text("播放页 → 播放设置 → 外挂字幕 → 在线搜索字幕 用它搜字幕。Key 在 opensubtitles.com 免费注册后、于 API consumers 里自建，只存本机。本地字幕文件（srt/vtt/ass）不需要 Key。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }

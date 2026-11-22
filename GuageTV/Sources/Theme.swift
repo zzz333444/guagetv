@@ -19,6 +19,12 @@ enum Theme {
                            light: UIColor.black.withAlphaComponent(0.05))
     static let glassStroke = dyn(dark: UIColor.white.withAlphaComponent(0.10),
                                  light: UIColor.black.withAlphaComponent(0.08))
+    /// Strong rim for the *active* card in a selectable set
+    /// (detail 播放资源卡、直播选中态）: the old hand-written
+    /// white 0.45 / 0.12 pair, now one named value so the
+    /// inactive rim stays Theme.glassStroke everywhere.
+    static let glassStrokeStrong = dyn(dark: UIColor.white.withAlphaComponent(0.45),
+                                       light: UIColor.black.withAlphaComponent(0.45))
     /// Gradient rim light for the Rex glass recipe: bright at the
     /// top edge, fading downwards — like light catching real glass.
     static let glassEdge = LinearGradient(
@@ -45,6 +51,10 @@ enum Theme {
     static let cardRadius: CGFloat = 20
     static let innerCardRadius: CGFloat = 16
     static let posterRadius: CGFloat = 12
+    /// Small chips / icon tiles / calendar day cells (v2.32):
+    /// the 10pt radius that was hand-written in Emby, media
+    /// servers, calendar and detail chips now has a name.
+    static let smallRadius: CGFloat = 10
     /// Tint wash over the translucent fill — the Library's
     /// LightGlassCard recipe; flat Theme.glass alone reads as a
     /// plain grey block next to it.

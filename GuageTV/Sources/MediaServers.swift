@@ -93,7 +93,7 @@ struct MediaServerSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     HStack {
                         Button {
                             Task { await login() }
@@ -151,7 +151,7 @@ struct MediaServerSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     Button {
                         addDAV()
                     } label: {
@@ -185,7 +185,7 @@ struct MediaServerSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     Button {
                         addSMB()
                     } label: {
@@ -208,7 +208,7 @@ struct MediaServerSettingsView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .padding(10)
-            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
     }
 
     private func login() async {

@@ -2389,12 +2389,17 @@ struct ModulesView: View {
                 if !checkLines.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(checkLines, id: \.self) { line in
-                            Text(line).font(.footnote).foregroundStyle(Theme.textDim)
+                            // v2.32: the panel was all textDim — a
+                            // failed line read exactly like a passed
+                            // one. Status now carries the colour
+                            // (✓ green / ✗ red / △ yellow) so the
+                            // outcome is visible without reading.
+                            Text(line).font(.footnote).foregroundStyle(Self.checkLineColor(line))
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                 }
                 if let note {
                     Text(note).font(.footnote).foregroundStyle(Theme.textDim)
@@ -2451,9 +2456,11 @@ struct ModulesView: View {
                                 // v1.94: last self-check stays on the
                                 // card (time + conclusion); the tick
                                 // forces a refresh once runSelfCheck
-                                // saves new results.
+                                // saves new results. v2.32: the line
+                                // is green/red by outcome instead of
+                                // flat textDim, matching the panel.
                                 Text(checkLine(record, tick: checkVersion))
-                                    .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
+                                    .font(.caption2).foregroundStyle(Self.cardCheckColor(record)).lineLimit(1)
                                 // v2.26: import-time metadata
                                 // warnings (non-blocking issues
                                 // from the guide check).
@@ -2467,7 +2474,7 @@ struct ModulesView: View {
                                 .font(.caption).foregroundStyle(Theme.textDim)
                         }
                         .padding(14)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -2724,6 +2731,22 @@ struct ModulesView: View {
         return "\(result.ok ? "✓" : "✗") 自检 \(stamp) · \(result.summary)"
     }
 
+    /// v2.32: self-check status colour — panel lines by their
+    /// leading mark, module-card lines by the stored result.
+    /// Unchecked stays textDim so "尚未自检" never reads as a
+    /// pass or a failure.
+    private static func checkLineColor(_ line: String) -> Color {
+        if line.hasPrefix("✓") { return Theme.ok }
+        if line.hasPrefix("✗") { return .red }
+        if line.hasPrefix("△") { return .yellow }
+        return Theme.textDim
+    }
+
+    private static func cardCheckColor(_ record: FWDRecord) -> Color {
+        guard let result = FWDStore.checkResult(for: record.id) else { return Theme.textDim }
+        return result.ok ? Theme.ok : .red
+    }
+
     private static let checkDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MM-dd HH:mm"
@@ -2801,7 +2824,7 @@ struct ModulesView: View {
             .disabled(downloadingCatalogID != nil)
         }
         .padding(14)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
     }
 }
 
@@ -3023,7 +3046,7 @@ struct FWDWidgetView: View {
                         TextField("搜索…", text: $searchText)
                             .font(.subheadline)
                             .padding(10)
-                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                         Button("搜索") { Task { await runSearch() } }
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.accent)
@@ -3079,7 +3102,7 @@ struct FWDWidgetView: View {
                         .foregroundStyle(Theme.accent)
                     }
                     .padding(10)
-                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                 }
                 if items.isEmpty {
                     EmptyStateView(icon: "square.stack.3d.up.slash",
@@ -3103,7 +3126,7 @@ struct FWDWidgetView: View {
                         .foregroundStyle(Theme.text)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                     }
                     .buttonStyle(.plain)
                     .disabled(loadingMore)
@@ -3130,7 +3153,7 @@ struct FWDWidgetView: View {
                             set: { selections[param.name] = $0 }))
                     .font(.subheadline)
                     .padding(10)
-                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onSubmit {
@@ -3186,8 +3209,8 @@ struct FWDWidgetView: View {
                         PosterImage(urlString: item.posterURL)
                             .aspectRatio(2/3, contentMode: .fill)
                             .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                            .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
                         Text(item.title)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(Theme.text)
@@ -3532,7 +3555,7 @@ struct FWDDetailView: View {
                     .aspectRatio(16/9, contentMode: .fill)
                     .frame(maxWidth: .infinity)
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.innerCardRadius))
                 Text(full.title)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
@@ -3593,7 +3616,7 @@ struct FWDDetailView: View {
                         .foregroundStyle(Theme.accent)
                     }
                     .padding(10)
-                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                 }
                 if let resolvingNote {
                     Text(resolvingNote).font(.footnote).foregroundStyle(.orange)
@@ -3608,7 +3631,7 @@ struct FWDDetailView: View {
                                 .foregroundStyle(.black)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 13)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                                .background(.white, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                         }
                         .buttonStyle(.plain)
                     }
@@ -3642,7 +3665,7 @@ struct FWDDetailView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 11)
-                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                             }
                             .buttonStyle(.plain)
                         }
@@ -3661,8 +3684,8 @@ struct FWDDetailView: View {
                                             .aspectRatio(2/3, contentMode: .fill)
                                             .frame(width: 92, height: 138)
                                             .clipped()
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                            .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                                            .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
                                         Text(rel.title)
                                             .font(.caption.weight(.medium))
                                             .foregroundStyle(Theme.text)

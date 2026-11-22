@@ -787,7 +787,7 @@ struct PlayerView: View {
         }
         .foregroundStyle(Theme.text)
         .padding(.horizontal, 20).padding(.vertical, 14)
-        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
+        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
     }
 
     private func hudBar(icon: String, level: Double) -> some View {
@@ -1385,8 +1385,8 @@ struct PlayerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10).padding(.vertical, 9)
             .background(current ? Color.white : Theme.glass,
-                        in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10)
+                        in: RoundedRectangle(cornerRadius: Theme.smallRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.smallRadius)
                 .stroke(current ? Color.white : Theme.glassStroke, lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -2323,7 +2323,7 @@ private struct GlassCapsuleStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
             .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
     }
 }
@@ -2332,7 +2332,7 @@ private struct GlassCircleStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(.ultraThinMaterial, in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 1))
+            .overlay(Circle().strokeBorder(Theme.glassStroke, lineWidth: 1))
             .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
     }
 }
@@ -2866,7 +2866,7 @@ private struct SeekBar: View {
                 .foregroundStyle(Theme.text)
         }
         .padding(6)
-        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: Theme.smallRadius))
         .offset(x: x, y: -96)
     }
 

@@ -73,7 +73,7 @@ struct SkeletonPosterGrid: View {
                   spacing: 16) {
             ForEach(0..<count, id: \.self) { _ in
                 VStack(alignment: .leading, spacing: 6) {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.smallRadius, style: .continuous)
                         .fill(Theme.glass)
                         .aspectRatio(2/3, contentMode: .fit)
                     RoundedRectangle(cornerRadius: 4)
@@ -111,7 +111,7 @@ struct SkeletonRowList: View {
                     Spacer()
                 }
                 .padding(14)
-                .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous))
             }
         }
         .redacted(reason: .placeholder)
@@ -122,7 +122,7 @@ struct SkeletonRowList: View {
 /// still loading and no feed art has landed yet.
 struct SkeletonHero: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
+        RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
             .fill(Theme.glass)
             .frame(height: 520)
             .overlay(alignment: .bottomLeading) {

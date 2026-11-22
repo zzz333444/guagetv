@@ -479,7 +479,7 @@ struct EmbyHomeView: View {
                     TextField("搜索服务器…", text: $searchText)
                         .font(.subheadline)
                         .padding(10)
-                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                         .submitLabel(.search)
                         .onSubmit { Task { await search() } }
                         .onChange(of: searchText) { _, newValue in
@@ -554,7 +554,7 @@ struct EmbyHomeView: View {
                                 Spacer(minLength: 0)
                             }
                             .padding(14)
-                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                         }
                         .buttonStyle(.plain)
                     }
@@ -597,8 +597,8 @@ struct EmbyHomeView: View {
                         PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
                             .aspectRatio(2/3, contentMode: .fill)
                             .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                            .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
                         Text(item.name)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(Theme.text)
@@ -628,8 +628,8 @@ struct EmbyHomeView: View {
                                     .aspectRatio(16/9, contentMode: .fill)
                                     .frame(width: 232, height: 130)
                                     .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                                    .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
                                 if item.runTimeTicks > 0, item.positionTicks > 0 {
                                     GeometryReader { geo in
                                         Rectangle()
@@ -680,8 +680,8 @@ struct EmbyHomeView: View {
                 .aspectRatio(2/3, contentMode: .fill)
                 .frame(width: 104, height: 156)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
             Text(item.name)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.text)
@@ -878,8 +878,8 @@ struct EmbyLibraryView: View {
                                             PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
                                                 .aspectRatio(2/3, contentMode: .fill)
                                                 .frame(maxWidth: .infinity)
-                                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                                .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                                                .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
                                             Text(item.name)
                                                 .font(.caption.weight(.medium))
                                                 .foregroundStyle(Theme.text)
@@ -1053,7 +1053,7 @@ struct EmbySeriesView: View {
                                             .foregroundStyle(Theme.accent)
                                     }
                                     .padding(12)
-                                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1102,7 +1102,7 @@ struct EmbySeriesView: View {
                                     }
                                 }
                                 .padding(12)
-                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: 12))
+                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                             }
                             .buttonStyle(.plain)
                         }

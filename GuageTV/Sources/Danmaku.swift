@@ -324,7 +324,7 @@ struct DanmakuSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("预览").font(.headline).foregroundStyle(Theme.text)
                     ZStack(alignment: .topLeading) {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: Theme.posterRadius)
                             .fill(Color.black.opacity(0.35))
                             .frame(height: 104)
                         VStack(alignment: .leading, spacing: 10) {

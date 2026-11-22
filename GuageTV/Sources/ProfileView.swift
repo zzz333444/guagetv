@@ -75,12 +75,16 @@ struct ProfileView: View {
                     Text(weekday).font(.caption2).foregroundStyle(Theme.textDim)
                     Text("\(day)")
                         .font(.subheadline.weight(isToday ? .bold : .regular))
-                        .foregroundStyle(isToday ? .white : .white.opacity(0.75))
+                        // v2.32: was hard .white — invisible in
+                        // light mode (white on a light card). The
+                        // today cell keeps its accent fill; the
+                        // text now follows the theme either way.
+                        .foregroundStyle(isToday ? Theme.text : Theme.text.opacity(0.75))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
                 .background(isToday ? Theme.accent.opacity(0.45) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 10))
+                            in: RoundedRectangle(cornerRadius: Theme.smallRadius))
             }
         }
     }
@@ -128,7 +132,7 @@ struct ProfileView: View {
                     ForEach(0..<(12 * 7), id: \.self) { i in
                         let level = heatLevel(cellIndex: i)
                         let fill: Color = level == 0
-                            ? Color.white.opacity(0.07)
+                            ? Theme.glass
                             : Theme.accent.opacity(0.30 + 0.17 * Double(level))
                         RoundedRectangle(cornerRadius: 3)
                             .fill(fill)
@@ -141,7 +145,7 @@ struct ProfileView: View {
                     ForEach(0...4, id: \.self) { level in
                         RoundedRectangle(cornerRadius: 2)
                             .fill(level == 0
-                                  ? Color.white.opacity(0.07)
+                                  ? Theme.glass
                                   : Theme.accent.opacity(0.30 + 0.17 * Double(level)))
                             .frame(width: 12, height: 12)
                     }
@@ -151,7 +155,7 @@ struct ProfileView: View {
                         Text(heatDayInfo).font(.caption2).foregroundStyle(Theme.text)
                     }
                 }
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Theme.glassStroke)
                 HStack(spacing: 12) {
                     periodStat(title: "本周", component: .weekOfYear)
                     periodStat(title: "本月", component: .month)

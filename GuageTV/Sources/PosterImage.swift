@@ -34,7 +34,7 @@ struct PosterImage: View {
                         withAnimation(.easeOut(duration: 0.35)) { appeared = true }
                     }
             } else {
-                Rectangle().fill(Color.white.opacity(0.08))
+                Rectangle().fill(Theme.glass)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

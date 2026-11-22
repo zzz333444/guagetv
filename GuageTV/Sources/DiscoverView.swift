@@ -333,6 +333,24 @@ struct DiscoverView: View {
                         .foregroundStyle(.white.opacity(0.88))
                         .lineLimit(2)
                 }
+                // v2.32: Rex hero carries a white play capsule —
+                // the old hero only opened the sheet on tap, so
+                // the fastest path to watching was hidden behind
+                // a long-press menu. Same white capsule the
+                // TMDB detail sheet uses, straight to cross-line
+                // search for this title.
+                Button {
+                    openSearch(for: item.title)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill").font(.caption)
+                        Text("播放").font(.subheadline.weight(.bold))
+                    }
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 18).padding(.vertical, 9)
+                    .background(.white, in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 34)
@@ -540,7 +558,7 @@ private struct TMDBDetailSheet: View {
                         .shadow(color: .black.opacity(0.6), radius: 8, y: 2)
                         .padding(18)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
 
                 HStack(spacing: 8) {
                     Text(item.mediaType == "tv" ? "剧集" : "电影")

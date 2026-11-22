@@ -175,7 +175,7 @@ struct DetailView: View {
             if resolving {
                 ProgressView().tint(Theme.text)
                     .padding(16)
-                    .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: Theme.posterRadius))
             } else if let playNote {
                 Text(playNote)
                     .font(.subheadline)
@@ -183,7 +183,7 @@ struct DetailView: View {
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                     .padding(.horizontal, 24)
                     .padding(.bottom, 30)
                     .frame(maxHeight: .infinity, alignment: .bottom)
@@ -289,7 +289,7 @@ struct DetailView: View {
                 // TMDB score as a 5-star bar (v1.78): 10-point score
                 // mapped to 5 stars, partial fill on the last star.
                 HStack(spacing: 6) {
-                    starBar(value: value)
+                    StarBarView(value: value)
                     Text(score).font(.subheadline.weight(.bold))
                     Text("TMDB").font(.caption).foregroundStyle(Theme.textDim)
                 }
@@ -297,28 +297,6 @@ struct DetailView: View {
             }
         }
         .frame(maxWidth: .infinity)
-    }
-
-    /// Five stars for a 0–10 score: each star fills by
-    /// clamp(score/2 − index, 0, 1), so 8.4 shows 4 full stars
-    /// plus a fifth one-fifth full.
-    private func starBar(value: Double) -> some View {
-        HStack(spacing: 2) {
-            ForEach(0..<5) { i in
-                let fill = min(max(value / 2 - Double(i), 0), 1)
-                ZStack {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(Color.white.opacity(0.25))
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(Color(red: 1, green: 0.8, blue: 0.2))
-                        .mask(alignment: .leading) {
-                            Rectangle().frame(width: 13 * fill, height: 13)
-                        }
-                }
-                .font(.system(size: 13))
-                .frame(width: 13, height: 13)
-            }
-        }
     }
 
     /// The episode the white button will play (resume target or
@@ -502,8 +480,8 @@ struct DetailView: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 PosterImage(urlString: title.poster)
                                     .frame(width: 92, height: 138)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.glass))
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                                    .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
                                 Text(title.title)
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(Theme.text)
@@ -770,21 +748,21 @@ struct DetailView: View {
     private func lineCard(_ i: Int) -> some View {
         let active = i == lineIndex
         let count = detail.playGroups.indices.contains(i) ? detail.playGroups[i].count : 0
+        // v2.32: count and spec were two stacked caption rows —
+        // one spec line ("共 12 集 · HLS · 1080P") reads denser,
+        // matching the Rex resource-card spec row.
         let spec = lineSpec(i)
+        let specLine = (count > 0 ? "共 \(count) 集" : "暂无集数")
+            + (spec.isEmpty ? "" : " · \(spec)")
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(detail.playFrom[i])
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
-                Text(count > 0 ? "共 \(count) 集" : "暂无集数")
+                Text(specLine)
                     .font(.caption2)
                     .foregroundStyle(Theme.textDim)
-                if !spec.isEmpty {
-                    Text(spec)
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textDim)
-                }
             }
             Spacer(minLength: 0)
             if active {
@@ -794,10 +772,13 @@ struct DetailView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(Theme.cardTint, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+        // v2.32: the hand-built double background (cardTint +
+        // glass) and hand-written 0.45/0.12 border pair are the
+        // shared glassPanel recipe plus Theme.glassStrokeStrong
+        // for the active rim — same look, one dialect.
+        .glassPanel(cornerRadius: Theme.innerCardRadius, shadow: false)
         .overlay(RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous)
-            .strokeBorder(active ? Color.white.opacity(0.45) : Color.white.opacity(0.12),
+            .strokeBorder(active ? Theme.glassStrokeStrong : Theme.glassStroke,
                           lineWidth: active ? 1.5 : 1))
         .contentShape(Rectangle())
         .onTapGesture {
@@ -824,10 +805,10 @@ struct DetailView: View {
                     PosterImage(urlString: still)
                         .frame(width: 176, height: 99)
                         .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous))
                 } else {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                    RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous)
+                        .fill(Theme.glass)
                         .frame(width: 176, height: 99)
                 }
                 if isWatched(ep) {
@@ -840,7 +821,7 @@ struct DetailView: View {
                         .offset(x: 5, y: -5)
                 }
             }
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous)
                 .strokeBorder(isCurrent ? Color.white.opacity(0.9) : .clear, lineWidth: 1.5))
             Text(displayName)
                 .font(.subheadline.weight(.semibold))

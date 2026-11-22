@@ -179,8 +179,8 @@ struct WatchlistView: View {
             }
         }
         .padding(10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.glassStroke, lineWidth: 1))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.innerCardRadius).strokeBorder(Theme.glassStroke, lineWidth: 1))
     }
 
     private var emptyState: some View {

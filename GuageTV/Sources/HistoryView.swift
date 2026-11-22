@@ -306,7 +306,7 @@ struct HistoryView: View {
             .buttonStyle(.plain)
         }
         .padding(10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
         .contentShape(Rectangle())
         .onTapGesture {
             if isSelectingHistory && segment == 0 {
@@ -345,7 +345,7 @@ struct HistoryView: View {
         }
         .font(.subheadline.weight(.semibold))
         .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
     }
 
     // MARK: downloads segment
@@ -441,7 +441,7 @@ struct HistoryView: View {
         }
         .font(.subheadline.weight(.semibold))
         .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
     }
 
     /// Storage usage card: downloaded videos on disk + poster
@@ -480,7 +480,7 @@ struct HistoryView: View {
                 .font(.caption).foregroundStyle(Theme.textDim)
         }
         .padding(14)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
         .onChange(of: isActive) { active in
             // v2.15: start the disk walk only on first open of the
             // tab, not at cold start when this view is mounted hidden.
@@ -576,7 +576,7 @@ struct HistoryView: View {
                 }
             }
             .padding(10)
-            .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -618,7 +618,7 @@ struct HistoryView: View {
             }
         }
         .padding(10)
-        .background(Theme.glass, in: RoundedRectangle(cornerRadius: 16))
+        .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius))
         .contentShape(Rectangle())
         .onTapGesture {
             if isSelectingDownloads {

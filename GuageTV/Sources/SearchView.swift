@@ -663,7 +663,7 @@ struct SearchView: View {
             .foregroundStyle(selected ? .white : Theme.text.opacity(0.85))
             .padding(.horizontal, 8).padding(.vertical, 9)
             .background(selected ? Color.blue : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: Theme.smallRadius, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1197,7 +1197,7 @@ private struct SearchPosterCell: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(Theme.glass)
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .overlay {
                         if !item.pic.isEmpty {

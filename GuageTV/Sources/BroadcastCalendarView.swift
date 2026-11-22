@@ -133,7 +133,7 @@ struct BroadcastCalendarView: View {
                         .foregroundStyle(Theme.accent)
                     }
                     .padding(10)
-                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                     .padding(.horizontal, 18)
                 }
                 if items.isEmpty {
@@ -177,8 +177,8 @@ struct BroadcastCalendarView: View {
                                         .padding(.top, 4)
                                 }
                                 .padding(10)
-                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.innerCardRadius, style: .continuous)
                                     .strokeBorder(Theme.glassStroke, lineWidth: 1))
                             }
                             .buttonStyle(.plain)

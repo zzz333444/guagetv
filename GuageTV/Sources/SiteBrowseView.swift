@@ -12,7 +12,7 @@ struct PosterCell: View {
                 // in an overlay, so a loaded image's intrinsic size can
                 // never feed back into grid layout.
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(Theme.glass)
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .overlay {
                         if !item.pic.isEmpty {
