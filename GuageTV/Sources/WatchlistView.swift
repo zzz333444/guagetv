@@ -108,6 +108,15 @@ struct WatchlistView: View {
         }.count
     }
 
+    // v2.35 fix：副行拼接是普通 Swift 逻辑，不能写在 ViewBuilder 里
+    //（if 语句分支返回 ()，编译器报 type '()' cannot conform to 'View'）。
+    private func metaLine(for entry: HistoryStore.Entry) -> String {
+        var parts = [entry.siteName, entry.lastRemarks].filter { !$0.isEmpty }
+        let done = downloadedCount(for: entry)
+        if done > 0 { parts.append("已下载 \(done) 集") }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
         Group {
             if sortedFavourites.isEmpty {
@@ -208,10 +217,7 @@ struct WatchlistView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
-                var metaParts = [entry.siteName, entry.lastRemarks].filter { !$0.isEmpty }
-                let done = downloadedCount(for: entry)
-                if done > 0 { metaParts.append("已下载 \(done) 集") }
-                let meta = metaParts.joined(separator: " · ")
+                let meta = metaLine(for: entry)
                 if !meta.isEmpty {
                     Text(meta).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 }
