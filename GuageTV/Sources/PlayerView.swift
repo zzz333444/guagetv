@@ -28,6 +28,13 @@ struct PlayerView: View {
     enum ResolveResult {
         case ok(url: String, header: [String: String])
         case failed(String)
+
+        /// v2.31: lets call sites record resolve timing without
+        /// re-switching on the outcome.
+        var isOK: Bool {
+            if case .ok = self { return true }
+            return false
+        }
     }
 
     /// Resolves one episode (line, episode) to a playable URL —

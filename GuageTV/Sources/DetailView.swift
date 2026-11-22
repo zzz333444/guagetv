@@ -9,13 +9,6 @@ enum ResolveOutcome {
     case ok(url: String, header: [String: String])
     case failed(reason: String)
 
-    /// v2.31: lets call sites record resolve timing without
-    /// re-switching on the outcome.
-    var isOK: Bool {
-        if case .ok = self { return true }
-        return false
-    }
-
     /// The spider's stated reason in a playerContent result, if any.
     static func spiderReason(in result: [String: Any]) -> String? {
         for key in ["msg", "errMsg"] {
