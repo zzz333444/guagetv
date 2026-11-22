@@ -23,6 +23,15 @@ import JavaScriptCore
 
 // MARK: - Metadata model
 
+/// One `belongTo` condition (Rex guide 0.0.7, v2.26): the param
+/// only shows — and only gets a default — when the named param
+/// currently holds one of `values`. May also be written as an
+/// array of conditions; all must hold for the param to show.
+struct FWDBelongTo: Codable {
+    var paramName: String
+    var values: [String]
+}
+
 struct FWDParam {
     var name: String
     var title: String = ""
@@ -34,6 +43,22 @@ struct FWDParam {
     /// `placeholders: [{title, value}]`) — e.g. rex-tmdb's 片单
     /// column carries a preset TMDB list URL here. v1.75.
     var placeholders: [FWDOption] = []
+    /// v2.26 (Rex guide): `belongTo` grouping + `startPage`
+    /// for page params (0-based paging when startPage is 0).
+    var belongTo: [FWDBelongTo] = []
+    var startPage: Int? = nil
+
+    /// Guide rule 3: hidden params get no default, but an
+    /// explicitly saved/caller value still passes through
+    /// (the combine step handles that half; this only decides
+    /// whether the param shows and takes a default).
+    func isVisible(given values: [String: String]) -> Bool {
+        guard !belongTo.isEmpty else { return true }
+        return belongTo.allSatisfy { cond in
+            guard let v = values[cond.paramName] else { return false }
+            return cond.values.contains(v)
+        }
+    }
 }
 
 /// Custom Decodable (same pattern as FWDMeta): fields added after
@@ -41,6 +66,7 @@ struct FWDParam {
 extension FWDParam: Codable {
     private enum CodingKeys: String, CodingKey {
         case name, title, type, value, enumOptions, desc, placeholders
+        case belongTo, startPage
     }
 
     init(from decoder: Decoder) throws {
@@ -52,6 +78,8 @@ extension FWDParam: Codable {
         enumOptions = try c.decodeIfPresent([FWDOption].self, forKey: .enumOptions) ?? []
         desc = try c.decodeIfPresent(String.self, forKey: .desc) ?? ""
         placeholders = try c.decodeIfPresent([FWDOption].self, forKey: .placeholders) ?? []
+        belongTo = try c.decodeIfPresent([FWDBelongTo].self, forKey: .belongTo) ?? []
+        startPage = try c.decodeIfPresent(Int.self, forKey: .startPage)
     }
 }
 
@@ -60,12 +88,41 @@ struct FWDOption: Codable {
     var value: String
 }
 
-struct FWDModuleEntry: Codable {
+struct FWDModuleEntry {
     var id: String = ""
     var title: String = ""
     var functionName: String = ""
     var type: String = ""
     var params: [FWDParam] = []
+    /// v2.26 (Rex guide): entry display fields + per-entry
+    /// result cache TTL in seconds. 0 = not declared; the app
+    /// default (30 min) applies. Guide default is 86400 — the
+    /// app deliberately keeps the fresher 30 min default.
+    var subtitle: String = ""
+    var iconurl: String = ""
+    var cacheDuration: Int = 0
+}
+
+/// Hand-rolled Decodable like FWDMeta/FWDParam: fields added
+/// after an index file was written must not drop every stored
+/// module (synthesized Codable would throw on the missing key).
+extension FWDModuleEntry: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, functionName, type, params
+        case subtitle, iconurl, cacheDuration
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        functionName = try c.decodeIfPresent(String.self, forKey: .functionName) ?? ""
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
+        params = try c.decodeIfPresent([FWDParam].self, forKey: .params) ?? []
+        subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+        iconurl = try c.decodeIfPresent(String.self, forKey: .iconurl) ?? ""
+        cacheDuration = try c.decodeIfPresent(Int.self, forKey: .cacheDuration) ?? 0
+    }
 }
 
 struct FWDMeta {
@@ -84,7 +141,21 @@ struct FWDMeta {
     /// Column-result cache TTL in seconds, from the module's
     /// declared `cacheDuration` (Forward spec). 0 = not
     /// declared; the app default (30 min) applies. v2.06.
+    /// v2.26: this top-level field is legacy — the Rex guide
+    /// puts cacheDuration on each ENTRY, and detailCacheDuration
+    /// on top. Kept only as a TTL fallback for index files
+    /// written before v2.26.
     var cacheDuration: Int = 0
+    /// v2.26 (Rex guide metadata chapter): minimum script
+    /// engine version the module needs, whole-module content
+    /// type, detail cache TTL (guide default 60 s), default
+    /// continuous-play preference, and the i18n dictionary
+    /// (consumed by R4; decoded now so imports validate it).
+    var requiredVersion: String = ""
+    var contentType: String = ""
+    var detailCacheDuration: Int = 60
+    var continuousPlay: Bool = false
+    var i18n: [String: [String: String]] = [:]
 
     /// Entries the browse UI can render as lists: everything that
     /// is not a stream resolver or a danmu feed.
@@ -104,6 +175,7 @@ extension FWDMeta: Codable {
         case id, title, version, author, description, site, icon
         case modules, searchFunction, searchParams, globalParams, hasDetail
         case cacheDuration
+        case requiredVersion, contentType, detailCacheDuration, continuousPlay, i18n
     }
 
     init(from decoder: Decoder) throws {
@@ -121,6 +193,11 @@ extension FWDMeta: Codable {
         globalParams = try c.decodeIfPresent([FWDParam].self, forKey: .globalParams) ?? []
         hasDetail = try c.decodeIfPresent(Bool.self, forKey: .hasDetail) ?? false
         cacheDuration = try c.decodeIfPresent(Int.self, forKey: .cacheDuration) ?? 0
+        requiredVersion = try c.decodeIfPresent(String.self, forKey: .requiredVersion) ?? ""
+        contentType = try c.decodeIfPresent(String.self, forKey: .contentType) ?? ""
+        detailCacheDuration = try c.decodeIfPresent(Int.self, forKey: .detailCacheDuration) ?? 60
+        continuousPlay = try c.decodeIfPresent(Bool.self, forKey: .continuousPlay) ?? false
+        i18n = try c.decodeIfPresent([String: [String: String]].self, forKey: .i18n) ?? [:]
     }
 }
 
@@ -256,9 +333,17 @@ enum FWDStore {
             throw StoreFailure(message: "不是 Forward 模块（找不到 WidgetMetadata）")
         }
         let meta = try FWDRuntime.parseMetadata(source: source)
+        // v2.26: import-time metadata validation (Rex guide).
+        // Errors block the import with a Chinese three-part
+        // list; warnings let it through and stay on the card.
+        let validation = FWDRuntime.validateMetadata(source: source)
+        if !validation.errors.isEmpty {
+            throw StoreFailure(message: "模块元数据校验不通过：\n" + validation.errors.joined(separator: "\n"))
+        }
         guard !meta.id.isEmpty else {
             throw StoreFailure(message: "模块缺少 id")
         }
+        saveValidationNotes(validation.warnings, for: meta.id)
         let fileName = meta.id.replacingOccurrences(of: "/", with: "_") + ".js"
         try source.write(to: dir.appendingPathComponent(fileName),
                          atomically: true, encoding: .utf8)
@@ -270,10 +355,51 @@ enum FWDStore {
         return record
     }
 
+    /// v2.26: non-blocking metadata warnings from the import
+    /// check, kept per module and shown on its card. Empty
+    /// (or a fresh clean import) clears the stored notes.
+    static func validationNotes(for recordID: String) -> [String]? {
+        guard let data = UserDefaults.standard.data(forKey: "fwd.validationNotes.\(recordID)"),
+              let notes = try? JSONDecoder().decode([String].self, from: data),
+              !notes.isEmpty else { return nil }
+        return notes
+    }
+
+    static func saveValidationNotes(_ notes: [String], for recordID: String) {
+        let key = "fwd.validationNotes.\(recordID)"
+        if notes.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(notes) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    /// v2.26: user-saved global params (Rex guide rule 1 —
+    /// they override caller values, including empty strings).
+    /// The combine layer reads this store; no settings UI
+    /// writes it yet, so it is empty until a later round adds
+    /// the per-module global-params editor.
+    static func savedGlobalParams(for recordID: String) -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: "fwd.savedGlobals.\(recordID)"),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return dict
+    }
+
+    static func saveGlobalParams(_ params: [String: String], for recordID: String) {
+        if params.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "fwd.savedGlobals.\(recordID)")
+        } else if let data = try? JSONEncoder().encode(params) {
+            UserDefaults.standard.set(data, forKey: "fwd.savedGlobals.\(recordID)")
+        }
+    }
+
     static func delete(_ record: FWDRecord) {
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(record.fileName))
         save(records().filter { $0.id != record.id })
         clearCheckResult(for: record.id)
+        // v2.26: validation notes and saved globals go with it.
+        UserDefaults.standard.removeObject(forKey: "fwd.validationNotes.\(record.id)")
+        UserDefaults.standard.removeObject(forKey: "fwd.savedGlobals.\(record.id)")
         // v2.07: a deleted module's per-module storage and cached
         // columns go with it — otherwise a later re-import of the
         // same id resurrects stale credentials and stale lists.
@@ -551,6 +677,152 @@ final class FWDRuntime {
         try FWDRuntime(widgetID: "meta").parseMetadataLocked(source: source)
     }
 
+    /// v2.26 — import-time metadata validation against the Rex
+    /// guide (the App-side counterpart of the official
+    /// validate.mjs, which needs literal metadata and cannot
+    /// parse rex-tmdb.js). Every issue is Chinese and
+    /// three-part: 哪个字段/参数、什么问题、怎么改.
+    /// Errors block the import; warnings let it through and
+    /// are stored for the module card.
+    static func validateMetadata(source: String) -> (errors: [String], warnings: [String]) {
+        var errors: [String] = []
+        var warnings: [String] = []
+        let runtime = FWDRuntime(widgetID: "validate")
+        let raw: [String: Any]
+        do {
+            (raw, _) = try runtime.metadataRawAndDetail(source: source)
+        } catch {
+            return (["模块元数据读不到：脚本里没有可用的 WidgetMetadata。改法：顶层用 var WidgetMetadata = {…} 声明。"], [])
+        }
+        func isStr(_ v: Any?) -> Bool { v is String }
+        func isNum(_ v: Any?) -> Bool { v is NSNumber }
+        // Top-level required strings (guide: id/title/version/
+        // requiredVersion/modules are all required).
+        for key in ["id", "title", "version", "requiredVersion"] {
+            if raw[key] == nil {
+                errors.append("元数据 \(key)：缺失（必填）。改法：在 WidgetMetadata 里补 \(key): \"…\"。")
+            } else if !isStr(raw[key]) {
+                errors.append("元数据 \(key)：写成了 \(typeName(raw[key]))，应为字符串。改法：改成 \(key): \"\(stringValue(raw[key]))\"。")
+            }
+        }
+        if let v = raw["requiredVersion"] as? String,
+           v.compare("0.0.7", options: .numeric) == .orderedDescending {
+            warnings.append("元数据 requiredVersion：要求脚本引擎 \(v)，高于本 App 支持的 0.0.7。改法：用到新特性的入口可能跑不了，可先导入试用，或等 App 跟进。")
+        }
+        if let ct = raw["contentType"] as? String,
+           !["video", "music", "audiobook", "shortDrama"].contains(ct) {
+            warnings.append("元数据 contentType：\"\(ct)\" 不是已知的 video/music/audiobook/shortDrama。改法：改成其中之一，或删掉该字段按未指定处理。")
+        } else if raw["contentType"] != nil, !isStr(raw["contentType"]) {
+            warnings.append("元数据 contentType：应为字符串。改法：改成 contentType: \"video\" 这类写法。")
+        }
+        if let d = raw["detailCacheDuration"], !isNum(d), !(d is String) {
+            warnings.append("元数据 detailCacheDuration：应为秒数。改法：改成 detailCacheDuration: 60。")
+        }
+        if let i18n = raw["i18n"], !(i18n is [String: Any]) {
+            warnings.append("元数据 i18n：应为 {语言: {原文: 译文}} 的词典。改法：按 guide 的 i18n 一节重写，无效词典会被忽略。")
+        }
+        let modules = raw["modules"] as? [[String: Any]] ?? []
+        if modules.isEmpty {
+            errors.append("模块入口 modules：为空或缺失，模块没有可打开的栏目。改法：在 WidgetMetadata 里加 modules: [{id, title, functionName}]。")
+        }
+        var seenIDs = Set<String>()
+        func checkParams(_ list: Any?, where whereText: String) {
+            guard let arr = list as? [[String: Any]] else { return }
+            for p in arr {
+                let name = p["name"] as? String ?? ""
+                let label = name.isEmpty ? "（未命名参数）" : "参数 \(name)"
+                if name.isEmpty {
+                    errors.append("\(whereText)\(label)：缺少 name。改法：每个参数都要写 name: \"…\"。")
+                }
+                if (p["title"] as? String ?? "").isEmpty {
+                    errors.append("\(whereText)\(label)：缺少 title。改法：补 title: \"…\"（参数标题，必填）。")
+                }
+                let type = p["type"] as? String ?? ""
+                if type.isEmpty {
+                    errors.append("\(whereText)\(label)：缺少 type。改法：补 type: \"input\" / \"enumeration\" / \"page\" 等。")
+                }
+                if let v = p["value"], !isStr(v) {
+                    errors.append("\(whereText)\(label) 的 value：写成了 \(typeName(v))，应为字符串（数字也要加引号）。改法：改成 value: \"\(stringValue(v))\"。")
+                }
+                for key in ["enumOptions", "placeholders"] {
+                    if let opts = p[key] as? [[String: Any]] {
+                        for o in opts {
+                            if let v = o["value"], !isStr(v) {
+                                errors.append("\(whereText)\(label) 的 \(key)：有 value 写成了 \(typeName(v))，应为字符串。改法：改成 value: \"\(stringValue(v))\"。")
+                            }
+                        }
+                    }
+                }
+                if type == "enumeration",
+                   (p["enumOptions"] as? [[String: Any]] ?? []).isEmpty {
+                    errors.append("\(whereText)\(label)：type 是 enumeration 但没有 enumOptions。改法：补 enumOptions: [{title, value}]，至少一项。")
+                }
+                if type == "constant", (p["value"] as? String ?? "").isEmpty {
+                    errors.append("\(whereText)\(label)：type 是 constant 但没有写 value。改法：补 value: \"…\"（固定值必须显式写）。")
+                }
+                if type == "page", let sp = p["startPage"], !isNum(sp), !(sp is String) {
+                    warnings.append("\(whereText)\(label) 的 startPage：应为整数。改法：改成 startPage: 0 或 1。")
+                }
+                if let b = p["belongTo"] {
+                    let conds = (b as? [String: Any]).map { [$0] } ?? (b as? [[String: Any]] ?? [])
+                    for c in conds {
+                        let ref = c["paramName"] as? String ?? ""
+                        let allNames = (modules.flatMap { ($0["params"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String } })
+                            + ((raw["globalParams"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
+                        if !ref.isEmpty, !allNames.contains(ref) {
+                            warnings.append("\(whereText)\(label) 的 belongTo：引用的参数 \"\(ref)\" 不存在。改法：改成已声明的参数名，否则该参数永远不显示。")
+                        }
+                    }
+                }
+            }
+        }
+        for m in modules {
+            let mid = m["id"] as? String ?? ""
+            let label = "入口「\(m["title"] as? String ?? mid)」"
+            if (m["title"] as? String ?? "").isEmpty {
+                errors.append("\(label)：缺少 title。改法：补 title: \"…\"（入口名称，必填）。")
+            }
+            if (m["functionName"] as? String ?? "").isEmpty {
+                errors.append("\(label)：缺少 functionName。改法：补 functionName: \"…\"，指向文件里的顶层函数。")
+            }
+            if !mid.isEmpty {
+                if seenIDs.contains(mid) {
+                    errors.append("\(label)：id \"\(mid)\" 与另一个入口重复。改法：每个入口用稳定的唯一 id。")
+                }
+                seenIDs.insert(mid)
+            }
+            if let cd = m["cacheDuration"], !isNum(cd), !(cd is String) {
+                warnings.append("\(label) 的 cacheDuration：应为秒数。改法：改成 cacheDuration: 86400 这类数字。")
+            }
+            checkParams(m["params"], where: "\(label)")
+        }
+        if let search = raw["search"] as? [String: Any] {
+            if (search["functionName"] as? String ?? "").isEmpty {
+                errors.append("搜索入口：缺少 functionName。改法：补 functionName: \"…\"，指向文件里的顶层搜索函数。")
+            }
+            checkParams(search["params"], where: "搜索入口")
+        }
+        checkParams(raw["globalParams"], where: "全局参数")
+        return (errors, warnings)
+    }
+
+    private static func typeName(_ v: Any?) -> String {
+        if let n = v as? NSNumber {
+            // JSON booleans arrive as NSNumber too; tell them
+            // apart by objCType ("c" = bool).
+            return String(cString: n.objCType) == "c" ? "布尔值" : "数字"
+        }
+        if v is [Any] { return "数组" }
+        if v is [String: Any] { return "对象" }
+        return "其他类型"
+    }
+
+    private static func stringValue(_ v: Any?) -> String {
+        if let s = v as? String { return s }
+        if let n = v as? NSNumber { return n.stringValue }
+        return ""
+    }
+
     func call(function: String, params: [String: Any], source: String) async throws -> Any? {
         let paramsJSON = (try? JSONSerialization.data(withJSONObject: params))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -611,7 +883,7 @@ final class FWDRuntime {
         return ctx
     }
 
-    private func parseMetadataLocked(source: String) throws -> FWDMeta {
+    private func metadataRawAndDetail(source: String) throws -> ([String: Any], Bool) {
         let ctx = try makeContext(source: source)
         guard let json = ctx.evaluateScript("JSON.stringify(globalThis.WidgetMetadata || null)")?.toString(),
               json != "null", json != "undefined",
@@ -620,6 +892,11 @@ final class FWDRuntime {
             throw FWDfailure(message: "模块元数据读取失败", kind: .script)
         }
         let hasDetail = ctx.evaluateScript("typeof loadDetail === 'function'")?.toBool() ?? false
+        return (raw, hasDetail)
+    }
+
+    private func parseMetadataLocked(source: String) throws -> FWDMeta {
+        let (raw, hasDetail) = try metadataRawAndDetail(source: source)
         func str(_ d: [String: Any], _ key: String) -> String {
             if let s = d[key] as? String { return s }
             if let n = d[key] as? NSNumber { return n.stringValue }
@@ -629,6 +906,27 @@ final class FWDRuntime {
             (list as? [[String: Any]] ?? []).map { p in
                 var desc = str(p, "description")
                 if desc.isEmpty { desc = str(p, "placeholder") }
+                // belongTo: one {paramName, value:[...]} object
+                // or an array of them (all must hold, guide).
+                var belongTo: [FWDBelongTo] = []
+                func oneBelong(_ b: [String: Any]) {
+                    let name = str(b, "paramName")
+                    var values: [String] = []
+                    if let arr = b["value"] as? [Any] {
+                        values = arr.map { ($0 as? String) ?? (($0 as? NSNumber)?.stringValue ?? "") }
+                            .filter { !$0.isEmpty }
+                    } else if let s = b["value"] as? String, !s.isEmpty {
+                        values = [s]
+                    }
+                    if !name.isEmpty, !values.isEmpty {
+                        belongTo.append(FWDBelongTo(paramName: name, values: values))
+                    }
+                }
+                if let b = p["belongTo"] as? [String: Any] { oneBelong(b) }
+                else if let arr = p["belongTo"] as? [[String: Any]] { arr.forEach(oneBelong) }
+                var startPage: Int? = nil
+                if let n = p["startPage"] as? NSNumber { startPage = n.intValue }
+                else if let s = p["startPage"] as? String, let n = Int(s) { startPage = n }
                 return FWDParam(name: str(p, "name"), title: str(p, "title"),
                                 type: str(p, "type").isEmpty ? "input" : str(p, "type"),
                                 value: str(p, "value"),
@@ -638,7 +936,8 @@ final class FWDRuntime {
                                 desc: desc,
                                 placeholders: (p["placeholders"] as? [[String: Any]] ?? []).map {
                                     FWDOption(title: str($0, "title"), value: str($0, "value"))
-                                })
+                                },
+                                belongTo: belongTo, startPage: startPage)
             }
         }
         var meta = FWDMeta()
@@ -652,20 +951,46 @@ final class FWDRuntime {
             ? (str(raw, "icon").isEmpty ? str(raw, "iconUrl") : str(raw, "icon"))
             : str(raw, "iconurl")
         meta.hasDetail = hasDetail
-        // Forward's declared cache TTL (seconds). Accept a
-        // number or a numeric string; absent/invalid = 0 and
-        // the app default applies (v2.06).
-        if let n = raw["cacheDuration"] as? NSNumber {
-            meta.cacheDuration = max(0, n.intValue)
-        } else if let s = raw["cacheDuration"] as? String,
+        // v2.26 (Rex guide): top-level metadata fields. Note
+        // cacheDuration belongs on each ENTRY per the guide,
+        // not on top — the old top-level read is gone; the
+        // legacy meta.cacheDuration stays 0 for new imports.
+        meta.requiredVersion = str(raw, "requiredVersion")
+        meta.contentType = str(raw, "contentType")
+        if let n = raw["detailCacheDuration"] as? NSNumber {
+            meta.detailCacheDuration = max(0, n.intValue)
+        } else if let s = raw["detailCacheDuration"] as? String,
                   let n = Int(s) {
-            meta.cacheDuration = max(0, n)
+            meta.detailCacheDuration = max(0, n)
+        }
+        if let b = raw["continuousPlay"] as? Bool { meta.continuousPlay = b }
+        if let dict = raw["i18n"] as? [String: [String: Any]] {
+            var out: [String: [String: String]] = [:]
+            for (lang, table) in dict {
+                var row: [String: String] = [:]
+                for (k, v) in table {
+                    if let s = v as? String { row[k] = s }
+                    else if let n = v as? NSNumber { row[k] = n.stringValue }
+                }
+                out[lang] = row
+            }
+            meta.i18n = out
         }
         meta.globalParams = params(raw["globalParams"] as? [Any])
         meta.modules = (raw["modules"] as? [[String: Any]] ?? []).map { m in
-            FWDModuleEntry(id: str(m, "id"), title: str(m, "title"),
-                           functionName: str(m, "functionName"),
-                           type: str(m, "type"), params: params(m["params"] as? [Any]))
+            var entry = FWDModuleEntry(id: str(m, "id"), title: str(m, "title"),
+                                       functionName: str(m, "functionName"),
+                                       type: str(m, "type"), params: params(m["params"] as? [Any]))
+            entry.subtitle = str(m, "subtitle")
+            entry.iconurl = str(m, "iconurl").isEmpty
+                ? (str(m, "iconUrl").isEmpty ? str(m, "iconURL") : str(m, "iconUrl"))
+                : str(m, "iconurl")
+            if let n = m["cacheDuration"] as? NSNumber {
+                entry.cacheDuration = max(0, n.intValue)
+            } else if let s = m["cacheDuration"] as? String, let n = Int(s) {
+                entry.cacheDuration = max(0, n)
+            }
+            return entry
         }
         if let search = raw["search"] as? [String: Any] {
             meta.searchFunction = str(search, "functionName")
@@ -1529,6 +1854,13 @@ struct ModulesView: View {
                                 // saves new results.
                                 Text(checkLine(record, tick: checkVersion))
                                     .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
+                                // v2.26: import-time metadata
+                                // warnings (non-blocking issues
+                                // from the guide check).
+                                if let notes = FWDStore.validationNotes(for: record.id) {
+                                    Text("元数据提示 \(notes.count) 项：\(notes[0])")
+                                        .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
+                                }
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -1827,27 +2159,86 @@ struct ModulesView: View {
     }
 }
 
+/// v2.26 — the ONE place module params are combined, following
+/// the Rex guide's 参数 rules verbatim:
+///  1. Start from caller values; user-saved global params
+///     override same-name values (INCLUDING empty strings).
+///  2. Fill defaults in order: globalParams, then the entry's
+///     own params.
+///  3. A param hidden by belongTo gets NO default — but an
+///     explicitly saved/caller value still passes through.
+///  4. language/timezone/userId/configId are injected ONLY
+///     when a param of that type is declared (language =
+///     device language, timezone = device zone; the app has
+///     no app-wide userId/configId, so those stay unset).
+///  5. page/offset with no explicit value come from the App's
+///     pagination position (page honours startPage; offset
+///     strides by the entry's count param when one exists).
+///  ALL values are strings — handlers do Number(...) first.
+/// `page` is the UI's 1-based page index (1 = first page).
+func fwdCombineParams(meta: FWDMeta, entry: FWDModuleEntry,
+                      caller: [String: String], page: Int,
+                      savedGlobals: [String: String]) -> [String: String] {
+    var result: [String: String] = caller
+    for (k, v) in savedGlobals { result[k] = v }
+    let ordered = meta.globalParams + entry.params
+    // Defaults first, so belongTo visibility can be judged
+    // against the values a referenced param would actually
+    // carry (its default included).
+    func defaultValue(_ p: FWDParam) -> String? {
+        switch p.type {
+        case "page":
+            let start = p.startPage ?? 1
+            return String(start + max(0, page - 1))
+        case "offset":
+            if let countParam = entry.params.first(where: { $0.type == "count" }),
+               let count = Int(result[countParam.name]
+                               ?? defaultValue(countParam) ?? "0"), count > 0 {
+                return String((page - 1) * count)
+            }
+            return "0"
+        case "count":
+            return p.value.isEmpty ? "0" : p.value
+        case "enumeration":
+            return p.value.isEmpty ? (p.enumOptions.first?.value ?? "") : p.value
+        case "input":
+            return p.value.isEmpty ? (p.placeholders.first?.value ?? "") : p.value
+        case "constant":
+            return p.value.isEmpty ? nil : p.value
+        case "folder":
+            return p.value.isEmpty ? "-1" : p.value
+        case "language":
+            if !p.value.isEmpty { return p.value }
+            return Locale.preferredLanguages.first ?? "zh-CN"
+        case "timezone":
+            if !p.value.isEmpty { return p.value }
+            return TimeZone.current.identifier
+        case "userId", "configId":
+            // No app-wide identity exists; only an explicit
+            // value is ever sent (rule 4: declared-only).
+            return p.value.isEmpty ? nil : p.value
+        default:
+            return p.value.isEmpty ? nil : p.value
+        }
+    }
+    var known: [String: String] = result
+    for p in ordered {
+        if known[p.name] == nil, let d = defaultValue(p) { known[p.name] = d }
+    }
+    for p in ordered {
+        if result[p.name] != nil { continue }
+        guard p.isVisible(given: known) else { continue }
+        if let d = defaultValue(p) { result[p.name] = d }
+    }
+    return result
+}
+
 /// Default params for a module's first run (self-check): the
 /// same fallback rules as FWDWidgetView.buildParams with no
 /// user selections — enumerations take their first option,
 /// inputs take their first placeholder suggestion.
 func fwdDefaultParams(meta: FWDMeta, module: FWDModuleEntry) -> [String: Any] {
-    var params: [String: Any] = [:]
-    for p in meta.globalParams where !p.value.isEmpty { params[p.name] = p.value }
-    for p in module.params {
-        if p.type == "page" || p.name == "page" {
-            params[p.name] = 1
-        } else if p.type == "count" || p.type == "offset" {
-            params[p.name] = Int(p.value) ?? p.value
-        } else if p.type == "enumeration" {
-            params[p.name] = p.value.isEmpty ? (p.enumOptions.first?.value ?? "") : p.value
-        } else if p.type == "input" {
-            params[p.name] = p.value.isEmpty ? (p.placeholders.first?.value ?? "") : p.value
-        } else if !p.value.isEmpty {
-            params[p.name] = p.value
-        }
-    }
-    return params
+    fwdCombineParams(meta: meta, entry: module, caller: [:], page: 1, savedGlobals: [:])
 }
 
 // MARK: - Widget browse
@@ -1945,7 +2336,7 @@ struct FWDWidgetView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let module = currentModule {
-                    ForEach(module.params.filter { $0.type == "enumeration" && !$0.enumOptions.isEmpty },
+                    ForEach(visibleParams(module.params).filter { $0.type == "enumeration" && !$0.enumOptions.isEmpty },
                             id: \.name) { param in
                         chipRow(param.enumOptions.map(\.title),
                                 selected: param.enumOptions.firstIndex {
@@ -1956,7 +2347,7 @@ struct FWDWidgetView: View {
                             Task { await load(reset: true) }
                         }
                     }
-                    ForEach(module.params.filter { $0.type == "input" },
+                    ForEach(visibleParams(module.params).filter { $0.type == "input" },
                             id: \.name) { param in
                         inputRow(param)
                     }
@@ -2122,37 +2513,24 @@ struct FWDWidgetView: View {
     }
 
     private func buildParams(for module: FWDModuleEntry, page: Int) -> [String: Any] {
-        var params: [String: Any] = [:]
-        for p in meta.globalParams where !p.value.isEmpty {
-            params[p.name] = p.value
-        }
-        for p in module.params {
-            if p.type == "page" || p.name == "page" {
-                params[p.name] = page
-            } else if p.type == "count" || p.type == "offset" {
-                params[p.name] = Int(selections[p.name] ?? p.value) ?? p.value
-            } else if p.type == "enumeration" {
-                // No explicit default in the metadata (Rex's
-                // official modules ship enumerations without a
-                // value): Forward hosts fall back to the FIRST
-                // option — sending "" produced paths like
-                // "trending/all/" and dead columns.
-                let fallback = p.value.isEmpty
-                    ? (p.enumOptions.first?.value ?? "") : p.value
-                params[p.name] = selections[p.name] ?? fallback
-            } else if p.type == "input" {
-                // Input params must always reach the handler —
-                // rex-tmdb's 片单 does params.url.includes(...) and
-                // dies on undefined. Fall back to the first
-                // placeholder suggestion when nothing was typed,
-                // so the column opens with content (v1.75).
-                params[p.name] = selections[p.name] ?? (p.value.isEmpty
-                    ? (p.placeholders.first?.value ?? "") : p.value)
-            } else if !p.value.isEmpty {
-                params[p.name] = selections[p.name] ?? p.value
-            }
-        }
-        return params
+        // v2.26: one shared combiner for the guide's rules
+        // (caller → saved globals → globalParams → entry
+        // defaults, belongTo hiding, string values only).
+        fwdCombineParams(meta: meta, entry: module, caller: selections,
+                         page: page,
+                         savedGlobals: FWDStore.savedGlobalParams(for: record.id))
+    }
+
+    /// Params the column UI shows: belongTo-hidden params are
+    /// not rendered at all (guide: hidden = not displayed).
+    /// Visibility is judged against the effective values the
+    /// handler would receive (defaults included).
+    private func visibleParams(_ params: [FWDParam]) -> [FWDParam] {
+        guard let module = currentModule else { return params }
+        let known = fwdCombineParams(meta: meta, entry: module,
+                                     caller: selections, page: page,
+                                     savedGlobals: FWDStore.savedGlobalParams(for: record.id))
+        return params.filter { $0.isVisible(given: known) }
     }
 
     /// Page-1 list loads consult FWDColumnCache first (v2.06):
@@ -2171,8 +2549,13 @@ struct FWDWidgetView: View {
         }
         if reset { loading = true; errorText = nil; lastSearchKeyword = nil }
         let params = buildParams(for: module, page: page)
-        let ttl = meta.cacheDuration > 0
-            ? TimeInterval(meta.cacheDuration) : FWDColumnCache.defaultTTL
+        // v2.26: TTL honours the ENTRY's declared cacheDuration
+        // (Rex guide); the legacy top-level value is only a
+        // fallback for index files written before v2.26.
+        let ttl = module.cacheDuration > 0
+            ? TimeInterval(module.cacheDuration)
+            : (meta.cacheDuration > 0
+               ? TimeInterval(meta.cacheDuration) : FWDColumnCache.defaultTTL)
         let cacheKey = FWDColumnCache.key(moduleID: record.id,
                                           columnID: module.id, params: params)
         if reset, page == 1, !bypassCache,
@@ -2230,10 +2613,17 @@ struct FWDWidgetView: View {
         lastSearchKeyword = keyword
         loading = true
         errorText = nil
-        var params: [String: Any] = ["keyword": keyword, "query": keyword,
-                                     "searchKeyword": keyword, "page": 1]
-        for p in meta.globalParams where !p.value.isEmpty { params[p.name] = p.value }
-        for p in meta.searchParams where !p.value.isEmpty { params[p.name] = p.value }
+        // v2.26: search params go through the same combiner
+        // as columns (guide: search is a top-level entry with
+        // the same param rules). keyword is the caller value;
+        // the query/searchKeyword aliases stay for modules
+        // written against the older convention.
+        let searchEntry = FWDModuleEntry(id: "search", title: "", functionName: fn,
+                                         type: "", params: meta.searchParams)
+        var params: [String: Any] = fwdCombineParams(
+            meta: meta, entry: searchEntry,
+            caller: ["keyword": keyword, "query": keyword, "searchKeyword": keyword],
+            page: 1, savedGlobals: FWDStore.savedGlobalParams(for: record.id))
         do {
             let result = try await FWDRuntime(widgetID: record.id)
                 .call(function: fn, params: params, source: source)

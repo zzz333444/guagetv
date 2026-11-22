@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.25 · 收官·全量复查与更新日志"
+    static let buildLabel = "v2.26 · 模块·元数据与参数规则对齐"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.26", title: "模块·元数据与参数规则对齐", lines: [
+            "模块元数据与参数按 Rex 官方规范（guide 0.0.7）逐条对齐：belongTo 分组（隐藏参数不显示、不补默认值，显式保存值仍传入）、enumeration/input/count/page/offset/folder/constant 各类默认值、globalParams 注入顺序、language/timezone 仅声明时注入、page 按 startPage 换算、全部参数值改传字符串",
+            "参数组合收进统一函数 fwdCombineParams，栏目、自检、搜索三处同规则；栏目参数 UI 按 belongTo 隐藏；搜索入口同样走组合规则，不再只拼 keyword/page",
+            "元数据解析补齐 requiredVersion/contentType/detailCacheDuration/continuousPlay/i18n，入口补 subtitle/iconurl 与每入口 cacheDuration（栏目缓存 TTL 改按入口声明值，旧顶层误读移除；应用默认仍 30 分钟，与 guide 默认 86400 的偏差已记录）",
+            "导入模块时即跑元数据校验（App 侧，官方 validate.mjs 因 rex-tmdb 元数据非字面量解析不了）：错误级阻断导入并给中文三段式清单（哪个字段、什么问题、怎么改），警告级留在模块卡上提示；bangumi 官方校验 0 问题通过",
+        ]),
         Entry(version: "v2.25", title: "收官·全量复查与更新日志", lines: [
             "更新日志补齐第七次通宵全部 11 轮（v2.15–v2.25）：性能三轮、模块对标 Rex 两轮、UI 对标 Rex 两轮、功能补强两轮、稳定扫荡一轮，当前版本置顶高亮",
             "全量复查：版本号三处一致（project.yml 2.25 / 225、buildLabel、更新日志首条），11 轮进度记录齐全；本轮不再加新功能，只做收官修正",
