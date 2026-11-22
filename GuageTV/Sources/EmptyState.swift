@@ -62,6 +62,40 @@ struct EmptyStateView: View {
     }
 }
 
+/// Canonical empty/error copy (v2.33): the same situation
+/// gets the same sentence on every page. Before this round
+/// one load failure read "模块没拉到数据" on the module
+/// page, "媒体库没拉到" / "剧集没拉到" in Emby, "直播列表
+/// 打不开" on the live page and "今天的放送没拉到" on the
+/// calendar — and one empty result read "没有搜到结果" in
+/// search but "这个栏目暂时没有内容" in a module column.
+/// The page's own navigation title already says where you
+/// are, so the state titles no longer repeat it. The retry
+/// action is "重新加载" everywhere it exists.
+enum EmptyStateCopy {
+    /// A remote list failed to load: the cause goes in the
+    /// message, the retry re-runs the same load.
+    static func loadFailed(message: String, retry: @escaping () -> Void) -> EmptyStateView {
+        EmptyStateView(icon: "wifi.exclamationmark",
+                       title: "没拉到数据",
+                       message: message,
+                       actionTitle: "重新加载",
+                       action: retry)
+    }
+
+    /// A search / column came back with zero rows.
+    static func noResults(message: String = "换个关键词或栏目试试",
+                          retry: (() -> Void)? = nil,
+                          compact: Bool = false) -> EmptyStateView {
+        EmptyStateView(icon: "magnifyingglass",
+                       title: "没有搜到结果",
+                       message: message,
+                       actionTitle: retry == nil ? nil : "重新加载",
+                       action: retry,
+                       compact: compact)
+    }
+}
+
 /// Glass placeholder shapes shown while a poster grid is loading:
 /// the same footprint as the real cards, redacted so they read as
 /// "content incoming" instead of a bare spinner.
@@ -84,6 +118,12 @@ struct SkeletonPosterGrid: View {
             }
         }
         .redacted(reason: .placeholder)
+        // v2.33: the transition lives on the skeleton itself, so
+        // every call site cross-fades instead of popping — the
+        // v2.24 "19 places unified" claim was only true where
+        // the parent added it by hand (Discover/Jar); the rest
+        // (Emby, CMS/py/JS browse, search, calendar) popped.
+        .transition(.opacity)
     }
 }
 
@@ -115,6 +155,9 @@ struct SkeletonRowList: View {
             }
         }
         .redacted(reason: .placeholder)
+        // v2.33: see SkeletonPosterGrid — transition on the
+        // skeleton itself, not the call site.
+        .transition(.opacity)
     }
 }
 
@@ -128,14 +171,21 @@ struct SkeletonHero: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 8) {
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.25))
+                        // v2.33: was hard white 0.25 — invisible
+                        // on a light-mode glass background; the
+                        // theme text colour is white in dark mode
+                        // (identical look) and near-black in light.
+                        .fill(Theme.text.opacity(0.25))
                         .frame(width: 180, height: 22)
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.white.opacity(0.18))
+                        .fill(Theme.text.opacity(0.18))
                         .frame(width: 240, height: 13)
                 }
                 .padding(20)
             }
             .redacted(reason: .placeholder)
+            // v2.33: see SkeletonPosterGrid — transition on the
+            // skeleton itself, not the call site.
+            .transition(.opacity)
     }
 }

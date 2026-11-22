@@ -417,7 +417,7 @@ struct DetailView: View {
             HStack {
                 Spacer()
                 Button(synopsisExpanded ? "收起" : "展开") {
-                    withAnimation(.easeInOut(duration: 0.2)) { synopsisExpanded.toggle() }
+                    withAnimation(Theme.animQuick) { synopsisExpanded.toggle() }
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.accent)
@@ -533,7 +533,7 @@ struct DetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Button {
                     Haptics.selection()
-                    withAnimation(.easeInOut(duration: 0.2)) { mediaInfoExpanded.toggle() }
+                    withAnimation(Theme.animQuick) { mediaInfoExpanded.toggle() }
                 } label: {
                     HStack {
                         Text("媒体信息").font(.headline).foregroundStyle(Theme.text)
@@ -664,7 +664,7 @@ struct DetailView: View {
                 Text("选集").font(.headline).foregroundStyle(Theme.text)
                 Spacer()
                 if episodes.count > 1 {
-                    Button { Haptics.tap(); episodesReversed.toggle() } label: {
+                    Button { Haptics.tap(); withAnimation(Theme.animQuick) { episodesReversed.toggle() } } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.up.arrow.down")
                                 .font(.caption2.weight(.bold))
@@ -690,7 +690,7 @@ struct DetailView: View {
                                 .padding(.horizontal, 11).padding(.vertical, 6)
                                 .background(episodeSegment == ci ? Color.white : Theme.glass, in: Capsule())
                                 .foregroundStyle(episodeSegment == ci ? .black : Theme.text.opacity(0.85))
-                                .onTapGesture { Haptics.selection(); episodeSegment = ci }
+                                .onTapGesture { withAnimation(Theme.animQuick) { episodeSegment = ci }; Haptics.selection() }
                         }
                     }
                 }

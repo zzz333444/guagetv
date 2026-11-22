@@ -3014,17 +3014,14 @@ struct FWDWidgetView: View {
                         .transition(.opacity)
                 }
             } else if let errorText, items.isEmpty {
-                EmptyStateView(icon: "wifi.exclamationmark",
-                               title: "模块没拉到数据",
-                               message: errorText,
-                               actionTitle: "重新加载",
-                               action: { Task { await retryCurrent() } })
+                EmptyStateCopy.loadFailed(message: errorText,
+                                            retry: { Task { await retryCurrent() } })
                     .padding(.horizontal, 18)
             } else {
                 content
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(meta.localized(meta.title.isEmpty ? record.id : meta.title))
         .navigationBarTitleDisplayMode(.inline)
@@ -3105,12 +3102,9 @@ struct FWDWidgetView: View {
                     .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                 }
                 if items.isEmpty {
-                    EmptyStateView(icon: "square.stack.3d.up.slash",
-                                   title: "这个栏目暂时没有内容",
-                                   message: "换个栏目或关键词试试",
-                                   actionTitle: "重新加载",
-                                   action: { Task { await load(reset: true, bypassCache: true) } },
-                                   compact: true)
+                    EmptyStateCopy.noResults(
+                        retry: { Task { await load(reset: true, bypassCache: true) } },
+                        compact: true)
                 } else {
                     posterGrid(items)
                 }

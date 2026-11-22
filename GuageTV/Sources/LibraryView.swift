@@ -249,7 +249,7 @@ struct LibraryView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: lineToast)
+        .animation(Theme.animQuick, value: lineToast)
         .onAppear { refreshLibrary() }
         .onDisappear { embyPrefetchTask?.cancel() }
         .alert("线路备注名", isPresented: Binding(get: { renamingEntry != nil },

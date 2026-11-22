@@ -104,7 +104,7 @@ struct SearchView: View {
                 statusRow
                 content
             }
-            .animation(.easeOut(duration: 0.25), value: searching)
+            .animation(Theme.animStandard, value: searching)
             .background(AmbientBackground(imageURL: nil))
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -169,7 +169,7 @@ struct SearchView: View {
             .padding(.horizontal, 14).padding(.vertical, 11)
             .glassCapsule()
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) { showSiteFilter.toggle() }
+                withAnimation(Theme.animQuick) { showSiteFilter.toggle() }
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(.body.weight(.semibold))
@@ -602,7 +602,7 @@ struct SearchView: View {
                     Divider().background(Theme.textDim.opacity(0.3))
                         .padding(.vertical, 4)
                     Button {
-                        withAnimation(.easeInOut(duration: 0.18)) { showEmptySites.toggle() }
+                        withAnimation(Theme.animQuick) { showEmptySites.toggle() }
                     } label: {
                         HStack(spacing: 5) {
                             Text("无结果")

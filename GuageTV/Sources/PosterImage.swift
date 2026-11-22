@@ -31,7 +31,7 @@ struct PosterImage: View {
                     .onAppear {
                         // A short fade reads far smoother than a
                         // hard pop when posters stream in.
-                        withAnimation(.easeOut(duration: 0.35)) { appeared = true }
+                        withAnimation(Theme.animFade) { appeared = true }
                     }
             } else {
                 Rectangle().fill(Theme.glass)

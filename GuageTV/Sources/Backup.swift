@@ -241,7 +241,7 @@ struct BackupView: View {
                         }
                     }
                     Button {
-                        exportURL = makeExportFile()
+                        Haptics.medium(); exportURL = makeExportFile()
                     } label: {
                         Label("生成备份文件", systemImage: "doc.badge.plus")
                             .font(.subheadline.weight(.semibold))
@@ -276,7 +276,7 @@ struct BackupView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("从文件导入").font(.headline).foregroundStyle(Theme.text)
                     Button {
-                        showImporter = true
+                        Haptics.tap(); showImporter = true
                     } label: {
                         Label("选择备份文件恢复", systemImage: "square.and.arrow.down")
                             .font(.subheadline.weight(.semibold))
@@ -342,6 +342,7 @@ struct BackupView: View {
                     Label("分享", systemImage: "square.and.arrow.up")
                 }
                 Button {
+                    Haptics.medium()
                     if let data = try? Data(contentsOf: file.url) {
                         offerRestore(data: data, sourceName: file.name)
                     } else {
@@ -351,7 +352,7 @@ struct BackupView: View {
                     Label("恢复", systemImage: "arrow.counterclockwise")
                 }
                 Button(role: .destructive) {
-                    deleteTarget = file
+                    Haptics.tap(); deleteTarget = file
                 } label: {
                     Label("删除", systemImage: "trash")
                 }

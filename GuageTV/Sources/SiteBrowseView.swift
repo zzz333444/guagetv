@@ -81,7 +81,7 @@ struct DetailLoaderView: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: detail == nil)
+        .animation(Theme.animStandard, value: detail == nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
         .task {
@@ -218,7 +218,7 @@ struct SiteBrowseView: View {
         }
         // v2.21: skeleton/content swap cross-fades instead of
         // flashing on every class/filter change.
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
     }
 
     /// One chip row per filter group the site declares for this

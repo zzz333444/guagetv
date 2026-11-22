@@ -321,7 +321,7 @@ struct SMBSharesView: View {
                 .listStyle(.plain)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .navigationTitle(server.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -375,7 +375,7 @@ struct SMBBrowserView: View {
                         } else if Self.videoExtensions.contains(
                             (entry.name as NSString).pathExtension.lowercased()) {
                             Button {
-                                play(entry)
+                                Haptics.medium(); play(entry)
                             } label: {
                                 HStack {
                                     Label(entry.name, systemImage: "film")
@@ -404,7 +404,7 @@ struct SMBBrowserView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .navigationTitle(path.isEmpty ? share : (path.split(separator: "/").last.map(String.init) ?? share))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in

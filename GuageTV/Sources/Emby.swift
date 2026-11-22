@@ -421,7 +421,7 @@ struct EmbyHomeView: View {
                 content
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle("Emby")
         .navigationBarTitleDisplayMode(.inline)
@@ -506,8 +506,8 @@ struct EmbyHomeView: View {
                         .transition(.opacity)
                 } else if !searchedKeyword.isEmpty && searchResults.isEmpty {
                     EmptyStateView(icon: "magnifyingglass",
-                                   title: "没有找到与「\(searchedKeyword)」相关的内容",
-                                   message: "换个关键词试试",
+                                   title: "没有搜到结果",
+                                   message: "没有找到与「\(searchedKeyword)」相关的内容，换个关键词试试",
                                    actionTitle: "清除搜索",
                                    action: { searchText = ""; searchResults = []; searchedKeyword = "" },
                                    compact: true)
@@ -579,7 +579,7 @@ struct EmbyHomeView: View {
             .padding(.top, 12)
             .padding(.bottom, 110)
         }
-        .animation(.easeOut(duration: 0.25), value: searching)
+        .animation(Theme.animStandard, value: searching)
     }
 
     private func sectionTitle(_ text: String) -> some View {
@@ -832,11 +832,8 @@ struct EmbyLibraryView: View {
                 }
                 .transition(.opacity)
             } else if let errorText {
-                EmptyStateView(icon: "wifi.exclamationmark",
-                               title: "媒体库没拉到",
-                               message: errorText,
-                               actionTitle: "重新加载",
-                               action: { Task { await reload() } })
+                EmptyStateCopy.loadFailed(message: errorText,
+                                            retry: { Task { await reload() } })
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -898,7 +895,7 @@ struct EmbyLibraryView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(library.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -1000,11 +997,8 @@ struct EmbySeriesView: View {
                 }
                 .transition(.opacity)
             } else if let errorText {
-                EmptyStateView(icon: "wifi.exclamationmark",
-                               title: "剧集没拉到",
-                               message: errorText,
-                               actionTitle: "重新加载",
-                               action: { Task { await load() } })
+                EmptyStateCopy.loadFailed(message: errorText,
+                                            retry: { Task { await load() } })
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -1113,7 +1107,7 @@ struct EmbySeriesView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(series.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -1221,7 +1215,7 @@ struct EmbyPlayLoader: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: selection == nil)
+        .animation(Theme.animStandard, value: selection == nil)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(item.name)
         .navigationBarTitleDisplayMode(.inline)

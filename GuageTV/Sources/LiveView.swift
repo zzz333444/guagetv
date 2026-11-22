@@ -128,12 +128,8 @@ struct LiveView: View {
                 // with a retry action (load() is idempotent).
                 VStack {
                     Spacer()
-                    EmptyStateView(
-                        icon: "tv.slash",
-                        title: "直播列表打不开",
-                        message: errorText,
-                        actionTitle: "重新加载",
-                        action: { Task { await load() } })
+                    EmptyStateCopy.loadFailed(message: errorText,
+                                                retry: { Task { await load() } })
                         .padding(.horizontal, 18)
                     Spacer()
                 }
@@ -150,7 +146,7 @@ struct LiveView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(live.name)
         .navigationBarTitleDisplayMode(.inline)

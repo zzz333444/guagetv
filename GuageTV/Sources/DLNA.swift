@@ -205,7 +205,7 @@ struct DLNACastView: View {
                 } else {
                     List(devices) { device in
                         Button {
-                            cast(to: device)
+                            Haptics.medium(); cast(to: device)
                         } label: {
                             HStack {
                                 Label(device.name, systemImage: "tv")
@@ -219,7 +219,7 @@ struct DLNACastView: View {
                     .listStyle(.plain)
                 }
             }
-            .animation(.easeOut(duration: 0.25), value: searching)
+            .animation(Theme.animStandard, value: searching)
             .background(Theme.bg)
             .navigationTitle("DLNA 投屏")
             .navigationBarTitleDisplayMode(.inline)

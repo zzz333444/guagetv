@@ -329,7 +329,7 @@ struct JarSiteBrowseView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: items.first?.pic))
         .task {
             JarProxyClient.warmActiveLine()
@@ -407,7 +407,7 @@ struct JarSiteBrowseView: View {
             page = 1
             pageCount = 1
         } catch {
-            errorText = "Jar 站点加载失败\n\n\(error.localizedDescription)"
+            errorText = "Jar 站点加载失败：\(error.localizedDescription)"
         }
         loading = false
     }
@@ -431,7 +431,7 @@ struct JarSiteBrowseView: View {
                 pageCount = PySiteBrowseView.intValue(result["pagecount"]) ?? 1
             }
         } catch {
-            errorText = "分类加载失败\n\n\(error.localizedDescription)"
+            errorText = "分类加载失败：\(error.localizedDescription)"
         }
         loading = false
     }
@@ -497,7 +497,7 @@ struct JarDetailLoaderView: View {
                 ColdStartSpinner(since: loadSince).transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: detail == nil)
+        .animation(Theme.animStandard, value: detail == nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
         .task {
@@ -523,7 +523,7 @@ struct JarDetailLoaderView: View {
             }
             detail = CMSClient.mapDetail(first, fallbackID: item.id)
         } catch {
-            errorText = "详情加载失败\n\n\(error.localizedDescription)"
+            errorText = "详情加载失败：\(error.localizedDescription)"
         }
     }
 

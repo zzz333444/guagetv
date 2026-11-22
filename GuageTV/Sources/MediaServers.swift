@@ -432,7 +432,7 @@ struct WebDAVBrowserView: View {
                 .listStyle(.plain)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .navigationTitle(path.isEmpty ? server.name : (path.split(separator: "/").last.map(String.init) ?? server.name))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in

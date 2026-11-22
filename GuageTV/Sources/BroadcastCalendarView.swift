@@ -61,11 +61,8 @@ struct BroadcastCalendarView: View {
             } else if let errorText, items.isEmpty {
                 VStack {
                     Spacer()
-                    EmptyStateView(icon: "wifi.exclamationmark",
-                                   title: "今天的放送没拉到",
-                                   message: errorText,
-                                   actionTitle: "重新加载",
-                                   action: { Task { await load(bypassCache: true) } })
+                    EmptyStateCopy.loadFailed(message: errorText,
+                                                retry: { Task { await load(bypassCache: true) } })
                         .padding(.horizontal, 18)
                     Spacer()
                 }
@@ -73,7 +70,7 @@ struct BroadcastCalendarView: View {
                 content
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle("播出日历")
         .navigationBarTitleDisplayMode(.inline)

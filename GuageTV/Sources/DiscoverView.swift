@@ -75,7 +75,7 @@ struct DiscoverView: View {
                     }
                 }
                 .padding(.bottom, 110)   // clear the floating tab bar
-                .animation(.easeOut(duration: 0.25), value: loading)
+                .animation(Theme.animStandard, value: loading)
             }
             .ignoresSafeArea(edges: .top)   // hero bleeds under the status bar (Rex look)
             .background(AmbientBackground(imageURL: heroArt))
@@ -607,7 +607,7 @@ private struct TMDBDetailSheet: View {
             .padding(18)
             .padding(.bottom, 20)
             .opacity(appeared ? 1 : 0)
-            .onAppear { withAnimation(.easeOut(duration: 0.3)) { appeared = true } }
+            .onAppear { withAnimation(Theme.animStandard) { appeared = true } }
         }
         .background(Theme.bg)
         .presentationDetents([.medium, .large])

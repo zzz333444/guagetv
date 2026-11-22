@@ -378,7 +378,7 @@ struct PlayerView: View {
                 } else if !isPlaying && duration > 0 {
                     // Paused: one big plain play glyph in the centre
                     // (reference-player style — no glass, no card).
-                    Button { togglePlay() } label: {
+                    Button { Haptics.medium(); togglePlay() } label: {
                         Image(systemName: "play.fill")
                             .font(.system(size: 54, weight: .medium))
                             .foregroundStyle(.white)
@@ -636,7 +636,8 @@ struct PlayerView: View {
                 .onTapGesture(count: 2) { seekBy(seekStep); showSeekToast(delta: seekStep) }
         }
         .onTapGesture {
-            withAnimation { showChrome.toggle() }
+            Haptics.tap()
+            withAnimation(Theme.animChrome) { showChrome.toggle() }
             if showChrome { scheduleChromeHide() }
         }
         .simultaneousGesture(
@@ -706,7 +707,7 @@ struct PlayerView: View {
             }
             if dragMode != .episodeSwipe {
                 hudGeneration += 1
-                withAnimation { hudVisible = true }
+                withAnimation(Theme.animChrome) { hudVisible = true }
             }
         }
         switch dragMode {
@@ -744,7 +745,7 @@ struct PlayerView: View {
         let gen = hudGeneration
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            if gen == hudGeneration { withAnimation { hudVisible = false } }
+            if gen == hudGeneration { withAnimation(Theme.animChrome) { hudVisible = false } }
         }
     }
 
@@ -824,7 +825,7 @@ struct PlayerView: View {
             if showResolutionPill, !specText.isEmpty {
                 Text(specText)
                     .font(.system(size: compact ? 11 : 12))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
             }
             if showSpeedPill {
@@ -919,6 +920,7 @@ struct PlayerView: View {
                 Section {
                     ForEach([("auto", "自动"), ("1080", "最高 1080p"), ("720", "最高 720p"), ("480", "最高 480p")], id: \.0) { option in
                         Button {
+                            Haptics.selection()
                             hlsQuality = option.0
                             applyHLSQuality()
                             showToast(option.0 == "auto" ? "画质：自动" : "画质上限：\(option.1)")
@@ -1007,7 +1009,7 @@ struct PlayerView: View {
         // on screen; landscape keeps the roomy reference metrics.
         let compact = !isLandscape
         return HStack(spacing: compact ? 6 : 12) {
-            Button { dismiss() } label: {
+            Button { Haptics.tap(); dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 19, weight: .medium))
                     .foregroundStyle(.white)
@@ -1027,33 +1029,33 @@ struct PlayerView: View {
                 if let lineName = activeLineName {
                     Text(lineName)
                         .font(.system(size: compact ? 11 : 12))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 2)
             HStack(spacing: compact ? 6 : 14) {
                 if showGravityButton {
-                    Button { toggleGravity(); pokeChrome() } label: {
+                    Button { Haptics.selection(); toggleGravity(); pokeChrome() } label: {
                         topIcon("aspectratio", compact: compact)
                     }
                     .buttonStyle(.plain)
                 }
                 if showScreenshotButton {
-                    Button { saveSnapshot() } label: {
+                    Button { Haptics.tap(); saveSnapshot() } label: {
                         topIcon("camera", compact: compact)
                     }
                     .buttonStyle(.plain)
                 }
                 if showEpisodeButton, episodes.count > 1 {
-                    Button { showEpisodes = true; pokeChrome() } label: {
+                    Button { Haptics.tap(); showEpisodes = true; pokeChrome() } label: {
                         topIcon("film", compact: compact)
                     }
                     .buttonStyle(.plain)
                 }
                 if !isMPV {
                     if showPiPButton, AVPictureInPictureController.isPictureInPictureSupported() {
-                        Button { native.togglePiP() } label: {
+                        Button { Haptics.tap(); native.togglePiP() } label: {
                             topIcon(native.isPiPActive ? "pip.exit" : "pip.enter", compact: compact)
                         }
                         .buttonStyle(.plain)
@@ -1064,7 +1066,7 @@ struct PlayerView: View {
                             .contentShape(Rectangle())
                     }
                 }
-                Button { showPlayerSettings = true; pokeChrome() } label: {
+                Button { Haptics.tap(); showPlayerSettings = true; pokeChrome() } label: {
                     topIcon("ellipsis", compact: compact)
                 }
                 .buttonStyle(.plain)
@@ -1129,7 +1131,7 @@ struct PlayerView: View {
                     .onTapGesture { Haptics.tap(); showRemaining.toggle(); pokeChrome() }
             }
             HStack(spacing: compact ? 10 : 24) {
-                Button { togglePlay(); pokeChrome() } label: {
+                Button { Haptics.medium(); togglePlay(); pokeChrome() } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white)
@@ -1142,7 +1144,7 @@ struct PlayerView: View {
                 // episodes at all (v1.36 behaviour kept); the
                 // arrows dim at the bounds.
                 if showEpisodeSwitch, !episodes.isEmpty {
-                    Button { prevEpisode(); pokeChrome() } label: {
+                    Button { Haptics.selection(); prevEpisode(); pokeChrome() } label: {
                         Image(systemName: "backward.end.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(index > 0 ? .white : .white.opacity(0.35))
@@ -1150,7 +1152,7 @@ struct PlayerView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    Button { nextEpisode(); pokeChrome() } label: {
+                    Button { Haptics.selection(); nextEpisode(); pokeChrome() } label: {
                         Image(systemName: "forward.end.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(index < episodes.count - 1 ? .white : .white.opacity(0.35))
@@ -1160,7 +1162,7 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                 }
                 Spacer(minLength: 4)
-                Button { switchEngine(manual: true); pokeChrome() } label: {
+                Button { Haptics.selection(); switchEngine(manual: true); pokeChrome() } label: {
                     Text(isMPV ? "MPV" : "原生")
                         .font(.system(size: compact ? 14 : 15, weight: .semibold))
                         .foregroundStyle(.white)
@@ -1170,7 +1172,7 @@ struct PlayerView: View {
                 }
                 .buttonStyle(.plain)
                 if showEpisodeButton, episodes.count > 1 {
-                    Button { showEpisodes = true; pokeChrome() } label: {
+                    Button { Haptics.tap(); showEpisodes = true; pokeChrome() } label: {
                         Text("选集")
                             .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
@@ -1181,7 +1183,7 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                 }
                 if showRateButton {
-                    Button { cycleRate(); pokeChrome() } label: {
+                    Button { Haptics.selection(); cycleRate(); pokeChrome() } label: {
                         Text(currentRate == 1 ? "倍速" : "倍速 \(String(format: "%.2g", currentRate))")
                             .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
@@ -1196,7 +1198,7 @@ struct PlayerView: View {
                 // "画质"; tap opens the HLS cap sheet. Shown for
                 // VOD and live alike (no isLive/episode gating).
                 if showQualityButton {
-                    Button { showQualitySheet = true; pokeChrome() } label: {
+                    Button { Haptics.tap(); showQualitySheet = true; pokeChrome() } label: {
                         Text(qualityButtonLabel)
                             .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
@@ -1213,7 +1215,7 @@ struct PlayerView: View {
                 // competes for space in portrait). Shares the
                 // "画面适配按钮" toggle with the top icon.
                 if showGravityButton {
-                    Button { toggleGravity(); pokeChrome() } label: {
+                    Button { Haptics.selection(); toggleGravity(); pokeChrome() } label: {
                         Text(videoGravity == "fill" ? "填充" : "适应")
                             .font(.system(size: compact ? 14 : 15, weight: .semibold))
                             .foregroundStyle(.white)
@@ -1312,7 +1314,7 @@ struct PlayerView: View {
                                             .background(s == seg ? Color.white : Theme.glass, in: Capsule())
                                             .foregroundStyle(s == seg ? .black : Theme.text.opacity(0.85))
                                             .onTapGesture {
-                                                episodeSegment = s
+                                                withAnimation(Theme.animQuick) { episodeSegment = s }
                                                 Haptics.selection()
                                             }
                                     }
@@ -1321,8 +1323,10 @@ struct PlayerView: View {
                         }
                         Spacer()
                         Button {
-                            episodeReversed.toggle()
-                            episodeSegment = 0
+                            withAnimation(Theme.animQuick) {
+                                episodeReversed.toggle()
+                                episodeSegment = 0
+                            }
                             Haptics.selection()
                         } label: {
                             Label(episodeReversed ? "倒序" : "正序",
@@ -1367,6 +1371,7 @@ struct PlayerView: View {
         let parts = guageEpisodeNameParts(episodes[i].name)
         let displayName = guageEpisodeDisplayName(parts.marker, index: i)
         return Button {
+            Haptics.selection()
             showEpisodes = false
             goToEpisode(i)
         } label: {
@@ -1477,6 +1482,7 @@ struct PlayerView: View {
                     Section("播放线路") {
                         ForEach(lineNames.indices, id: \.self) { i in
                             Button {
+                                Haptics.selection()
                                 showPlayerSettings = false
                                 switchLine(i)
                             } label: {
@@ -1494,6 +1500,7 @@ struct PlayerView: View {
                 Section("倍速 · 当前 \(String(format: "%.2g", currentRate))x") {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
                         Button {
+                            Haptics.selection()
                             setRate(rate); pokeChrome()
                         } label: {
                             HStack {
@@ -1508,6 +1515,7 @@ struct PlayerView: View {
                 }
                 Section("画面方向") {
                     Button {
+                        Haptics.tap()
                         if !rotationLocked {
                             rotate(toLandscape: !UIDevice.current.orientation.isLandscape)
                         }
@@ -1528,11 +1536,11 @@ struct PlayerView: View {
                     }
                 }
                 Section("快进快退") {
-                    Button { seekBy(-seekStep); pokeChrome() } label: {
+                    Button { Haptics.tap(); seekBy(-seekStep); pokeChrome() } label: {
                         Label("快退 \(Int(seekStep)) 秒", systemImage: "gobackward")
                             .foregroundStyle(Theme.text)
                     }
-                    Button { seekBy(seekStep); pokeChrome() } label: {
+                    Button { Haptics.tap(); seekBy(seekStep); pokeChrome() } label: {
                         Label("快进 \(Int(seekStep)) 秒", systemImage: "goforward")
                             .foregroundStyle(Theme.text)
                     }
@@ -1564,6 +1572,7 @@ struct PlayerView: View {
                 Section("画质（HLS 多码率）") {
                     ForEach([("auto", "自动"), ("1080", "最高 1080p"), ("720", "最高 720p"), ("480", "最高 480p")], id: \.0) { option in
                         Button {
+                            Haptics.selection()
                             hlsQuality = option.0
                             applyHLSQuality()
                         } label: {
@@ -2284,10 +2293,10 @@ struct PlayerView: View {
     private func showToast(_ text: String) {
         toastGeneration += 1
         let gen = toastGeneration
-        withAnimation { toast = text }
+        withAnimation(Theme.animChrome) { toast = text }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_600_000_000)
-            if gen == toastGeneration { withAnimation { toast = nil } }
+            if gen == toastGeneration { withAnimation(Theme.animChrome) { toast = nil } }
         }
     }
 
@@ -2304,7 +2313,7 @@ struct PlayerView: View {
         let gen = chromeGeneration
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
-            if gen == chromeGeneration { withAnimation { showChrome = false } }
+            if gen == chromeGeneration { withAnimation(Theme.animChrome) { showChrome = false } }
         }
     }
 

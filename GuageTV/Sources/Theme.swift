@@ -55,6 +55,20 @@ enum Theme {
     /// the 10pt radius that was hand-written in Emby, media
     /// servers, calendar and detail chips now has a name.
     static let smallRadius: CGFloat = 10
+    /// Canonical animation set (v2.33): every duration in the
+    /// app previously lived as a literal — 0.18 / 0.2 / 0.22 /
+    /// 0.25 / 0.3 / 0.35 scattered across 16 files — so the
+    /// same gesture felt different on each page. Four values
+    /// now cover everything: quick for toggles, expands and
+    /// segment switches; standard for content swaps and the
+    /// loading ↔ content cross-fade; fade for image fade-ins;
+    /// chrome for the player chrome / HUD / toast. The one
+    /// deliberate exception is the Discover hero auto-advance
+    /// (0.45s, a slow carousel cross-fade, not a gesture).
+    static let animQuick = Animation.easeInOut(duration: 0.2)
+    static let animStandard = Animation.easeOut(duration: 0.25)
+    static let animFade = Animation.easeOut(duration: 0.35)
+    static let animChrome = Animation.easeInOut(duration: 0.25)
     /// Tint wash over the translucent fill — the Library's
     /// LightGlassCard recipe; flat Theme.glass alone reads as a
     /// plain grey block next to it.
@@ -244,7 +258,7 @@ struct MediaInfoCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 Button {
                     Haptics.selection()
-                    withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+                    withAnimation(Theme.animQuick) { expanded.toggle() }
                 } label: {
                     HStack {
                         Text("媒体信息").font(.headline).foregroundStyle(Theme.text)

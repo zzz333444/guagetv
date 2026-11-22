@@ -164,7 +164,7 @@ struct ContentView: View {
                 .allowsHitTesting(tab == 3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.22), value: tab)
+        .animation(Theme.animQuick, value: tab)
     }
 
     private var sideRail: some View {
@@ -220,7 +220,7 @@ struct ContentView: View {
     }
 
     private func tabButton(index: Int, icon: String, label: String) -> some View {
-        Button { Haptics.tap(); withAnimation(.easeInOut(duration: 0.2)) { tab = index } } label: {
+        Button { Haptics.tap(); withAnimation(Theme.animQuick) { tab = index } } label: {
             if compactTab {
                 Image(systemName: icon).font(.system(size: 19))
                     .foregroundStyle(tab == index ? Theme.text : Theme.text.opacity(0.55))

@@ -186,7 +186,7 @@ struct CacheSettingsView: View {
                                     .foregroundStyle(Theme.textDim)
                                     .monospacedDigit()
                                 Button("清理") {
-                                    Task { await clear(area) }
+                                    Task { Haptics.tap(); await clear(area); Haptics.success() }
                                 }
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -205,7 +205,7 @@ struct CacheSettingsView: View {
                                 .monospacedDigit()
                         }
                         Button {
-                            Task { await clearAll() }
+                            Task { Haptics.tap(); await clearAll(); Haptics.success() }
                         } label: {
                             Text(busy ? "清理中…" : "清理全部缓存")
                                 .font(.subheadline.weight(.semibold))
@@ -241,7 +241,7 @@ struct CacheSettingsView: View {
                                 .multilineTextAlignment(.trailing)
                         }
                         Button {
-                            Task { await clearDiskCaches() }
+                            Task { Haptics.tap(); await clearDiskCaches(); Haptics.success() }
                         } label: {
                             Text(busy ? "清理中…" : "清理模块与发现缓存")
                                 .font(.subheadline.weight(.semibold))

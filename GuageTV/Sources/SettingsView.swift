@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.32 · Rex 细节核查"
+    static let buildLabel = "v2.33 · 播放器与动效收尾"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,14 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.33", title: "播放器与动效收尾", lines: [
+            "动画时长全仓统一：此前 0.18 / 0.2 / 0.22 / 0.25 / 0.3 / 0.35 六档字面量散在 16 个文件，同一手势各页手感不一；现收进 Theme 四个常量（animQuick 0.2 展开/切换、animStandard 0.25 内容切换与加载交叉淡入淡出、animFade 0.35 图片淡入、animChrome 0.25 播放器 chrome/HUD/toast），数值与旧版一致、只换名；唯一例外是发现页 hero 自动轮播的 0.45 秒慢切（定时轮播，不参与手势统一）",
+            "播放器 chrome 复核：横屏控制层与选集态逐项核对——竖屏紧凑度量（图标 32pt、间距收窄）与横屏宽松度量此前 v1.57 已分档，本轮复核无溢出；chrome/HUD/toast 此前用无参 withAnimation（系统默认曲线），现统一走 animChrome；选集面板的分段 chips 与正倒序切换此前瞬间跳变，现加 animQuick 过渡；详情页选集分段与正倒序同步加动画",
+            "骨架屏闪烁点清零：v2.24「19 处统一加淡出」核查发现只在发现页与 jar 页真正落地，其余骨架分支（Emby、CMS/py/JS 浏览页、搜索页、播出日历）出现与消失都是硬切；现过渡直接长在三个骨架组件本体上（SkeletonPosterGrid / SkeletonRowList / SkeletonHero），各父页已有的 loading 动画驱动交叉淡入淡出；骨架 hero 的浅色占位条此前手写白 0.25/0.18（浅色底上几乎看不见），改走主题文字透明度",
+            "触感矩阵复核：播放器此前整条底栏与顶栏按钮都没有触感（播放/切集/换引擎/倍速/画质/选集/截图/PiP/设置），现按五类补齐（播放/投屏等主操作 medium、切集/选集/倍速 selection、普通点按 tap）；设置页的倍速行、线路行、快进快退与画质选项同步补上；缓存页三处清理（点按 tap、清完 success）、DLNA 设备行、SMB 视频行、备份生成/恢复此前零触感一并补上；复核无双震：历史页分支内 tap/medium 只走其一、模块 chips 与直播分组各只震一次；语音搜索是纯识别类、无界面按钮，不补",
+            "空态与错误态文案统一：同一情况同一句——加载失败六处（模块页、Emby 媒体库/剧集页、直播页、播出日历）此前各写各的（「模块没拉到数据」「媒体库没拉到」「直播列表打不开」「今天的放送没拉到」），现统一为「没拉到数据」，原因进正文、重试统一「重新加载」；无结果三处统一为「没有搜到结果」（Emby 搜索的关键词保留在正文里）；JS/py/Jar 三类浏览页的错误前缀此前是「加载失败\\n\\n原因」双行，现统一为「XX 加载失败：原因」单行；Emby「没连上」是服务器不可达、与列表拉取失败不是同一情况，文案保留",
+            "玻璃对比度复核：播放器顶栏线路名（白 0.7）与状态条分辨率（白 0.75）在亮画面上偏淡，各提亮一档到 0.85；其余小字抽查通过——Theme.textDim 0.55 在深色环境光底上对比约 6:1、浅色底上约 7:1，均在可读线之上，未动全局值",
+        ]),
         Entry(version: "v2.32", title: "Rex 细节核查", lines: [
             "发现页 hero 补播放入口：Rex hero 有白色播放胶囊，旧版只有点按进详情、长按菜单才有跨线搜索；现简介下方直接放白色「播放」胶囊，点即跨线搜索该片",
             "详情页播放资源卡规格行合并：集数与画质/格式原来是两行小字，现合成一行「共 12 集 · HLS · 1080P」；卡面改走共享 glassPanel，选中态描边改用新常量 Theme.glassStrokeStrong，不再手写 0.45/0.12 两档白边",

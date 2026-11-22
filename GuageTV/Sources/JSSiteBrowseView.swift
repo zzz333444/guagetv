@@ -48,7 +48,7 @@ struct JSSiteBrowseView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: loading)
+        .animation(Theme.animStandard, value: loading)
         .background(AmbientBackground(imageURL: items.first?.pic))
         .task { await prepare() }
     }
@@ -118,7 +118,7 @@ struct JSSiteBrowseView: View {
             page = 1
             pageCount = 1
         } catch {
-            errorText = "JS 站点加载失败\n\n\(error.localizedDescription)"
+            errorText = "JS 站点加载失败：\(error.localizedDescription)"
         }
         loading = false
     }
@@ -141,7 +141,7 @@ struct JSSiteBrowseView: View {
                 pageCount = PySiteBrowseView.intValue(result["pagecount"]) ?? 1
             }
         } catch {
-            errorText = "分类加载失败\n\n\(error.localizedDescription)"
+            errorText = "分类加载失败：\(error.localizedDescription)"
         }
         loading = false
     }
@@ -228,7 +228,7 @@ struct JSDetailLoaderView: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: detail == nil)
+        .animation(Theme.animStandard, value: detail == nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AmbientBackground(imageURL: item.pic))
         .task {
@@ -241,7 +241,7 @@ struct JSDetailLoaderView: View {
                 }
                 detail = CMSClient.mapDetail(first, fallbackID: item.id)
             } catch {
-                errorText = "详情加载失败\n\n\(error.localizedDescription)"
+                errorText = "详情加载失败：\(error.localizedDescription)"
             }
         }
     }
