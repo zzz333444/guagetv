@@ -115,12 +115,26 @@ final class DanmakuStore: ObservableObject {
                 let body = row[4] as? String ?? ""
                 add(time: time, text: body, color: anyColor(row[2]), mode: mode)
             }
-        } else if let obj = root as? [String: Any],
-                  let list = (obj["data"] as? [[String: Any]])
-                    ?? (obj["danmuku"] as? [[String: Any]])
-                    ?? (obj["danmu"] as? [[String: Any]])
-                    ?? (obj["comments"] as? [[String: Any]]) {
-            for entry in list { addDict(entry) }
+        } else if let obj = root as? [String: Any] {
+            // Guide 弹幕章: {comments:[{p,m}]}, {danmuku:
+            // [[time, pos, color, "", text]]} — the array-of-
+            // arrays shape must be handled here too, not only
+            // as a root array (v2.28: previously dropped).
+            for key in ["data", "danmuku", "danmu", "comments"] {
+                if let list = obj[key] as? [[String: Any]] {
+                    for entry in list { addDict(entry) }
+                    return out
+                }
+                if let rows = obj[key] as? [[Any]] {
+                    for row in rows where row.count >= 5 {
+                        guard let time = anyDouble(row[0]) else { continue }
+                        let mode = (anyInt(row[1]) ?? 1) == 0 ? 1 : (anyInt(row[1]) ?? 1)
+                        let body = row[4] as? String ?? ""
+                        add(time: time, text: body, color: anyColor(row[2]), mode: mode)
+                    }
+                    return out
+                }
+            }
         }
         return out
     }
@@ -212,6 +226,12 @@ struct DanmakuView: View {
     @AppStorage("danmaku.fontSize") private var fontSize = 15.0
     @AppStorage("danmaku.area") private var areaFraction = 0.45
     @AppStorage("danmaku.outline") private var outline = true
+    /// v2.28 (R3 加料): time offset in seconds — positive
+    /// delays danmaku (a comment stamped t shows at t +
+    /// offset). Read live here so it applies to module danmu
+    /// exactly like file/API danmu (blockWords already filter
+    /// in DanmakuStore.load, area already bounds the lanes).
+    @AppStorage("danmaku.offset") private var offset = 0.0
 
     private static let travel: Double = 9   // seconds to cross the screen
     private var laneHeight: CGFloat { CGFloat(fontSize) + 9 }
@@ -225,7 +245,7 @@ struct DanmakuView: View {
     }
 
     private func draw(context: GraphicsContext, size: CGSize) {
-        let now = isMPV ? mpv.currentTime : native.currentTime
+        let now = (isMPV ? mpv.currentTime : native.currentTime) - offset
         guard now > 0, size.width > 40 else { return }
         var ctx = context
         ctx.opacity = opacity
@@ -294,6 +314,9 @@ struct DanmakuSettingsView: View {
     @AppStorage("danmaku.speed") private var speedFactor = 1.0
     @AppStorage("danmaku.area") private var areaFraction = 0.45
     @AppStorage("danmaku.outline") private var outline = true
+    /// v2.28: offset in seconds (positive = later). Shared
+    /// with DanmakuView; applies to module danmu too.
+    @AppStorage("danmaku.offset") private var offset = 0.0
 
     var body: some View {
         SettingsPage(title: "弹幕外观") {
@@ -337,6 +360,11 @@ struct DanmakuSettingsView: View {
                     sliderRow(title: "显示区域", valueText: "屏幕上部 \(Int(areaFraction * 100))%") {
                         Slider(value: $areaFraction, in: 0.25...1, step: 0.05)
                     }
+                    sliderRow(title: "时间偏移", valueText: offset == 0 ? "不偏移" : (offset > 0 ? "延后 \(String(format: "%.1f", offset)) 秒" : "提前 \(String(format: "%.1f", -offset)) 秒")) {
+                        Slider(value: $offset, in: -5...5, step: 0.5)
+                    }
+                    Text("弹幕与画面对不上时调这里：正值让弹幕晚出现、负值让它早出现；模块弹幕、文件弹幕、在线弹幕都走同一处。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
                     Text("显示区域越小，滚动弹幕只占画面上方一块，不挡字幕与画面主体。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }

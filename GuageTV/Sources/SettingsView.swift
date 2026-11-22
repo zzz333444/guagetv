@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.27 · 模块·返回字段与详情搜索对齐"
+    static let buildLabel = "v2.28 · 模块资源字幕与弹幕对齐"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.28", title: "模块资源字幕与弹幕对齐", lines: [
+            "资源与字幕按 Rex 官方规范（guide 0.0.7 资源与字幕章）逐项对齐：loadResource 只认 id/functionName/type 三元组全对的入口（裸 type: stream 换名入口不再被调用）；返回的播放线路数组全解析（name/url/description/playerType/customHeaders），多线路时详情页弹出线路选择器；playerType 落实到播放器（system 走原生引擎、app 走 mpv，手动切引擎与失败换引擎仍优先）；取流参数按 guide 上下文表全改字符串、缺字段不传、title 只给字幕与弹幕入口",
+            "字幕接通播放器：条目 externalSubtitles 与 loadSubtitle 入口（三元组识别）合并去重进播放器，isDefault 轨道自动加载（否则首条），字幕菜单新增「模块自带字幕」分组置于在线搜索之上（优先级：模块自带 > OpenSubtitles），点任意轨道即下载（带 customHeaders）解析显示；loadSubtitle 返回 {subtitles:[…]} 包裹也认",
+            "弹幕按 guide 弹幕章重写三段链：searchDanmu → getDetail（按集号匹配 episodeId，缺集号字段时取首集）→ getComments（commentId 终于传分集 id，不再错传番剧 id）；另支持 getCommentsWithSegmentTime 分段探针与旧版 getCommentsById/getDanmuWithSegmentTime 兜底；{danmuku:[[时间,位置,颜色,\"\",文本]]} 形状此前在字幕解析字典分支被丢掉，已补上",
+            "弹幕设置复核：偏移秒数新增（-5~+5 秒滑杆，正在播放的弹幕立即生效），屏蔽词（DanmakuStore.load 过滤）与显示区域（DanmakuView 车道数）核查确认对模块弹幕同样生效；官方 harness 实测 danmu.js 三段链全通、资源/字幕测试模块 0 issues，validate.mjs 对 danmu.js 与测试模块均为 0 问题",
+        ]),
         Entry(version: "v2.27", title: "模块·返回字段与详情搜索对齐", lines: [
             "返回字段按 Rex 官方规范（guide 0.0.7 返回数据章）逐项补齐解码：subtitle（卡片副标题）、backdropPaths（剧照组）、detailPoster、coverRatio、duration（秒数）、genreItems、language、season、previewUrl、trailers、playerType、customHeaders/headers、外挂字幕 externalSubtitles、音乐 tracks；peoples 补 id 与 avatar，演职员行有头像时显示头像、无头像时仍显示首字圆圈",
             "详情按 guide 详情章复核：loadDetail 只收裸 link 字符串（已是现状，harness 实测 argument 为纯字符串）；TMDB 条目带 link 时详情结果合并进列表条目、不再整项替换（旧逻辑会丢掉海报与评分）；loadDetail 返回空数组 [] 视为“无补充详情”不再弹错，只返回 null 才报错；详情页集数优先用 tracks、回退 episodeItems/childItems",

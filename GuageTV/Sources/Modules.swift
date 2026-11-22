@@ -158,12 +158,28 @@ struct FWDMeta {
     var i18n: [String: [String: String]] = [:]
 
     /// Entries the browse UI can render as lists: everything that
-    /// is not a stream resolver or a danmu feed.
+    /// is not a stream resolver, a subtitle feed or a danmu feed.
     var listModules: [FWDModuleEntry] {
-        modules.filter { $0.type != "stream" && $0.type != "danmu" && $0.id != "loadResource" && !$0.functionName.isEmpty }
+        modules.filter { $0.type != "stream" && $0.type != "danmu" && $0.type != "subtitle"
+            && $0.id != "loadResource" && $0.id != "loadSubtitle" && !$0.functionName.isEmpty }
     }
+    /// Guide 资源与字幕章 (v2.28): a resource entry is ONLY
+    /// called when it is exactly id "loadResource" +
+    /// functionName "loadResource" + type "stream". A bare
+    /// type "stream" entry with another id/functionName is
+    /// NOT called. v2.27 and earlier took the first
+    /// type-"stream" entry regardless of id — that loose
+    /// match is removed here.
     var resourceFunction: String? {
-        modules.first { $0.id == "loadResource" || $0.type == "stream" }?.functionName
+        modules.first { $0.id == "loadResource" && $0.functionName == "loadResource"
+            && $0.type == "stream" }?.functionName
+    }
+    /// Guide 资源与字幕章 (v2.28): the standalone subtitle
+    /// entry is exactly id "loadSubtitle" + functionName
+    /// "loadSubtitle" + type "subtitle".
+    var subtitleFunction: String? {
+        modules.first { $0.id == "loadSubtitle" && $0.functionName == "loadSubtitle"
+            && $0.type == "subtitle" }?.functionName
     }
 }
 
@@ -228,7 +244,10 @@ struct FWDSubtitle {
             return ""
         }
         url = str("url")
-        title = str("title")
+        // Guide: subtitle entries spell the track name `title`;
+        // some modules write `name` (the resource-entry word)
+        // — accept it as a fallback, never silently untitled.
+        title = str("title").isEmpty ? str("name") : str("title")
         // The subtitle entry spells it `lang`; the item field
         // spells it `language` — accept both.
         language = str("language").isEmpty ? str("lang") : str("language")
@@ -238,6 +257,78 @@ struct FWDSubtitle {
         if let dict = d["customHeaders"] as? [String: Any] ?? d["headers"] as? [String: Any] {
             for (k, v) in dict { customHeaders[k] = String(describing: v) }
         }
+    }
+
+    /// Menu label: title first, else the language tag, else a
+    /// bare "字幕" so a track never renders as an empty row.
+    var displayName: String {
+        if !title.isEmpty { return title }
+        if !language.isEmpty { return language }
+        return "字幕"
+    }
+}
+
+/// One playback line from a `loadResource` entry (guide 资源与
+/// 字幕章, v2.28): [{name, url, description, customHeaders,
+/// playerType}]. `name` and `url` are both required by the
+/// guide; a nameless line gets "线路 N" so the resource
+/// picker never shows a blank row.
+struct FWDResource {
+    var name: String = ""
+    var url: String = ""
+    var description: String = ""
+    var playerType: String = ""
+    var customHeaders: [String: String] = [:]
+
+    init(_ d: [String: Any], index: Int) {
+        func str(_ key: String) -> String {
+            if let s = d[key] as? String { return s }
+            if let n = d[key] as? NSNumber { return n.stringValue }
+            return ""
+        }
+        name = str("name").isEmpty ? "线路 \(index + 1)" : str("name")
+        url = str("url")
+        description = str("description")
+        playerType = str("playerType")
+        if let dict = d["customHeaders"] as? [String: Any] ?? d["headers"] as? [String: Any] {
+            for (k, v) in dict { customHeaders[k] = String(describing: v) }
+        }
+    }
+}
+
+/// Playback context for loadResource / loadSubtitle / danmu
+/// entries (guide 资源与字幕章 + 弹幕章, v2.28). Every value
+/// is a string; a field the item does not carry is simply not
+/// passed. `title` (the search title) is only sent to the
+/// subtitle and danmu entries — never to loadResource.
+enum FWDPlaybackContext {
+    static func build(item: FWDItem, seriesTitle: String?, episodeName: String?,
+                      includeTitle: Bool, episodeFallback: Int? = nil) -> [String: Any] {
+        var p: [String: Any] = ["id": item.id]
+        let kind: String
+        if item.mediaType == "movie" || item.mediaType == "tv" { kind = item.mediaType }
+        else if !item.episodeItems.isEmpty || !item.tracks.isEmpty || !item.childItems.isEmpty { kind = "tv" }
+        else { kind = "movie" }
+        p["type"] = kind
+        p["seriesName"] = seriesTitle ?? item.title
+        if let episodeName, !episodeName.isEmpty { p["episodeName"] = episodeName }
+        if item.type == "tmdb" { p["tmdbId"] = item.id }
+        if let s = item.season { p["season"] = String(s) }
+        if let e = item.episode { p["episode"] = String(e) }
+        else if let f = episodeFallback { p["episode"] = String(f) }
+        if !item.link.isEmpty { p["link"] = item.link }
+        if !item.releaseDate.isEmpty { p["airDate"] = item.releaseDate }
+        if let d = item.duration { p["runtime"] = String(d) }
+        if includeTitle { p["title"] = seriesTitle ?? item.title }
+        return p
+    }
+
+    /// Module-level globalParams (e.g. danmu.js's `server`)
+    /// ride along with playback calls, same as list calls.
+    static func withGlobals(_ p: [String: Any], meta: FWDMeta) -> [String: Any] {
+        var out = p
+        for g in meta.globalParams where !g.value.isEmpty { out[g.name] = g.value }
+        return out
     }
 }
 
@@ -1642,55 +1733,60 @@ final class FWDRuntime {
 
 // MARK: - Danmu modules (v1.61)
 
-/// Forward danmu modules, per the public ForwardWidgets spec
-/// (InchStudio/ForwardWidgets, "弹幕分片加载流程"):
-///   searchDanmu(params) → search matches ({animes:[{bangumiId…}]})
-///   getCommentsById(params) → the episode's danmu array
-///     (params carry commentId / animeId from the search hit,
-///     plus tmdbId / type / title / seriesName / episodeName /
-///     season / episode / link / videoUrl / segmentTime)
-///   getDanmuWithSegmentTime(params) → one time segment's danmu
-///     (segmentTime + the tmdbId-keyed cache getCommentsById fills)
-/// Accepted danmu shapes (all feed DanmakuStore.load, which also
-/// parses bilibili XML / JSON): [{p:"time,mode,size,color,…",
-/// m:"text"}] and [[time, mode, color, "", text]].
+/// Forward danmu modules, per the Rex guide 0.0.7 弹幕章
+/// (v2.28 rewrite — the v1.61 flow skipped a step):
+///   1. searchDanmu(params) → {animes:[{animeId…}]}; a
+///      module may answer with danmu directly instead.
+///   2. getDetail(params + animeId) → [{episodeId,
+///      episodeTitle, episodeNumber}]; match by episode
+///      number, else take the first episode. The episodeId
+///      (a string or integer, never a list index) becomes
+///      commentId — the old code passed the ANIME id as
+///      commentId, so episode matching never happened.
+///   3. getComments(params + animeId + commentId) →
+///      {comments:[{p, m}]} (or a bare [{p,m}] array,
+///      {danmuku:[[time, pos, color, "", text]]}, or XML).
+///   4. getCommentsWithSegmentTime(params + commentId +
+///      segmentTime) — segmented loading; probed at 0.
+/// Params follow the guide's playback-context table (all
+/// strings, missing fields not passed; `title` is sent
+/// because this is a danmu entry). animeId prefers
+/// bangumiId, then animeId. Legacy ids getCommentsById /
+/// getDanmuWithSegmentTime are still accepted as fallbacks
+/// for modules written against the older Forward spec.
 enum FWDDanmu {
     static func entries(for meta: FWDMeta) -> [FWDModuleEntry] {
         meta.modules.filter {
             $0.type == "danmu"
-            || $0.id == "searchDanmu" || $0.id == "getComments"
-            || $0.id == "getDanmuWithSegmentTime"
+            || $0.id == "searchDanmu" || $0.id == "getDetail" || $0.id == "getComments"
+            || $0.id == "getCommentsWithSegmentTime"
+            || $0.id == "getCommentsById" || $0.id == "getDanmuWithSegmentTime"
         }
     }
 
     static func hasDanmu(_ meta: FWDMeta) -> Bool { !entries(for: meta).isEmpty }
 
     /// Fetch one episode's danmaku from the SAME package's danmu
-    /// modules, following the spec flow. Returns raw JSON data
-    /// for DanmakuStore.load, or nil when the package has no
-    /// danmu modules / nothing matched.
-    static func fetch(record: FWDRecord, item: FWDItem, episodeIndex: Int) async -> Data? {
+    /// modules, following the guide's three-step chain. Returns
+    /// raw JSON data for DanmakuStore.load, or nil when the
+    /// package has no danmu modules / nothing matched.
+    /// `seriesTitle` is the show title when `item` is one
+    /// episode; nil when `item` is itself the single title
+    /// being played (movie / single video).
+    static func fetch(record: FWDRecord, item: FWDItem, episodeIndex: Int,
+                      seriesTitle: String? = nil) async -> Data? {
         guard let source = FWDStore.source(for: record) else { return nil }
         let meta = record.meta
         let entries = entries(for: meta)
         guard !entries.isEmpty else { return nil }
         let runtime = FWDRuntime(widgetID: record.id)
         let epNo = item.episode ?? (episodeIndex + 1)
-        var params: [String: Any] = [
-            "title": item.title,
-            "seriesName": item.title,
-            "episodeName": item.title,
-            "episode": epNo,
-            "type": item.mediaType.isEmpty
-                ? (item.episodeItems.isEmpty && item.childItems.isEmpty ? "movie" : "tv")
-                : item.mediaType,
-            "link": item.link,
-            "videoUrl": item.videoUrl,
-        ]
-        if item.type == "tmdb" { params["tmdbId"] = item.id }
-        if !item.releaseDate.isEmpty { params["airDate"] = item.releaseDate }
-        if !item.durationText.isEmpty { params["runtime"] = item.durationText }
-        for p in meta.globalParams where !p.value.isEmpty { params[p.name] = p.value }
+        let episodeName = seriesTitle == nil ? nil : item.title
+        var params = FWDPlaybackContext.build(item: item, seriesTitle: seriesTitle,
+                                              episodeName: episodeName, includeTitle: true,
+                                              episodeFallback: epNo)
+        params["videoUrl"] = item.videoUrl
+        params = FWDPlaybackContext.withGlobals(params, meta: meta)
 
         func entry(id: String, fn: String) -> FWDModuleEntry? {
             entries.first { $0.id == id } ?? entries.first { $0.functionName == fn }
@@ -1705,24 +1801,46 @@ enum FWDDanmu {
                 matchedID = matchID(from: result)
             }
         }
-        // 2. getCommentsById: the episode's comments.
-        if let comments = entry(id: "getComments", fn: "getCommentsById") {
+        guard let animeID = matchedID else { return nil }
+        // 2. getDetail: episodes for the matched anime; match
+        // by episode number (as a string), else first episode.
+        // Without a getDetail entry, fall back to the anime id
+        // as commentId (legacy modules without episode lists).
+        var commentID = animeID
+        if let detail = entry(id: "getDetail", fn: "getDetail") ?? entry(id: "getDetail", fn: "findEpisodes") {
             var p2 = params
-            if let matchedID { p2["commentId"] = matchedID; p2["animeId"] = matchedID }
-            p2["segmentTime"] = 0
-            if let result = try? await runtime.call(function: comments.functionName,
+            p2["animeId"] = animeID
+            if let result = try? await runtime.call(function: detail.functionName,
                                                     params: p2, source: source),
+               let episodes = result as? [[String: Any]], !episodes.isEmpty {
+                let wanted = String(epNo)
+                let pick = episodes.first {
+                    let n = ($0["episodeNumber"] as? String) ?? (($0["episodeNumber"] as? NSNumber)?.stringValue ?? "")
+                    return n == wanted
+                } ?? episodes[0]
+                if let s = pick["episodeId"] as? String, !s.isEmpty { commentID = s }
+                else if let n = pick["episodeId"] as? NSNumber { commentID = n.stringValue }
+            }
+        }
+        // 3. getComments: the episode's comments.
+        if let comments = entry(id: "getComments", fn: "getComments")
+            ?? entry(id: "getComments", fn: "getCommentsById") {
+            var p3 = params
+            p3["animeId"] = animeID
+            p3["commentId"] = commentID
+            if let result = try? await runtime.call(function: comments.functionName,
+                                                    params: p3, source: source),
                let data = danmuData(from: result) { return data }
         }
-        // 3. Segment fetch (optional): reads the tmdbId-keyed
-        // cache getCommentsById fills; one probe at 0 is enough
-        // to tell whether the cache landed.
-        if let segment = entry(id: "getDanmuWithSegmentTime", fn: "getDanmuWithSegmentTime") {
-            var p3 = params
-            if let matchedID { p3["commentId"] = matchedID; p3["animeId"] = matchedID }
-            p3["segmentTime"] = 0
+        // 4. Segment fetch (optional): one probe at segment 0.
+        if let segment = entry(id: "getCommentsWithSegmentTime", fn: "getCommentsWithSegmentTime")
+            ?? entry(id: "getDanmuWithSegmentTime", fn: "getDanmuWithSegmentTime") {
+            var p4 = params
+            p4["animeId"] = animeID
+            p4["commentId"] = commentID
+            p4["segmentTime"] = "0"
             if let result = try? await runtime.call(function: segment.functionName,
-                                                    params: p3, source: source),
+                                                    params: p4, source: source),
                let data = danmuData(from: result) { return data }
         }
         return nil
@@ -2872,8 +2990,24 @@ struct FWDDetailView: View {
         /// episode; forced on when the package has danmu modules.
         var danmakuLoader: ((Int) async -> Data?)?
         var danmakuForced: Bool = false
+        /// v2.28: the winning resource's playerType (or the
+        /// item's own) — "system" forces the native engine,
+        /// "app" the software (mpv) one, empty means auto.
+        var playerType: String = ""
+        /// v2.28: module subtitles for the opening episode,
+        /// plus a per-episode loader (item externalSubtitles
+        /// first, then the loadSubtitle entry).
+        var initialSubtitles: [FWDSubtitle] = []
+        var subtitleLoader: ((Int) async -> [FWDSubtitle])?
         var id: String { episodes[index].url + "#\(index)" }
     }
+    /// v2.28: a loadResource answer with more than one line
+    /// pauses for the user to pick one (guide: the entry
+    /// returns playback LINES, plural). Pending episode while
+    /// the picker sheet is up.
+    @State private var resourceChoices: [FWDResource]?
+    @State private var resourcePendingIndex: Int = 0
+    @State private var resourcePendingSingle: Bool = false
 
     init(record: FWDRecord, item: FWDItem) {
         self.record = record
@@ -3083,7 +3217,48 @@ struct FWDDetailView: View {
                        initialResolved: sel.initial,
                        resolver: sel.resolver,
                        danmakuLoader: sel.danmakuLoader,
-                       danmakuForced: sel.danmakuForced)
+                       danmakuForced: sel.danmakuForced,
+                       modulePlayerType: sel.playerType,
+                       initialSubtitles: sel.initialSubtitles,
+                       subtitleLoader: sel.subtitleLoader)
+        }
+        .sheet(isPresented: Binding(
+            get: { resourceChoices != nil },
+            set: { if !$0 { resourceChoices = nil } })) {
+            if let choices = resourceChoices {
+                NavigationStack {
+                    List {
+                        Section("选择播放线路（模块返回了 \(choices.count) 条）") {
+                            ForEach(Array(choices.enumerated()), id: \.offset) { pair in
+                                Button {
+                                    let picked = pair.element
+                                    let idx = resourcePendingIndex
+                                    let single = resourcePendingSingle
+                                    resourceChoices = nil
+                                    Task { await startPlayback(at: idx, single: single, resource: picked) }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(pair.element.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(Theme.text)
+                                        if !pair.element.description.isEmpty {
+                                            Text(pair.element.description)
+                                                .font(.caption).foregroundStyle(Theme.textDim)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("播放线路")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("取消") { resourceChoices = nil }
+                        }
+                    }
+                }
+            }
         }
         .task { await enrich() }
     }
@@ -3127,38 +3302,43 @@ struct FWDDetailView: View {
         }
     }
 
-    private func resolve(_ ep: FWDItem) async -> PlayerView.ResolveResult {
+    /// All playback lines for one episode (guide 资源与字幕章,
+    /// v2.28): the loadResource entry returns an ARRAY of lines,
+    /// each {name, url, description, customHeaders, playerType}.
+    /// Params are the guide's playback context (all strings,
+    /// missing fields not passed; no `title` — that only goes
+    /// to subtitle/danmu entries). A line without its own
+    /// headers falls back to the item's customHeaders. A
+    /// direct videoUrl short-circuits as a single unnamed line.
+    private func resolveAll(_ ep: FWDItem, episodeIndex: Int = 0) async -> [FWDResource] {
         if !ep.videoUrl.isEmpty {
             // v2.27: an item's own customHeaders ride along
             // with its direct videoUrl (guide: headers are
             // carried when playing); previously this played
             // headerless.
-            return .ok(url: ep.videoUrl, header: ep.customHeaders)
+            return [FWDResource(["name": "直接播放", "url": ep.videoUrl,
+                                 "playerType": ep.playerType,
+                                 "customHeaders": ep.customHeaders], index: 0)]
         }
-        guard let source = FWDStore.source(for: record) else {
-            return .failed("模块文件丢失")
-        }
+        guard let source = FWDStore.source(for: record) else { return [] }
         let runtime = FWDRuntime(widgetID: record.id)
         if let fn = meta.resourceFunction {
-            var params: [String: Any] = ["id": ep.id, "link": ep.link,
-                                         "videoUrl": ep.videoUrl, "type": ep.type,
-                                         "mediaType": ep.mediaType, "title": ep.title]
-            if let n = ep.episode { params["episode"] = n }
+            let params = FWDPlaybackContext.withGlobals(
+                FWDPlaybackContext.build(item: ep, seriesTitle: full.title,
+                                         episodeName: ep.title == full.title ? nil : ep.title,
+                                         includeTitle: false,
+                                         episodeFallback: episodeIndex + 1), meta: meta)
             if let result = try? await runtime.call(function: fn, params: params, source: source),
-               let resources = result as? [[String: Any]],
-               let first = resources.first,
-               let url = first["url"] as? String, !url.isEmpty {
-                var header: [String: String] = [:]
-                for key in ["customHeaders", "headers"] {
-                    if let dict = first[key] as? [String: Any] {
-                        for (k, v) in dict { header[k] = String(describing: v) }
+               let resources = result as? [[String: Any]] {
+                return resources.enumerated().compactMap { i, dict in
+                    var res = FWDResource(dict, index: i)
+                    guard !res.url.isEmpty else { return nil }
+                    for (k, v) in ep.customHeaders where res.customHeaders[k] == nil {
+                        res.customHeaders[k] = v
                     }
+                    res.customHeaders.removeValue(forKey: "X-Forward-Skip-Redirect-Probe")
+                    return res
                 }
-                // v2.27: a resource without its own headers
-                // falls back to the item's customHeaders.
-                for (k, v) in ep.customHeaders where header[k] == nil { header[k] = v }
-                header.removeValue(forKey: "X-Forward-Skip-Redirect-Probe")
-                return .ok(url: url, header: header)
             }
         }
         if !ep.link.isEmpty, meta.hasDetail {
@@ -3167,55 +3347,127 @@ struct FWDDetailView: View {
                let dict = result as? [String: Any] {
                 let detail = FWDItem(dict)
                 if !detail.videoUrl.isEmpty {
-                    return .ok(url: detail.videoUrl, header: detail.customHeaders)
+                    return [FWDResource(["name": "直接播放", "url": detail.videoUrl,
+                                        "playerType": detail.playerType,
+                                        "customHeaders": detail.customHeaders], index: 0)]
                 }
             }
         }
-        return .failed("该条目没有可播放地址")
+        return []
+    }
+
+    private func resolve(_ ep: FWDItem, episodeIndex: Int = 0) async -> PlayerView.ResolveResult {
+        let lines = await resolveAll(ep, episodeIndex: episodeIndex)
+        guard let first = lines.first else {
+            return .failed("该条目没有可播放地址")
+        }
+        return .ok(url: first.url, header: first.customHeaders)
+    }
+
+    /// Module subtitles for one episode (guide 资源与字幕章,
+    /// v2.28): the item's own externalSubtitles first, then
+    /// the loadSubtitle entry (same playback context plus
+    /// `title`). Deduped by URL; an entry returning a bare
+    /// array is the norm, a {subtitles:[…]} wrapper is also
+    /// accepted. Empty when the module offers no subtitles.
+    private func resolveSubtitles(_ ep: FWDItem, episodeIndex: Int = 0) async -> [FWDSubtitle] {
+        var out = ep.externalSubtitles
+        var seen = Set(out.map(\.url).filter { !$0.isEmpty })
+        guard let fn = meta.subtitleFunction,
+              let source = FWDStore.source(for: record) else { return out }
+        let params = FWDPlaybackContext.withGlobals(
+            FWDPlaybackContext.build(item: ep, seriesTitle: full.title,
+                                     episodeName: ep.title == full.title ? nil : ep.title,
+                                     includeTitle: true,
+                                     episodeFallback: episodeIndex + 1), meta: meta)
+        guard let result = try? await FWDRuntime(widgetID: record.id)
+                .call(function: fn, params: params, source: source) else { return out }
+        var dicts: [[String: Any]] = []
+        if let arr = result as? [[String: Any]] { dicts = arr }
+        else if let dict = result as? [String: Any],
+                let arr = dict["subtitles"] as? [[String: Any]] { dicts = arr }
+        for d in dicts {
+            let track = FWDSubtitle(d)
+            guard !track.url.isEmpty, !seen.contains(track.url) else { continue }
+            seen.insert(track.url)
+            out.append(track)
+        }
+        return out
     }
 
     private func playSingle() async {
         resolvingNote = nil
-        let outcome = await resolve(full)
-        switch outcome {
-        case .ok(let url, let header):
-            playSelection = FWDPlaySelection(
-                episodes: [PlayerView.EpisodeRef(name: full.title, url: url)],
-                index: 0, initial: (url, header), resolver: nil,
-                danmakuLoader: { _ in
-                    await FWDDanmu.fetch(record: record, item: full, episodeIndex: 0)
-                },
-                danmakuForced: FWDDanmu.hasDanmu(meta))
-        case .failed(let reason):
-            resolvingNote = reason
+        let lines = await resolveAll(full, episodeIndex: 0)
+        if lines.isEmpty {
+            resolvingNote = "该条目没有可播放地址"
+            return
         }
+        if lines.count > 1 {
+            resourcePendingIndex = 0
+            resourcePendingSingle = true
+            resourceChoices = lines
+            return
+        }
+        await startPlayback(at: 0, single: true, resource: lines[0])
     }
 
     private func playEpisode(at idx: Int) async {
         resolvingNote = nil
         let list = episodes
         guard list.indices.contains(idx) else { return }
-        let refs = list.enumerated().map { i, ep in
-            PlayerView.EpisodeRef(
-                name: guageEpisodeDisplayName(ep.title, index: ep.episode.map { $0 - 1 } ?? i),
-                url: !ep.link.isEmpty ? ep.link : (ep.videoUrl.isEmpty ? "ep#\(i)" : ep.videoUrl))
+        let lines = await resolveAll(list[idx], episodeIndex: idx)
+        if lines.isEmpty {
+            resolvingNote = "该条目没有可播放地址"
+            return
         }
-        let first = await resolve(list[idx])
-        switch first {
-        case .ok(let url, let header):
-            playSelection = FWDPlaySelection(
-                episodes: refs, index: idx, initial: (url, header),
-                resolver: { _, i in
-                    guard list.indices.contains(i) else { return .failed("集数越界") }
-                    return await resolve(list[i])
-                },
-                danmakuLoader: { i in
-                    guard list.indices.contains(i) else { return nil }
-                    return await FWDDanmu.fetch(record: record, item: list[i], episodeIndex: i)
-                },
-                danmakuForced: FWDDanmu.hasDanmu(meta))
-        case .failed(let reason):
-            resolvingNote = reason
+        if lines.count > 1 {
+            resourcePendingIndex = idx
+            resourcePendingSingle = false
+            resourceChoices = lines
+            return
         }
+        await startPlayback(at: idx, single: false, resource: lines[0])
+    }
+
+    /// Build the PlayerView session for one episode once its
+    /// line is chosen: resolver (later episodes still resolve
+    /// first-line-only), danmu loader (guide three-step chain),
+    /// subtitle loader (item subtitles + loadSubtitle entry),
+    /// and the winning line's playerType.
+    private func startPlayback(at idx: Int, single: Bool, resource: FWDResource) async {
+        let list = single ? [full] : episodes
+        guard list.indices.contains(idx) else { return }
+        let ep = list[idx]
+        let refs: [PlayerView.EpisodeRef]
+        if single {
+            refs = [PlayerView.EpisodeRef(name: full.title, url: resource.url)]
+        } else {
+            refs = list.enumerated().map { i, ep in
+                PlayerView.EpisodeRef(
+                    name: guageEpisodeDisplayName(ep.title, index: ep.episode.map { $0 - 1 } ?? i),
+                    url: !ep.link.isEmpty ? ep.link : (ep.videoUrl.isEmpty ? "ep#\(i)" : ep.videoUrl))
+            }
+        }
+        let subtitles = await resolveSubtitles(ep, episodeIndex: idx)
+        let playerType = resource.playerType.isEmpty ? ep.playerType : resource.playerType
+        let resolver: PlayerView.Resolver? = single ? nil : { _, i in
+            guard list.indices.contains(i) else { return .failed("集数越界") }
+            return await resolve(list[i], episodeIndex: i)
+        }
+        playSelection = FWDPlaySelection(
+            episodes: refs, index: idx, initial: (resource.url, resource.customHeaders),
+            resolver: resolver,
+            danmakuLoader: { i in
+                guard list.indices.contains(i) else { return nil }
+                return await FWDDanmu.fetch(record: record, item: list[i], episodeIndex: i,
+                                            seriesTitle: single ? nil : full.title)
+            },
+            danmakuForced: FWDDanmu.hasDanmu(meta),
+            playerType: playerType,
+            initialSubtitles: subtitles,
+            subtitleLoader: { i in
+                guard list.indices.contains(i) else { return [] }
+                return await resolveSubtitles(list[i], episodeIndex: i)
+            })
     }
 }

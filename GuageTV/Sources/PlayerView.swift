@@ -58,6 +58,22 @@ struct PlayerView: View {
     /// in-player toggle off clears it for this session.
     let danmakuLoader: ((Int) async -> Data?)?
     @State private var danmakuForced: Bool = false
+    /// v2.28 (guide 资源与字幕章): the winning resource's /
+    /// item's playerType — "system" prefers the native engine,
+    /// "app" the software (mpv) one, empty means auto. A manual
+    /// engine switch / recovery step (engineOverride) still wins
+    /// over it, so the failure ladder can always move engines.
+    let modulePlayerType: String
+    /// v2.28: module subtitles — the opening episode's tracks
+    /// (item externalSubtitles + loadSubtitle entry) and a
+    /// per-episode loader for later episodes. The player
+    /// auto-loads the isDefault track (else the first) and
+    /// lists the rest in the subtitle menu, grouped above
+    /// OpenSubtitles (priority: module > online search).
+    let initialSubtitles: [FWDSubtitle]
+    let subtitleLoader: ((Int) async -> [FWDSubtitle])?
+    @State private var availableModuleSubtitles: [FWDSubtitle] = []
+    @State private var moduleSubtitleLoadedFor: Int?
     /// Toggle binding for the in-player settings sheet: on =
     /// global switch or this session's forced module danmaku;
     /// off clears both.
@@ -150,6 +166,9 @@ struct PlayerView: View {
         self.onEpisodeChange = nil
         self.danmakuLoader = nil
         _danmakuForced = State(initialValue: false)
+        self.modulePlayerType = ""
+        self.initialSubtitles = []
+        self.subtitleLoader = nil
         self.initialLine = 0
         self.initialIndex = 0
         _activeLine = State(initialValue: 0)
@@ -165,7 +184,10 @@ struct PlayerView: View {
          onEpisodeChange: ((Int, Int, String, [String: String]) -> Void)? = nil,
          danmakuLoader: ((Int) async -> Data?)? = nil,
          danmakuForced: Bool = false,
-         isLive: Bool = false) {
+         isLive: Bool = false,
+         modulePlayerType: String = "",
+         initialSubtitles: [FWDSubtitle] = [],
+         subtitleLoader: ((Int) async -> [FWDSubtitle])? = nil) {
         let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
         _episodes = State(initialValue: episodes)
         self.baseHeader = header
@@ -180,6 +202,9 @@ struct PlayerView: View {
         self.onEpisodeChange = onEpisodeChange
         self.danmakuLoader = danmakuLoader
         _danmakuForced = State(initialValue: danmakuForced)
+        self.modulePlayerType = modulePlayerType
+        self.initialSubtitles = initialSubtitles
+        self.subtitleLoader = subtitleLoader
         self.initialLine = lineIndex
         self.initialIndex = start
         _activeLine = State(initialValue: lineIndex)
@@ -209,6 +234,11 @@ struct PlayerView: View {
 
     private var isMPV: Bool {
         if let engineOverride { return engineOverride }
+        // v2.28: the module's playerType preference ("system" /
+        // "app") sits between a manual override and the user's
+        // saved engine preference.
+        if modulePlayerType == "system" { return false }
+        if modulePlayerType == "app" { return true }
         switch UserDefaults.standard.string(forKey: "enginePreference") ?? "auto" {
         case "mpv": return true
         case "native": return false
@@ -358,6 +388,7 @@ struct PlayerView: View {
             batteryLevel = UIDevice.current.batteryLevel
             LocalProxyServer.shared.startInBackground()
             loadDanmakuForCurrentEpisode()
+            refreshModuleSubtitles()
             // P5: no immediate prefetch here any more — the next
             // episode is pre-resolved once playback passes 70%
             // (see the currentTime change handler below).
@@ -1536,6 +1567,29 @@ struct PlayerView: View {
                     }
                 }
                 Section("外挂字幕") {
+                    // v2.28 (guide 资源与字幕章 + R3 加料): module
+                    // subtitles sit above online search — priority
+                    // is module > OpenSubtitles; a tap loads that
+                    // track (headers included), replacing the
+                    // current external subtitle.
+                    if !availableModuleSubtitles.isEmpty {
+                        Text("模块自带字幕（优先于在线搜索）")
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                        ForEach(availableModuleSubtitles, id: \.url) { track in
+                            Button {
+                                showPlayerSettings = false
+                                Task { await loadModuleSubtitle(track) }
+                            } label: {
+                                HStack {
+                                    Text(track.displayName).foregroundStyle(Theme.text)
+                                    Spacer()
+                                    if externalSubName == "模块字幕 · \(track.displayName)" {
+                                        Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Button {
                         showPlayerSettings = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showSubPicker = true }
@@ -1818,8 +1872,67 @@ struct PlayerView: View {
         externalCues2 = []
         externalSubName2 = ""
         loadDanmakuForCurrentEpisode()
+        refreshModuleSubtitles()
         guard let hit = resolved[index] else { return }
         onEpisodeChange?(activeLine, index, hit.url, hit.header)
+    }
+
+    /// Module subtitles for the current episode (v2.28, guide
+    /// 资源与字幕章): the opening episode reuses the tracks the
+    /// detail page already resolved (no second loadSubtitle
+    /// call); later episodes ask the loader. The list feeds the
+    /// subtitle menu, and the isDefault track (else the first)
+    /// auto-loads when nothing else is showing — a module track
+    /// outranks an online search, never a file the user picked
+    /// (notifyEpisodeChange clears cues on episode switches, so
+    /// a fresh episode re-arms the default).
+    private func refreshModuleSubtitles() {
+        let idx = index
+        Task {
+            let tracks: [FWDSubtitle]
+            if idx == initialIndex, moduleSubtitleLoadedFor == nil {
+                tracks = initialSubtitles
+            } else if let loader = subtitleLoader {
+                tracks = await loader(idx)
+            } else {
+                tracks = []
+            }
+            await MainActor.run {
+                availableModuleSubtitles = tracks
+                moduleSubtitleLoadedFor = idx
+                if externalCues.isEmpty,
+                   let def = tracks.first(where: \.isDefault) ?? tracks.first {
+                    Task { await loadModuleSubtitle(def) }
+                }
+            }
+        }
+    }
+
+    /// Download one module subtitle track (its customHeaders
+    /// ride along, like playback headers) and show it as the
+    /// main external subtitle.
+    private func loadModuleSubtitle(_ track: FWDSubtitle) async {
+        guard let url = URL(string: track.url) else {
+            await MainActor.run { showToast("模块字幕地址无效") }
+            return
+        }
+        var request = URLRequest(url: url)
+        for (k, v) in track.customHeaders { request.setValue(v, forHTTPHeaderField: k) }
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else {
+            await MainActor.run { showToast("模块字幕下载失败：\(track.displayName)") }
+            return
+        }
+        let fileName = url.lastPathComponent.isEmpty ? track.displayName : url.lastPathComponent
+        let cues = SubtitleParser.parse(data: data, fileName: fileName)
+        await MainActor.run {
+            if cues.isEmpty {
+                showToast("模块字幕没解析出内容：\(track.displayName)")
+            } else {
+                externalCues = cues
+                externalSubName = "模块字幕 · \(track.displayName)"
+                showToast("字幕已加载：\(track.displayName)")
+            }
+        }
     }
 
     /// Pre-resolve the NEXT episode in the background once the
