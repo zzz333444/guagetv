@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.29 · 模块内容类型与多语言对齐"
+    static let buildLabel = "v2.30 · 启动内存与缓存治理"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.30", title: "启动内存与缓存治理", lines: [
+            "模块栏目缓存改文件化：原来 30 条 × 30 行整坨写进 UserDefaults（每次栏目访问整 blob 重编码重写、启动时整份 plist 跟着加载），现在每条一个小文件存 Caches/fwd-columns/，本时段命中只读内存、写盘走后台单文件；上限 30 条 / 5 MB、最旧先淘汰、超 24 小时自动清理；旧 blob 首次访问时一次性迁移后删除",
+            "TMDB 搜索缓存加 200 条上限：此前无上限整表重写，满 200 时清掉最早 50 条，blob 不再无限长大",
+            "资源库首帧：单文件线路的直开路由原来在卡片 body 里逐卡解析配置（每求值一次解析一次），现在每次刷新时预计算一次、body 只查表",
+            "缓存管理页新增「模块与发现缓存」区：海报磁盘 / 模块栏目 / 发现页三项分开显示占用与上限，可一键清理；内存海报缓存上限按本机内存档位实测显示（6 GiB 以上 160 MB、4 GiB 以上 120 MB、以下 48 MB）",
+            "启动链路二轮盘点：配置解析、历史解码、发现缓存读取、设置/记录页磁盘统计此前几轮已全部移出主线程或加 isActive 门，本轮逐项复核无新增主线程同步工作；双引擎内存回收复核通过（mpv 切走/退出即销毁句柄与渲染上下文、原生引擎 teardown 摘掉时间观察者）；模块 JSContext 复核通过（原生回调均不强引上下文、异常处理弱引 self，用完即释）",
+        ]),
         Entry(version: "v2.29", title: "模块内容类型与多语言对齐", lines: [
             "内容类型按 Rex 官方规范（guide 0.0.7 内容类型章）落地：模块声明的 contentType（video/music/audiobook/shortDrama）在模块卡上显示角标；未声明时由用户长按卡片自选（声明有效时声明优先，自选不生效）；albumMotionArtwork 解码进详情媒体信息行",
             "多语言按 guide i18n 章落地：模块标题、栏目名、参数名、选项与占位提示按完整语言代码 → 文字体系（zh-TW → zh-Hant）→ 基础语言 → 原文的顺序取词典译文；返回数据本身不翻译；运行时补 Widget.i18n(\"文案\")（真实 JS 已用 Node 抽测：zh-TW 取 zh-Hant、en 取 en、缺词回原文）",

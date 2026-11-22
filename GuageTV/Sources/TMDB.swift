@@ -110,6 +110,24 @@ enum TMDBClient {
     }
 
     private static let cacheKey = "tmdb.cache.v1"
+    /// v2.30: the lookup cache used to grow without bound — one
+    /// more UserDefaults blob rewritten whole on every new
+    /// title, and loaded at every app launch. Cap it at 200
+    /// titles; on overflow drop the oldest 50 keys (dictionary
+    /// order is only an approximation of age, but the bound —
+    /// not the exact victim — is what matters here).
+    private static let cacheMaxEntries = 200
+
+    /// Discover-cache file size, for the cache-management page.
+    static func discoverCacheFileSize() -> Int64 {
+        (try? discoverCacheURL.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+            .map(Int64.init) ?? 0
+    }
+
+    /// Drop the Discover cache file (cache-management page).
+    static func clearDiscoverCache() {
+        try? FileManager.default.removeItem(at: discoverCacheURL)
+    }
 
     private static func cached(name: String, year: String) -> Info? {
         guard let map = UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String],
@@ -152,6 +170,9 @@ enum TMDBClient {
         var map = (UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String]) ?? [:]
         if let encoded = try? JSONEncoder().encode(info),
            let raw = String(data: encoded, encoding: .utf8) {
+            if map.count >= cacheMaxEntries {
+                for key in map.keys.prefix(50) { map.removeValue(forKey: key) }
+            }
             map[name + "|" + year] = raw
             UserDefaults.standard.set(map, forKey: cacheKey)
         }

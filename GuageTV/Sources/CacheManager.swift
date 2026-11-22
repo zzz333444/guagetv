@@ -80,6 +80,40 @@ enum CacheManager {
         await MainActor.run { PosterCache.shared.clearMemory() }
     }
 
+    /// Disk-cache governance (v2.30): the three bounded disk
+    /// caches and their caps — poster images 150 MB
+    /// (PosterStore evicts oldest-first), module column results
+    /// 5 MB / 30 files (FWDColumnCache), Discover feed one file
+    /// (TMDBClient, rewritten whole on each refresh). The
+    /// breakdown below is what the cache page shows; the total
+    /// is the sum, not the whole Caches directory (which also
+    /// holds URLCache and other system files).
+    struct DiskCacheBreakdown {
+        var posterBytes: Int64 = 0
+        var moduleColumnBytes: Int64 = 0
+        var discoverBytes: Int64 = 0
+        var total: Int64 { posterBytes + moduleColumnBytes + discoverBytes }
+    }
+
+    static func diskCacheBreakdown() async -> DiskCacheBreakdown {
+        async let posters = posterCacheSize()
+        async let columns = FWDColumnCache.size()
+        let discover = TMDBClient.discoverCacheFileSize()
+        return DiskCacheBreakdown(
+            posterBytes: await posters,
+            moduleColumnBytes: await columns,
+            discoverBytes: discover)
+    }
+
+    /// Clear the three governed disk caches + the in-memory
+    /// poster cache. Downloaded videos, config lines and
+    /// UserDefaults are never touched.
+    static func clearDiskCaches() async {
+        await clearPosterCache()
+        FWDColumnCache.clearAll()
+        await Task.detached(priority: .utility) { TMDBClient.clearDiscoverCache() }.value
+    }
+
     /// Size of an arbitrary directory, off the main thread.
     static func sizeOfDirectory(_ dir: URL) async -> Int64 {
         await detachedSize(of: dir)
@@ -134,6 +168,9 @@ struct CacheSettingsView: View {
     @State private var sizes: [CacheManager.Area: Int64] = [:]
     @State private var loaded = false
     @State private var busy = false
+    /// v2.30: the governed disk caches (poster / module columns
+    /// / Discover), measured alongside the generic areas above.
+    @State private var breakdown: CacheManager.DiskCacheBreakdown?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -181,6 +218,42 @@ struct CacheSettingsView: View {
                     }
                 }
                 GlassCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("模块与发现缓存").font(.headline).foregroundStyle(Theme.text)
+                        diskRow(title: "海报磁盘缓存", bytes: breakdown?.posterBytes, cap: "上限 150 MB，自动清理最旧的")
+                        diskRow(title: "模块栏目缓存", bytes: breakdown?.moduleColumnBytes, cap: "上限 5 MB / 30 条，超期自动清理")
+                        diskRow(title: "发现页缓存", bytes: breakdown?.discoverBytes, cap: "单个文件，随刷新整体重写")
+                        Divider().background(Color.white.opacity(0.12))
+                        HStack {
+                            Text("小计").font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Text(loaded ? CacheManager.format(breakdown?.total ?? 0) : "计算中…")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                                .monospacedDigit()
+                        }
+                        HStack(spacing: 10) {
+                            Text("内存海报缓存上限").foregroundStyle(Theme.text)
+                            Spacer()
+                            Text(PosterCache.memoryTierDescription)
+                                .foregroundStyle(Theme.textDim)
+                                .font(.footnote)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Button {
+                            Task { await clearDiskCaches() }
+                        } label: {
+                            Text(busy ? "清理中…" : "清理模块与发现缓存")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        .background(.white, in: Capsule())
+                        .foregroundStyle(.black)
+                        .disabled(busy || !loaded || (breakdown?.total ?? 0) == 0)
+                    }
+                }
+                GlassCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("说明").font(.headline).foregroundStyle(Theme.text)
                         Text("海报图片缓存在缓存区里（posters 子目录），清理「缓存区」时会一并清掉。")
@@ -202,12 +275,26 @@ struct CacheSettingsView: View {
 
     private var total: Int64 { sizes.values.reduce(0, +) }
 
+    private func diskRow(title: String, bytes: Int64?, cap: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 10) {
+                Text(title).foregroundStyle(Theme.text)
+                Spacer()
+                Text(loaded ? CacheManager.format(bytes ?? 0) : "计算中…")
+                    .foregroundStyle(Theme.textDim)
+                    .monospacedDigit()
+            }
+            Text(cap).font(.caption).foregroundStyle(Theme.textDim)
+        }
+    }
+
     private func refresh() async {
         var result: [CacheManager.Area: Int64] = [:]
         for area in CacheManager.Area.allCases {
             result[area] = await CacheManager.size(of: area)
         }
         sizes = result
+        breakdown = await CacheManager.diskCacheBreakdown()
         loaded = true
     }
 
@@ -221,6 +308,13 @@ struct CacheSettingsView: View {
     private func clearAll() async {
         busy = true
         await CacheManager.clearAll()
+        await refresh()
+        busy = false
+    }
+
+    private func clearDiskCaches() async {
+        busy = true
+        await CacheManager.clearDiskCaches()
         await refresh()
         busy = false
     }

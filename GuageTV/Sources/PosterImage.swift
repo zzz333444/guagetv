@@ -97,6 +97,20 @@ final class PosterCache {
     /// Drop decoded posters from memory (disk level untouched).
     func clearMemory() { memory.removeAllObjects() }
 
+    /// v2.30: the effective memory tier, for the cache page and
+    /// diagnostics — the v2.16 tiering is only real if the number
+    /// on screen matches the limit the cache actually enforces.
+    /// 6 GiB+ → 160 MB, 4 GiB+ → 120 MB, smaller → 48 MB.
+    static var memoryLimitMB: Int { memoryLimitBytes() / 1_048_576 }
+
+    static var memoryTierDescription: String {
+        let gib: UInt64 = 1 << 30
+        let mem = ProcessInfo.processInfo.physicalMemory
+        let tier = mem >= 6 * gib ? "6 GiB 以上档位"
+            : mem >= 4 * gib ? "4 GiB 以上档位" : "4 GiB 以下档位"
+        return "\(memoryLimitMB) MB（\(tier)，本机内存 \(mem / gib) GiB）"
+    }
+
     /// v2.16 memory tier (see init): 6 GiB+ → 160 MB, 4 GiB+ →
     /// 120 MB, smaller devices → 48 MB. Plain if/else: a switch
     /// `case 6 * gib...:` does not compile — a computed

@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 import JavaScriptCore
 
 /// Forward-format JS modules (v1.58) — the module system the user
@@ -918,18 +919,51 @@ enum FWDStore {
     }
 }
 
-/// Column-result cache (v2.06): re-entering a module column
-/// replays the last page-1 result instead of re-running the JS
-/// handler and the network. Entries live in UserDefaults as one
-/// JSON blob per key (rows + savedAt), capped at 30 entries with
-/// the oldest evicted. TTL honours the module's declared
-/// `cacheDuration` (seconds) when present, otherwise 30 min.
-/// Only page-1 list results are cached, never searches, never
-/// empty results (a transient 0 must not poison the next visit).
+/// Column-result cache (v2.06; file-backed since v2.30):
+/// re-entering a module column replays the last page-1 result
+/// instead of re-running the JS handler and the network. TTL
+/// honours the module's declared `cacheDuration` (seconds) when
+/// present, otherwise 30 min. Only page-1 list results are
+/// cached, never searches, never empty results (a transient 0
+/// must not poison the next visit).
+///
+/// v2.30 storage change — why the move matters: the old store
+/// was ONE UserDefaults blob ([String: Data], up to 30 entries
+/// × 30 rows). Every column visit re-encoded and rewrote the
+/// WHOLE blob on the main actor, and UserDefaults loads its
+/// entire plist at app launch, so the cache taxed cold start
+/// even on days the module page never opened. Entries now live
+/// as one small JSON file each under Caches/fwd-columns/, with
+/// an in-memory copy of entries touched this session; writes
+/// are single-file, detached, and bounded (30 files / 5 MB,
+/// oldest-first eviction, >24 h files pruned — 24 h is the
+/// guide's default cacheDuration of 86400 s). The legacy blob
+/// is migrated once, on first access, then deleted.
 enum FWDColumnCache {
-    private static let storeKey = "fwd.columnCache.v1"
+    private static let legacyKey = "fwd.columnCache.v1"
     private static let maxEntries = 30
+    private static let maxBytes: Int64 = 5 * 1024 * 1024
+    private static let maxAge: TimeInterval = 86400
     static let defaultTTL: TimeInterval = 1800
+
+    /// Entries touched this session (key → savedAt + rows), so
+    /// a re-entered column never touches disk at all. All
+    /// callers run on the main actor (module column loads,
+    /// module delete), so no locking is needed here; file IO
+    /// below always runs detached.
+    private static var memory: [String: (savedAt: TimeInterval, rows: [[String: Any]])] = [:]
+    private static var migrationStarted = false
+
+    private static var dir: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("fwd-columns", isDirectory: true)
+    }
+
+    private static func fileURL(for key: String) -> URL {
+        let digest = SHA256.hash(data: Data(key.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return dir.appendingPathComponent(hex + ".json")
+    }
 
     static func key(moduleID: String, columnID: String, params: [String: Any]) -> String {
         let paramsJSON = (try? JSONSerialization.data(withJSONObject: params, options: [.sortedKeys]))
@@ -938,40 +972,141 @@ enum FWDColumnCache {
     }
 
     static func get(key: String, ttl: TimeInterval) -> [[String: Any]]? {
-        guard let data = (UserDefaults.standard.dictionary(forKey: storeKey) as? [String: Data])?[key],
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let savedAt = obj["savedAt"] as? TimeInterval,
-              Date().timeIntervalSince1970 - savedAt < ttl,
-              let rows = obj["rows"] as? [[String: Any]] else { return nil }
-        return rows
+        kickMigration()
+        if let hit = memory[key],
+           Date().timeIntervalSince1970 - hit.savedAt < ttl {
+            return hit.rows
+        }
+        if let data = try? Data(contentsOf: fileURL(for: key)),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let savedAt = obj["savedAt"] as? TimeInterval,
+           Date().timeIntervalSince1970 - savedAt < ttl,
+           let rows = obj["rows"] as? [[String: Any]] {
+            memory[key] = (savedAt, rows)
+            return rows
+        }
+        // Transitional fallback: a pre-v2.30 blob not yet
+        // migrated. Read-only here; the migration task below
+        // moves it to files and deletes the key.
+        if let data = (UserDefaults.standard.dictionary(forKey: legacyKey) as? [String: Data])?[key],
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let savedAt = obj["savedAt"] as? TimeInterval,
+           Date().timeIntervalSince1970 - savedAt < ttl,
+           let rows = obj["rows"] as? [[String: Any]] {
+            memory[key] = (savedAt, rows)
+            return rows
+        }
+        return nil
     }
 
     static func set(key: String, rows: [[String: Any]]) {
-        var dict = (UserDefaults.standard.dictionary(forKey: storeKey) as? [String: Data]) ?? [:]
-        if dict.count >= maxEntries {
-            var oldestKey: String?
-            var oldestAt = TimeInterval.greatestFiniteMagnitude
-            for (k, data) in dict {
-                if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let at = obj["savedAt"] as? TimeInterval, at < oldestAt {
-                    oldestAt = at
-                    oldestKey = k
-                }
-            }
-            if let oldestKey { dict.removeValue(forKey: oldestKey) }
-        }
+        kickMigration()
+        let savedAt = Date().timeIntervalSince1970
+        memory[key] = (savedAt, rows)
         guard let data = try? JSONSerialization.data(withJSONObject: [
-            "savedAt": Date().timeIntervalSince1970, "rows": rows]) else { return }
-        dict[key] = data
-        UserDefaults.standard.set(dict, forKey: storeKey)
+            "key": key, "savedAt": savedAt, "rows": rows]) else { return }
+        let file = fileURL(for: key)
+        Task.detached(priority: .utility) {
+            try? FileManager.default.createDirectory(
+                at: dir, withIntermediateDirectories: true)
+            try? data.write(to: file, options: .atomic)
+            prune()
+        }
     }
 
     /// Drop every cached column of one module (module delete,
     /// v2.07): keys are "moduleID|columnID|params…".
     static func clear(moduleID: String) {
-        guard var dict = UserDefaults.standard.dictionary(forKey: storeKey) as? [String: Data] else { return }
-        dict = dict.filter { !$0.key.hasPrefix(moduleID + "|") }
-        UserDefaults.standard.set(dict, forKey: storeKey)
+        memory = memory.filter { !$0.key.hasPrefix(moduleID + "|") }
+        let prefix = moduleID + "|"
+        Task.detached(priority: .utility) {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil) else { return }
+            for file in files where file.pathExtension == "json" {
+                guard let data = try? Data(contentsOf: file),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let storedKey = obj["key"] as? String,
+                      storedKey.hasPrefix(prefix) else { continue }
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    /// Drop the whole column cache (cache-management page).
+    static func clearAll() {
+        memory.removeAll()
+        Task.detached(priority: .utility) {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil) else { return }
+            for file in files { try? FileManager.default.removeItem(at: file) }
+        }
+    }
+
+    /// On-disk size of the column cache, for the cache page.
+    static func size() async -> Int64 {
+        await Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            guard let files = try? fm.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
+            var total: Int64 = 0
+            for file in files {
+                total += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            }
+            return total
+        }.value
+    }
+
+    /// One-time migration of the pre-v2.30 UserDefaults blob to
+    /// files, then the legacy key is deleted so the blob stops
+    /// loading at every app launch.
+    private static func kickMigration() {
+        guard !migrationStarted else { return }
+        migrationStarted = true
+        Task.detached(priority: .utility) {
+            guard let dict = UserDefaults.standard.dictionary(forKey: legacyKey) as? [String: Data],
+                  !dict.isEmpty else { return }
+            try? FileManager.default.createDirectory(
+                at: dir, withIntermediateDirectories: true)
+            for (key, data) in dict {
+                guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let savedAt = obj["savedAt"] as? TimeInterval,
+                      let rows = obj["rows"] as? [[String: Any]],
+                      let out = try? JSONSerialization.data(withJSONObject: [
+                        "key": key, "savedAt": savedAt, "rows": rows]) else { continue }
+                try? out.write(to: fileURL(for: key), options: .atomic)
+            }
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+            prune()
+        }
+    }
+
+    /// Oldest-first eviction down to the entry/byte caps; files
+    /// older than maxAge go first regardless of size.
+    private static func prune() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]) else { return }
+        var entries: [(url: URL, size: Int, date: Date)] = []
+        var total: Int64 = 0
+        for file in files where file.pathExtension == "json" {
+            let values = try? file.resourceValues(
+                forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = values?.fileSize ?? 0
+            total += Int64(size)
+            entries.append((file, size, values?.contentModificationDate ?? .distantPast))
+        }
+        let now = Date()
+        let sorted = entries.sorted(by: { $0.date < $1.date })
+        var remaining = sorted.count
+        for entry in sorted {
+            let tooOld = now.timeIntervalSince(entry.date) > maxAge
+            if !tooOld, remaining <= maxEntries, total <= maxBytes { break }
+            try? fm.removeItem(at: entry.url)
+            total -= Int64(entry.size)
+            remaining -= 1
+        }
     }
 }
 

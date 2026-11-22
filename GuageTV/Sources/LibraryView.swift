@@ -50,6 +50,13 @@ struct LibraryView: View {
     /// Direct-open route for single-file (py / JS) lines: tapping
     /// the card pushes its one site's browse page immediately.
     @State private var directRoute: FileSiteRoute?
+    /// v2.30: direct-open routes, computed ONCE per refresh.
+    /// fileRoute(for:) parses the line's stored config off disk,
+    /// and both tap sites used to call it from the view body —
+    /// i.e. once per card, per body evaluation, on the main
+    /// thread. The routes now come from this dictionary; the
+    /// body only reads it.
+    @State private var fileRoutes: [String: FileSiteRoute] = [:]
     /// Ambient glow source for the page background: the freshest
     /// artwork the user actually has — a continue-watching poster,
     /// else a favourite's. The library used to sit on a flat static
@@ -120,7 +127,7 @@ struct LibraryView: View {
                     NavigationLink {
                         PyGroupView(config: $config,
                                     onPick: { entry in
-                                        if let route = fileRoute(for: entry) {
+                                        if let route = fileRoutes[entry.id] {
                                             directRoute = route
                                         }
                                     })
@@ -333,6 +340,11 @@ struct LibraryView: View {
         entries = ConfigLibrary.entries()
         activeID = ConfigLibrary.activeID()
         groups = ConfigLibrary.groups()
+        // v2.30: routes for single-file lines, once per refresh
+        // (see fileRoutes) instead of once per card per body eval.
+        fileRoutes = Dictionary(uniqueKeysWithValues: entries.compactMap { entry in
+            fileRoute(for: entry).map { (entry.id, $0) }
+        })
         let liveIDs = Set(entries.map(\.id))
         if let cached = UserDefaults.standard.dictionary(forKey: Self.kindSummaryCacheKey) as? [String: String] {
             kindSummary = cached.filter { liveIDs.contains($0.key) }
@@ -524,7 +536,7 @@ struct LibraryView: View {
     /// reveal was removed at the user's request).
     private func handleLineTap(_ model: LineCardModel) {
         Haptics.tap()
-        if let route = fileRoute(for: model.entry) {
+        if let route = fileRoutes[model.id] {
             directRoute = route
             return
         }
