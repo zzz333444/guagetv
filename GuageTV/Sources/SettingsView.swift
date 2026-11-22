@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.30 · 启动内存与缓存治理"
+    static let buildLabel = "v2.31 · 播放与网络深挖"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.31", title: "播放与网络深挖", lines: [
+            "起播三段打点落地：解析（spider playerContent / 解析接口整段）、首帧（打开播放器到首次进入播放状态）、HLS 代理（播放列表与分片上游取回）三段耗时分别计数进诊断聚合（慢阈值：解析 >3 秒、首帧 >5 秒、HLS >2 秒），设置 → 关于新增一行起播打点汇总（各段平均耗时、缓存命中数、最慢一段一目了然），诊断导出文本顶部同步带上这行汇总；最慢一段针对性优化见下两条",
+            "HLS 去广告代理加缓存与预取：播放列表内存缓存（直播 2 秒、点播 300 秒，引擎高频轮询不再每次重拉上游）；分片整段内存缓存（上限 32 段 / 48 MB、最旧先淘汰、300 秒 TTL，Range 请求命中整段缓存后由代理再切片）；点播播放列表改写完即后台预取前 3 个分片（预取失败不阻塞播放列表返回）；分片与播放列表请求各走独立后台线程，直播播放列表刷新不再阻塞分片取回（逐项复核：分片请求不在串行队列上）",
+            "自动换线打点：换线触发记一次尝试（原因分类：加载超时 / 网络 / 解码 / 引擎报错，看门狗的「加载超时」单独成桶不再被误读成解码错），新线路解析出播放地址记一次成功；诊断汇总显示尝试次数、成功次数与各原因计数，换线成功率可查；误判口径：无解析器的裸地址线路换线即记成功（换线本身就是成功），有解析器时以解析出地址为准",
+            "弱网自适应复核与实修：原生与 mpv 的 HLS 码率档位此前并不对齐——原生在建 item 时就读保存的画质上限，mpv 只在播放器内切换画质时才生效，设置里存好的 720p 上限在 mpv 首载时被忽略；现 mpv 启动配置里同样读保存的上限（两引擎同档：1080=8Mbps、720=4.5Mbps、480=1.8Mbps，auto 时两边都自由适配）；原生 startsOnFirstEligibleVariant（低码率先出首帧）与 mpv 自适应选档、原生 automaticallyWaitsToMinimizeStalling 与 mpv cache-pause 逐项核对一致，无需再改",
+            "JarProxy 冷启动衔接补齐：跨线搜索此前从不预热（浏览与详情页进页都预热），首个 jar 搜索调用直接撞上冷代理的两轮预算；现搜索开始即预热当前线路（TTL 门控，不重复发）；jar 详情页的播放解析（playerContent）改走 patient 模式（300 秒重试预算，与浏览类调用同口径），冷代理唤醒期间不再两次尝试就判死",
+        ]),
         Entry(version: "v2.30", title: "启动内存与缓存治理", lines: [
             "模块栏目缓存改文件化：原来 30 条 × 30 行整坨写进 UserDefaults（每次栏目访问整 blob 重编码重写、启动时整份 plist 跟着加载），现在每条一个小文件存 Caches/fwd-columns/，本时段命中只读内存、写盘走后台单文件；上限 30 条 / 5 MB、最旧先淘汰、超 24 小时自动清理；旧 blob 首次访问时一次性迁移后删除",
             "TMDB 搜索缓存加 200 条上限：此前无上限整表重写，满 200 时清掉最早 50 条，blob 不再无限长大",
@@ -1444,6 +1451,8 @@ struct AboutView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("诊断日志").font(.headline).foregroundStyle(Theme.text)
                     Text("记录最近的 py 蜘蛛报错与播放失败（最多 200 条）。哪个站挂了，把日志导出发出来就能直接定位。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                    Text(Diagnostics.timingSummary())
                         .font(.footnote).foregroundStyle(Theme.textDim)
                     HStack(spacing: 10) {
                         ShareLink(item: Diagnostics.exportText()) {

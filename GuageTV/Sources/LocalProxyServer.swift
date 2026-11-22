@@ -162,6 +162,91 @@ final class LocalProxyServer {
 
     // MARK: HLS ad filter endpoints
 
+    /// v2.31 HLS 缓存：播放列表与分片各一份内存缓存。
+    /// 播放列表：直播 2 秒 TTL（引擎轮询频繁，上游每次都
+    /// 重拉既慢又费请求；2 秒仍跟得上直播边缘），点播
+    /// 300 秒（播放列表静态）。分片按上游地址缓存整段
+    /// （上限 32 段 / 48 MB，最旧先淘汰，300 秒 TTL；分片
+    /// 地址本身不可变，直播/点播都可缓存）。Range 请求命中
+    /// 整段缓存时由 send() 再按 Range 切片，无需另存分片。
+    private struct CachedPlaylist { var text: String; var savedAt: Date; var isLive: Bool }
+    private struct CachedSegment { var data: Data; var type: String; var status: Int; var savedAt: Date }
+    private var playlistCache: [String: CachedPlaylist] = [:]
+    private var segmentCache: [String: CachedSegment] = [:]
+    private var segmentCacheOrder: [String] = []
+    private let hlsCacheLock = NSLock()
+
+    private func playlistCached(for key: String) -> String? {
+        hlsCacheLock.lock()
+        defer { hlsCacheLock.unlock() }
+        guard let entry = playlistCache[key] else { return nil }
+        let ttl: TimeInterval = entry.isLive ? 2 : 300
+        guard Date().timeIntervalSince(entry.savedAt) < ttl else {
+            playlistCache.removeValue(forKey: key)
+            return nil
+        }
+        return entry.text
+    }
+
+    private func storePlaylist(key: String, text: String, isLive: Bool) {
+        hlsCacheLock.lock()
+        defer { hlsCacheLock.unlock() }
+        playlistCache[key] = CachedPlaylist(text: text, savedAt: Date(), isLive: isLive)
+    }
+
+    private func segmentCached(for key: String) -> CachedSegment? {
+        hlsCacheLock.lock()
+        defer { hlsCacheLock.unlock() }
+        guard let entry = segmentCache[key],
+              Date().timeIntervalSince(entry.savedAt) < 300 else {
+            segmentCache.removeValue(forKey: key)
+            segmentCacheOrder.removeAll { $0 == key }
+            return nil
+        }
+        return entry
+    }
+
+    private func storeSegment(key: String, data: Data, type: String, status: Int) {
+        hlsCacheLock.lock()
+        defer { hlsCacheLock.unlock() }
+        if segmentCache[key] == nil { segmentCacheOrder.append(key) }
+        segmentCache[key] = CachedSegment(data: data, type: type, status: status, savedAt: Date())
+        var totalBytes = segmentCache.values.reduce(0) { $0 + $1.data.count }
+        while (segmentCache.count > 32 || totalBytes > 48 * 1024 * 1024),
+              let oldest = segmentCacheOrder.first {
+            segmentCacheOrder.removeFirst()
+            if let removed = segmentCache.removeValue(forKey: oldest) {
+                totalBytes -= removed.data.count
+            }
+        }
+    }
+
+    /// Prefetch the first 3 segments of a freshly rewritten
+    /// playlist into the segment cache, so the engine's first
+    /// segment requests hit memory instead of the upstream.
+    /// Fire-and-forget on a background queue; a slow upstream
+    /// here never blocks the playlist response itself.
+    private func prefetchSegments(playlistText: String, base: URL, headers: [String: String]) {
+        let lines = playlistText.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.hasPrefix("#") && !$0.isEmpty }
+        let targets = Array(lines.prefix(3)).compactMap {
+            URL(string: $0, relativeTo: base)?.absoluteString
+        }
+        guard !targets.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            for target in targets {
+                if self.segmentCached(for: target) != nil { continue }
+                guard let url = URL(string: target) else { continue }
+                let (status, type, data, _) = HLSAdFilter.fetch(url: url, headers: headers, range: nil, timeout: 15)
+                if status == 200, !data.isEmpty {
+                    self.storeSegment(key: target, data: data, type: type, status: status)
+                }
+            }
+        }
+    }
+
     private func queryMap(_ components: URLComponents) -> [String: String] {
         var map: [String: String] = [:]
         for item in components.queryItems ?? [] {
@@ -177,8 +262,22 @@ final class LocalProxyServer {
             return (400, "text/plain; charset=utf-8", Data("bad hls request".utf8), [:])
         }
         let headers = HLSAdFilter.decodeHeaders(query["hdrs"])
+        // v2.31: live playlists are re-polled by the engine every
+        // few seconds — serve a 2s-old rewrite from memory instead
+        // of re-fetching upstream each time. A slow playlist fetch
+        // never blocks segment fetches: each connection runs on
+        // its own global-queue thread (see respond/dispatch), so
+        // playlist and /seg requests proceed concurrently.
+        let cacheKey = target + "|" + (query["hdrs"] ?? "")
+        if let cached = playlistCached(for: cacheKey) {
+            Diagnostics.recordHLSPlaylistCacheHit()
+            return (200, "application/vnd.apple.mpegurl",
+                    Data(cached.utf8), [:])
+        }
+        let started = Date()
         // v2.17: playlist fetch on the start path — 8s budget.
         let (status, type, data, _) = HLSAdFilter.fetch(url: url, headers: headers, range: nil, timeout: 8)
+        Diagnostics.recordHLSPlaylist(ms: Int(Date().timeIntervalSince(started) * 1000))
         guard status == 200 else {
             return (status, type, data, [:])
         }
@@ -188,6 +287,13 @@ final class LocalProxyServer {
                                          root: root, headersB64: query["hdrs"])
         if result.removed > 0 {
             Diagnostics.log("去广告", "移除 \(result.removed) 段（约 \(Int(result.removedSeconds)) 秒）：\(target)")
+        }
+        let isLive = !text.contains("#EXT-X-ENDLIST")
+        storePlaylist(key: cacheKey, text: result.text, isLive: isLive)
+        // Master playlists list variants, not segments — only
+        // prefetch from a media playlist.
+        if !isLive, !text.contains("#EXT-X-STREAM-INF") {
+            prefetchSegments(playlistText: text, base: url, headers: headers)
         }
         return (200, "application/vnd.apple.mpegurl",
                 Data(result.text.utf8), [:])
@@ -200,15 +306,27 @@ final class LocalProxyServer {
             return (400, "text/plain; charset=utf-8", Data("bad segment request".utf8), [:])
         }
         let headers = HLSAdFilter.decodeHeaders(query["hdrs"])
+        // v2.31: whole-segment memory cache (see the cache note
+        // above); a Range request that hits the full entry is
+        // sliced by send() afterwards.
+        if let cached = segmentCached(for: target) {
+            Diagnostics.recordSegmentCacheHit()
+            return (cached.status, cached.type, cached.data, [:])
+        }
+        let started = Date()
         // v2.17: segment fetch — 15s budget (was a flat 20s for
         // both playlist and segment); a dead segment 502s and the
         // engine retries instead of hanging the episode.
         let (status, type, data, responseHeaders) =
             HLSAdFilter.fetch(url: url, headers: headers, range: range, timeout: 15)
+        Diagnostics.recordHLSSegment(ms: Int(Date().timeIntervalSince(started) * 1000))
         var extra: [String: String] = [:]
         for (key, value) in responseHeaders
         where ["content-range", "accept-ranges"].contains(key.lowercased()) {
             extra[key] = value
+        }
+        if range == nil, status == 200, !data.isEmpty {
+            storeSegment(key: target, data: data, type: type, status: status)
         }
         return (status, type, data, extra)
     }

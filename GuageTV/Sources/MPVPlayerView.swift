@@ -133,6 +133,17 @@ final class MPVController: ObservableObject {
             setOptionOn(h, "terminal", "no")
             setOptionOn(h, "msg-level", "all=warn")
             setOptionOn(h, "cache", "yes")
+            // v2.31: the saved HLS quality cap applies at startup
+            // too — previously it only landed when the user toggled
+            // it inside the player (applyHLSBitrate), so a 720p cap
+            // saved in Settings was ignored on the first mpv load
+            // while the native engine honoured it at item creation
+            // (NativeController.attachItemObservers reads the same
+            // key). Both engines now cap at the same bitrates
+            // (1080=8Mbps / 720=4.5Mbps / 480=1.8Mbps); "auto"
+            // leaves both free to adapt.
+            setOptionOn(h, "hls-bitrate", MPVController.hlsBitrateValue(
+                for: UserDefaults.standard.string(forKey: "player.hlsQuality") ?? "auto"))
             // Buffers maxed (v1.35, at the user's explicit ask —
             // the earlier "60s is enough" call is superseded):
             // two minutes of cache and a 60s readahead target.
@@ -544,16 +555,20 @@ final class MPVController: ObservableObject {
     func refreshStatsNow() { refreshStats() }
 
     /// Cap HLS variant bitrate (player.hlsQuality): mpv's
-    /// hls-bitrate option takes max=<bytes/s>.
-    func applyHLSBitrate(_ mode: String) {
-        let value: String
+    /// hls-bitrate option takes max=<bytes/s>. The mapping is
+    /// shared with startup (see configure above) so the saved cap
+    /// and a mid-play change can never disagree.
+    static func hlsBitrateValue(for mode: String) -> String {
         switch mode {
-        case "1080": value = "max=8000000"
-        case "720": value = "max=4500000"
-        case "480": value = "max=1800000"
-        default: value = "no"
+        case "1080": return "max=8000000"
+        case "720": return "max=4500000"
+        case "480": return "max=1800000"
+        default: return "no"
         }
-        setProperty("hls-bitrate", value)
+    }
+
+    func applyHLSBitrate(_ mode: String) {
+        setProperty("hls-bitrate", Self.hlsBitrateValue(for: mode))
     }
 
     private func poll() {

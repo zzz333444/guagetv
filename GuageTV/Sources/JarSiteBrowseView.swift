@@ -531,8 +531,13 @@ struct JarDetailLoaderView: View {
         let vipFlags = ConfigLibrary.activeID().flatMap { ConfigLibrary.load(id: $0) }?.flags ?? []
         let result: [String: Any]
         do {
+            // v2.31: playback resolve is browse-class — a cold
+            // JarProxy needs the patient budget (300s retry
+            // window), not the two-attempt default that failed a
+            // sleeping proxy before the first frame.
             result = try await JarProxyClient.run(jar: jarURL, site: site, action: "playerContent",
-                                                  extra: ["flag": flag, "id": episodeID, "vipFlags": vipFlags])
+                                                  extra: ["flag": flag, "id": episodeID, "vipFlags": vipFlags],
+                                                  patient: true)
         } catch {
             return .failed(reason: "Jar 代理调用失败：\(error.localizedDescription)")
         }

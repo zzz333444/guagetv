@@ -154,6 +154,14 @@ struct PlayerView: View {
     /// Stall watchdog state (see watchdogTick).
     @State private var stallTicks = 0
     @State private var lastWatchTime: Double = -1
+    /// v2.31 起播打点：播放器打开时刻与首帧是否已记（只记
+    /// 本次打开的首播首帧，切集/换线不再重复记）。
+    @State private var playOpenedAt: Date?
+    @State private var firstFrameRecorded = false
+    /// v2.31 自动换线打点：最近一次失败原文（分类用）与
+    /// 是否正处在一次换线触发的 switchLine 中。
+    @State private var lastFailureMessage: String?
+    @State private var failoverInFlight = false
     /// P4 音频中断恢复：中断开始时记下当时是否在播，中断结束
     /// 且系统建议恢复时用它决定要不要续播。
     @State private var wasPlayingBeforeInterruption = false
@@ -395,6 +403,7 @@ struct PlayerView: View {
             }
             UIDevice.current.isBatteryMonitoringEnabled = true
             batteryLevel = UIDevice.current.batteryLevel
+            if playOpenedAt == nil { playOpenedAt = Date() }
             LocalProxyServer.shared.startInBackground()
             loadDanmakuForCurrentEpisode()
             refreshModuleSubtitles()
@@ -414,6 +423,19 @@ struct PlayerView: View {
             applyPendingStartIfNeeded()
             applyResumeIfNeeded()
             applyIntroSkipIfNeeded()
+        }
+        .onChange(of: isPlaying) { _, playing in
+            // v2.31: first time the engine reports playing after
+            // the player opened = first frame (approx). Only the
+            // first episode of the session is timed — later
+            // episodes' starts include their resolve time and
+            // would pollute the start-up metric.
+            if playing, !firstFrameRecorded, let openedAt = playOpenedAt {
+                firstFrameRecorded = true
+                Diagnostics.recordFirstFrame(
+                    ms: Int(Date().timeIntervalSince(openedAt) * 1000),
+                    engine: isMPV ? "mpv" : "原生", isLive: isLive)
+            }
         }
         .onChange(of: currentTime) { _ in
             if currentTime > 3, recoveryStep != 0 { recoveryStep = 0; triedLines.removeAll() }
@@ -1820,8 +1842,10 @@ struct PlayerView: View {
         }
         resolvingEpisode = true
         pokeChrome()
+        let resolveStarted = Date()
         Task {
             let result = await episodeResolver?(activeLine, target) ?? .failed("没有可用的解析通道")
+            Diagnostics.recordResolve(started: resolveStarted, ok: result.isOK)
             resolvingEpisode = false
             switch result {
             case .ok(let url, let header):
@@ -1846,13 +1870,20 @@ struct PlayerView: View {
         let targetIndex = min(index, targetEpisodes.count - 1)
         let keepPosition = currentTime
         resolvingEpisode = true
+        let resolveStarted = Date()
         Task {
             var hit: (url: String, header: [String: String])?
             if let episodeResolver {
                 switch await episodeResolver(target, targetIndex) {
                 case .ok(let url, let header):
+                    Diagnostics.recordResolve(started: resolveStarted, ok: true)
                     hit = (url, header)
                 case .failed(let reason):
+                    Diagnostics.recordResolve(started: resolveStarted, ok: false)
+                    if failoverInFlight {
+                        Diagnostics.recordFailover(reason: classifyFailure(lastFailureMessage ?? reason), success: false)
+                        failoverInFlight = false
+                    }
                     resolvingEpisode = false
                     showToast(reason)
                     return
@@ -1865,6 +1896,13 @@ struct PlayerView: View {
             pendingStart = keepPosition > 5 ? keepPosition : nil
             index = targetIndex
             notifyEpisodeChange()
+            if failoverInFlight {
+                // No resolver = raw-URL lines, the switch itself
+                // is the success; with a resolver, success means
+                // the new line resolved to a play URL.
+                Diagnostics.recordFailover(reason: classifyFailure(lastFailureMessage ?? ""), success: episodeResolver == nil || hit != nil)
+                failoverInFlight = false
+            }
             showToast("已切换到 \(lineNames.indices.contains(target) ? lineNames[target] : "线路 \(target + 1)")")
         }
     }
@@ -1953,8 +1991,10 @@ struct PlayerView: View {
               resolved[target] == nil, !prefetching.contains(target) else { return }
         prefetching.insert(target)
         let line = activeLine
+        let resolveStarted = Date()
         Task {
             let result = await episodeResolver(line, target)
+            Diagnostics.recordResolve(started: resolveStarted, ok: result.isOK)
             if case .ok(let url, let header) = result {
                 if activeLine == line { resolved[target] = (url, header) }
             } else if activeLine == line, index + 1 == target {
@@ -2018,6 +2058,7 @@ struct PlayerView: View {
     private func handlePlaybackFailure(_ message: String) {
         if let last = lastFailureAt, Date.now.timeIntervalSince(last) < 3 { return }
         lastFailureAt = .now
+        lastFailureMessage = message
         Diagnostics.log("播放", "\(isMPV ? "mpv" : "原生") · \(title) \(current.name)：\(message)")
         switch recoveryStep {
         case 0:
@@ -2053,8 +2094,19 @@ struct PlayerView: View {
         triedLines.insert(next)
         Diagnostics.log("播放", "自动换线 · \(title)：线路 \(activeLine + 1) → \(next + 1)")
         showToast("这条线路播不了，自动切换线路…")
+        failoverInFlight = true
         switchLine(next)
         return true
+    }
+
+    /// v2.31: bucket a failure message for the failover ledger —
+    /// the watchdog's "加载超时" stays its own bucket so a
+    /// stall-driven failover is never misread as a decode error.
+    private func classifyFailure(_ message: String) -> String {
+        if message.contains("超时") { return "加载超时" }
+        if message.contains("网络") || message.contains("连接") || message.contains("断开") { return "网络" }
+        if message.contains("解码") || message.contains("格式") || message.contains("不支持") { return "解码" }
+        return "引擎报错"
     }
 
     private func reloadCurrentEngine() {

@@ -9,6 +9,13 @@ enum ResolveOutcome {
     case ok(url: String, header: [String: String])
     case failed(reason: String)
 
+    /// v2.31: lets call sites record resolve timing without
+    /// re-switching on the outcome.
+    var isOK: Bool {
+        if case .ok = self { return true }
+        return false
+    }
+
     /// The spider's stated reason in a playerContent result, if any.
     static func spiderReason(in result: [String: Any]) -> String? {
         for key in ["msg", "errMsg"] {
@@ -1054,8 +1061,10 @@ struct DetailView: View {
         let startLine = lineIndex
         let startIndex = episodes.firstIndex(where: { $0.id == ep.id }) ?? 0
         let resolver = makeEpisodeResolver()
+        let resolveStarted = Date()
         Task {
             let outcome = await resolver(startLine, startIndex)
+            Diagnostics.recordResolve(started: resolveStarted, ok: outcome.isOK)
             resolving = false
             switch outcome {
             case .ok(let url, let resolvedHeader):

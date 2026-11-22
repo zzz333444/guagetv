@@ -832,6 +832,12 @@ struct SearchView: View {
         showEmptySites = false
         searchDoneCount = 0
         searchTotalCount = 0
+        // v2.31: warm the active line before the jar phase starts
+        // (fire-and-forget, 10-minute TTL in warmLine) — search
+        // previously never warmed, so its first jar call paid the
+        // cold-proxy wake on the two-attempt budget while browse
+        // and detail both warm on appear.
+        if JarProxyClient.configured { JarProxyClient.warmActiveLine() }
         // Searchable py/JS pools: the active line's spider sites PLUS
         // every imported single-file py/JS line in the library —
         // those live as their own lines, and the user expects the
