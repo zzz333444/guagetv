@@ -286,9 +286,19 @@ struct LiveView: View {
                     }
                 }
                 Spacer()
+                // v2.35 回看：该直播源在配置里带 catchup 字段时，
+                // 频道行挂「可回看」角标；不带的源维持原样。
+                if live.catchup?.source?.isEmpty == false {
+                    Text("可回看")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(Theme.ok)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Theme.ok.opacity(0.15), in: Capsule())
+                }
                 if !programmes.isEmpty {
                     Button {
-                        sheetProgrammes = ProgrammeSheetItem(channel: channel.name, list: programmes)
+                        sheetProgrammes = ProgrammeSheetItem(channel: channel.name,
+                                                             channelURL: channel.url,
+                                                             list: programmes)
                     } label: {
                         Text("节目单").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
                             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -381,7 +391,8 @@ struct LiveView: View {
                 ForEach(dayGroups(entry.list), id: \.day) { group in
                     Section {
                         ForEach(group.items) { programme in
-                            programmeRow(programme)
+                            programmeRow(programme, channelURL: entry.channelURL,
+                                         channelName: entry.channel)
                         }
                     } header: {
                         Text(dayLabel(group.day)).foregroundStyle(Theme.section)
@@ -396,7 +407,14 @@ struct LiveView: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func programmeRow(_ programme: EPGProgramme) -> some View {
+    /// v2.35 回看：已播完的节目（end ≤ 现在）且该直播源带
+    /// catchup 时，给出「回看」按钮——按节目起止时刻展开
+    /// catchup 模板拼出回看地址，走同一播放器播。正在播 /
+    /// 未开播的节目没有回看；无 catchup 的源不显示入口。
+    /// 点按先关节目单 sheet，0.35 秒后再弹播放器全屏盖板
+    /// （sheet 未收起时直接弹盖板会被系统吞掉）。
+    private func programmeRow(_ programme: EPGProgramme,
+                              channelURL: String, channelName: String) -> some View {
         HStack(spacing: 10) {
             Text("\(timeText(programme.start))–\(timeText(programme.end))")
                 .font(.caption.monospacedDigit()).foregroundStyle(Theme.textDim)
@@ -405,6 +423,24 @@ struct LiveView: View {
             if programme.contains(Date()) {
                 Spacer()
                 Text("正在播").font(.caption2.weight(.bold)).foregroundStyle(Theme.accent)
+            } else if programme.end <= Date(),
+                      let url = live.catchupURL(channelURL: channelURL,
+                                                start: programme.start, end: programme.end) {
+                Spacer()
+                Button("回看") {
+                    Haptics.medium()
+                    sheetProgrammes = nil
+                    let replay = LiveListParser.Channel(
+                        name: "\(channelName) · \(programme.title)", url: url, group: "")
+                    Task {
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        playChannel = replay
+                    }
+                }
+                .font(.caption.weight(.semibold)).foregroundStyle(Theme.ok)
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Theme.ok.opacity(0.15), in: Capsule())
+                .buttonStyle(.plain)
             }
         }
         .listRowBackground(Color.clear)
@@ -521,6 +557,7 @@ struct LiveGroup: Identifiable {
 // Sheet payload wrapper (tuples are not Identifiable).
 private struct ProgrammeSheetItem: Identifiable {
     let channel: String
+    let channelURL: String
     let list: [EPGProgramme]
     var id: String { channel }
 }

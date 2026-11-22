@@ -34,6 +34,93 @@ final class DownloadManager: NSObject, ObservableObject {
 
     @Published private(set) var items: [Item] = []
 
+    /// v2.35 整剧下完的站内标记：vodName → 下完时间。
+    /// 只在 App 内提示（下载页组头「已下完」角标 + 记录
+    /// tab 圆点），不发系统通知——守用户「不主动提醒」
+    /// 的口径。入队新集 / 删光已下完集时标记失效。
+    private static let completedSeriesKey = "downloads.completedSeries.v1"
+    private static let unseenCompletedKey = "downloads.completedSeriesUnseen.v1"
+    private static let maxCompletedSeries = 20
+    @Published private(set) var completedSeries: [String: Date] = [:]
+    /// 下完后尚未被用户打开记录页看到的剧名；记录 tab
+    /// 的圆点靠它亮，打开记录页即清。
+    @Published private(set) var unseenCompletedSeries: Set<String> = []
+
+    /// 该剧名当前是否整剧下完：有标记、且名下每一项都
+    /// 是 done（至少一项）。标记只作「曾经下完」的凭证，
+    /// 真正的状态以现有下载项为准。
+    func isSeriesComplete(_ vodName: String) -> Bool {
+        let name = vodName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard completedSeries[name] != nil else { return false }
+        let mine = items.filter {
+            $0.vodName.trimmingCharacters(in: .whitespacesAndNewlines) == name
+        }
+        return !mine.isEmpty && mine.allSatisfy { $0.state == "done" }
+    }
+
+    func markCompletedSeriesSeen() {
+        guard !unseenCompletedSeries.isEmpty else { return }
+        unseenCompletedSeries = []
+        UserDefaults.standard.set([], forKey: Self.unseenCompletedKey)
+    }
+
+    private func loadCompletedSeries() {
+        if let map = UserDefaults.standard.dictionary(forKey: Self.completedSeriesKey)
+            as? [String: TimeInterval] {
+            completedSeries = Dictionary(uniqueKeysWithValues:
+                map.map { ($0.key, Date(timeIntervalSince1970: $0.value)) })
+        }
+        if let list = UserDefaults.standard.stringArray(forKey: Self.unseenCompletedKey) {
+            unseenCompletedSeries = Set(list)
+        }
+    }
+
+    private func saveCompletedSeries() {
+        let map = Dictionary(uniqueKeysWithValues:
+            completedSeries.map { ($0.key, $0.value.timeIntervalSince1970) })
+        UserDefaults.standard.set(map, forKey: Self.completedSeriesKey)
+        UserDefaults.standard.set(Array(unseenCompletedSeries),
+                                  forKey: Self.unseenCompletedKey)
+    }
+
+    /// 一项下完后检查：同名剧是否再无未完成项（下载中 /
+    /// 已暂停 / 失败都算未完成）。是则记下完标记；否则
+    /// 不动（还在下的剧不算下完）。
+    private func noteFinishedIfSeriesComplete(_ vodName: String) {
+        let name = vodName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let mine = items.filter {
+            $0.vodName.trimmingCharacters(in: .whitespacesAndNewlines) == name
+        }
+        guard !mine.isEmpty, mine.allSatisfy({ $0.state == "done" }) else { return }
+        completedSeries[name] = Date()
+        if completedSeries.count > Self.maxCompletedSeries {
+            for key in completedSeries.keys.sorted(by: {
+                (completedSeries[$0] ?? .distantPast) < (completedSeries[$1] ?? .distantPast)
+            }).prefix(completedSeries.count - Self.maxCompletedSeries) {
+                completedSeries.removeValue(forKey: key)
+            }
+        }
+        unseenCompletedSeries.insert(name)
+        saveCompletedSeries()
+    }
+
+    /// 同名剧又有了新下载任务 / 已下完的集被删光时，
+    /// 下完标记失效。
+    private func clearCompletedSeriesIfNeeded(_ vodName: String) {
+        let name = vodName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, completedSeries[name] != nil else { return }
+        let mine = items.filter {
+            $0.vodName.trimmingCharacters(in: .whitespacesAndNewlines) == name
+        }
+        // 入队时新项 state 为 downloading；删光时 done 项归零。
+        if mine.contains(where: { $0.state != "done" }) || mine.isEmpty {
+            completedSeries.removeValue(forKey: name)
+            unseenCompletedSeries.remove(name)
+            saveCompletedSeries()
+        }
+    }
+
     /// Background session (v1.42): file downloads keep running
     /// with the app in the background or even terminated; tasks
     /// are re-mapped to manifest items on relaunch.
@@ -84,6 +171,7 @@ final class DownloadManager: NSObject, ObservableObject {
     override init() {
         super.init()
         load()
+        loadCompletedSeries()
         reconnectTasks()
     }
 
@@ -200,6 +288,8 @@ final class DownloadManager: NSObject, ObservableObject {
                         isHLS: remote.lowercased().contains(".m3u8"))
         items.insert(item, at: 0)
         save()
+        // 又有新集入队：该剧不再算整剧下完。
+        clearCompletedSeriesIfNeeded(vodName)
         if item.isHLS { startHLS(item) } else { startFile(item) }
     }
 
@@ -218,6 +308,8 @@ final class DownloadManager: NSObject, ObservableObject {
         storeResumeData(for: item.id, data: nil)
         items.removeAll { $0.id == item.id }
         save()
+        // 已下完的集被删光时，下完标记失效。
+        clearCompletedSeriesIfNeeded(item.vodName)
     }
 
     /// Batch remove (v2.10): used by the downloads multi-select bar.
@@ -371,6 +463,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 $0.totalBytes = size
             }
             storeResumeData(for: id, data: nil)
+            noteFinishedIfSeriesComplete(item.vodName)
             if let finished = items.first(where: { $0.id == id }) {
                 notifyFinished(finished)
             }
@@ -443,6 +536,7 @@ extension DownloadManager: AVAssetDownloadDelegate {
                 $0.localPath = location.path
             }
             if let finished = items.first(where: { $0.id == id }) {
+                noteFinishedIfSeriesComplete(finished.vodName)
                 notifyFinished(finished)
             }
             hlsTasks[id] = nil

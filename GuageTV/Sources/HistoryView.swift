@@ -561,8 +561,19 @@ struct HistoryView: View {
                     .frame(width: 46, height: 69)
                     .posterFrame()
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(group.key).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.text).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(group.key).font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text).lineLimit(1)
+                        // v2.35 整剧下完：组内全部 done 且有下完
+                        // 标记时挂绿角标（站内提示，不发系统通知）。
+                        if DownloadManager.shared.isSeriesComplete(group.key) {
+                            Text("已下完")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Theme.ok, in: Capsule())
+                                .foregroundStyle(.white)
+                        }
+                    }
                     Text(subtitle).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                 }
                 Spacer()

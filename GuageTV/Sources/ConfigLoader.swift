@@ -84,12 +84,74 @@ struct TVBoxConfig: Decodable {
         var ua: String?
         var groups: String?
         var channels: [Channel]?
+        /// v2.35 回看：线路级 catchup 声明（TVBox/FongMi 约定）。
+        /// 形如 {"type":"append","source":"?livemode=4&starttime=${(b)yyyyMMdd'T'HHmm}00.00Z&endtime=${(e)yyyyMMdd'T'HHmm}00.00Z"}；
+        /// 个别线路写成纯字符串时按 append 处理。没有该字段的
+        /// 线路（用户线路 571 条里大部分）维持现状、不显示回看。
+        var catchup: Catchup?
 
         /// Stable list identity: live names repeat across sources,
         /// so name alone is not a ForEach id (duplicate ids collapse
         /// rows and mis-route taps). Name + URL distinguishes rows
         /// from different sources carrying the same name.
         var liveID: String { name + "#" + url }
+
+        /// catchup 模板展开：${(b)FORMAT} / ${(e)FORMAT} 分别按
+        /// 节目起止时刻（UTC）格式化；其余字符原样保留。type 为
+        /// append（或缺失）时把展开后的 source 拼到频道地址后；
+        /// source 为空或模板里没有任何占位符时返回 nil——没有
+        /// 起止时间的回看地址拼出来也是错的，不如不显示入口。
+        func catchupURL(channelURL: String, start: Date, end: Date) -> String? {
+            guard let source = catchup?.source, !source.isEmpty else { return nil }
+            let expanded = Self.expandCatchupTemplate(source, start: start, end: end)
+            guard expanded != source else { return nil }
+            if channelURL.contains("?") && expanded.hasPrefix("?") {
+                return channelURL + "&" + expanded.dropFirst()
+            }
+            if !channelURL.contains("?") && expanded.hasPrefix("&") {
+                return channelURL + "?" + expanded.dropFirst()
+            }
+            return channelURL + expanded
+        }
+
+        private static func expandCatchupTemplate(_ template: String,
+                                                  start: Date, end: Date) -> String {
+            guard let re = try? NSRegularExpression(pattern: #"\$\{(b|e)([^}]*)\}"#) else {
+                return template
+            }
+            var out = template
+            let range = NSRange(template.startIndex..., in: template)
+            for m in re.matches(in: template, range: range).reversed() {
+                guard let whole = Range(m.range, in: template),
+                      let flag = Range(m.range(at: 1), in: template),
+                      let fmt = Range(m.range(at: 2), in: template) else { continue }
+                let date = template[flag] == "b" ? start : end
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.dateFormat = String(template[fmt])
+                out.replaceSubrange(whole, with: formatter.string(from: date))
+            }
+            return out
+        }
+
+        struct Catchup: Decodable {
+            var type: String?
+            var source: String?
+
+            init(from decoder: Decoder) throws {
+                if let single = try? decoder.singleValueContainer().decode(String.self) {
+                    type = "append"
+                    source = single
+                    return
+                }
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                type = try? c.decode(String.self, forKey: .type)
+                source = try? c.decode(String.self, forKey: .source)
+            }
+
+            private enum CodingKeys: String, CodingKey { case type, source }
+        }
 
         struct Channel: Decodable {
             var name: String

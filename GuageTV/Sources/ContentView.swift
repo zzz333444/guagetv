@@ -5,6 +5,8 @@ import SwiftUI
 /// floating circle button on the right.
 struct ContentView: View {
     @State private var config: TVBoxConfig?
+    /// v2.35：观察下载完成标记，记录 tab 的未读红点靠它刷新。
+    @StateObject private var downloads = DownloadManager.shared
     @State private var tab = 0
     @State private var showSearch = false
     /// 外观与交互 choice: "system" follows the phone, else forced.
@@ -108,6 +110,11 @@ struct ContentView: View {
         }
         .onChange(of: showRecordsTab) { _ in clampTab() }
         .onChange(of: showLibraryTab) { _ in clampTab() }
+        .onChange(of: tab) { _, new in
+            // v2.35：点进记录页（下载所在页）即视为已读，
+            // 下完红点随之消失。
+            if new == 1 { downloads.markCompletedSeriesSeen() }
+        }
         .sheet(isPresented: $showSearch) {
             SearchView(config: config)
         }
@@ -234,6 +241,17 @@ struct ContentView: View {
                 .foregroundStyle(tab == index ? Theme.text : Theme.text.opacity(0.55))
                 .frame(width: 62, height: 46)
                 .background(tab == index ? Theme.text.opacity(0.14) : Color.clear, in: Capsule())
+            }
+        }
+        // v2.35 整剧下完的站内提醒：有未读的下完剧时在
+        // 记录 tab（下载所在页）右上角挂红点；点进记录页
+        // 即视为已读。资源库页本身没有下载入口，角标不往
+        // 那边贴（见本夜计划 R10 记录）。不发系统通知。
+        .overlay(alignment: .topTrailing) {
+            if index == 1 && !downloads.unseenCompletedSeries.isEmpty {
+                Circle().fill(Color.red)
+                    .frame(width: 8, height: 8)
+                    .offset(x: 2, y: -2)
             }
         }
     }

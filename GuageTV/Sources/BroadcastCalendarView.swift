@@ -39,6 +39,14 @@ struct BroadcastCalendarView: View {
         record?.meta.listModules.first { $0.id == "dailySchedule" }
     }
 
+    /// v2.35 今日标记：days[0] 是「今天」快捷芯片，days[1...7]
+    /// 是本周一到周日；今天所在的周芯片下标 = 1 + 距周一的天数，
+    /// 该芯片下方挂一个强调色小圆点，周切换时一眼能定位今天。
+    private var todayWeekdayIndex: Int {
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        return 1 + (weekday + 5) % 7
+    }
+
     var body: some View {
         Group {
             if loading {
@@ -93,7 +101,9 @@ struct BroadcastCalendarView: View {
     private var content: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                // Week strip: 今天 + 周一…周日（带日期）。
+                // Week strip: 今天 + 周一…周日（带日期）。v2.35：
+                // 今天所在的周芯片下方挂强调色圆点；选中态切换
+                // 走 animQuick，不再瞬间跳变。
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(days.indices, id: \.self) { idx in
@@ -102,17 +112,24 @@ struct BroadcastCalendarView: View {
                                 selectedDay = idx
                                 Task { await load() }
                             } label: {
-                                Text(days[idx].label)
-                                    .font(.caption.weight(selectedDay == idx ? .semibold : .regular))
-                                    .foregroundStyle(selectedDay == idx ? .black : Theme.text.opacity(0.85))
-                                    .padding(.horizontal, 11).padding(.vertical, 6)
-                                    .background(selectedDay == idx ? Color.white : Theme.glass, in: Capsule())
-                                    .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+                                VStack(spacing: 2) {
+                                    Text(days[idx].label)
+                                        .font(.caption.weight(selectedDay == idx ? .semibold : .regular))
+                                        .foregroundStyle(selectedDay == idx ? .black : Theme.text.opacity(0.85))
+                                    // 占位圆点保持各芯片同高，只在今天那格着色。
+                                    Circle()
+                                        .fill(idx == todayWeekdayIndex ? Theme.accent : Color.clear)
+                                        .frame(width: 5, height: 5)
+                                }
+                                .padding(.horizontal, 11).padding(.vertical, 6)
+                                .background(selectedDay == idx ? Color.white : Theme.glass, in: Capsule())
+                                .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 18)
+                    .animation(Theme.animQuick, value: selectedDay)
                 }
                 if let errorText, !items.isEmpty {
                     HStack(spacing: 8) {

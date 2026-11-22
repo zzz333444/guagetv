@@ -3442,6 +3442,10 @@ struct FWDDetailView: View {
     @State private var detailError: String?
     @State private var playSelection: FWDPlaySelection?
     @State private var resolvingNote: String?
+    /// v2.35：详情加载失败时的跨线搜索兜底（播出日历点按
+    /// 进详情是同一条链路：模块详情拉不到时不只剩重试，
+    /// 还能拿片名直接去全局搜索找其他线路的同名资源）。
+    @State private var showCrossSearch = false
 
     private struct FWDPlaySelection: Identifiable {
         var episodes: [PlayerView.EpisodeRef]
@@ -3602,6 +3606,12 @@ struct FWDDetailView: View {
                             .font(.caption).foregroundStyle(Theme.textDim)
                             .lineLimit(2)
                         Spacer()
+                        Button("跨线搜索") {
+                            Haptics.tap()
+                            showCrossSearch = true
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
                         Button("重试") {
                             Haptics.tap()
                             Task { await enrich() }
@@ -3765,6 +3775,10 @@ struct FWDDetailView: View {
             }
         }
         .task { await enrich() }
+        .navigationDestination(isPresented: $showCrossSearch) {
+            SearchView(config: ConfigLibrary.activeID().flatMap { ConfigLibrary.load(id: $0) },
+                       initialKeyword: full.title)
+        }
     }
 
     private var metaLine: String {
