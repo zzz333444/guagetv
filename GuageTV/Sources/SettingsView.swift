@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.36 · 稳定扫荡与备份补全"
+    static let buildLabel = "v2.37 · 收官·全量复查与更新日志"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.37", title: "收官·全量复查与更新日志", lines: [
+            "更新日志补齐第八次通宵全部 12 轮（v2.26–v2.37）：模块对标 Rex 官方规范四轮、性能深挖两轮、UI 对标两轮、功能大件两轮、稳定扫荡一轮，当前版本置顶高亮",
+            "全量复查：版本号三处一致（project.yml 2.37 / 237、buildLabel、更新日志首条）；更新日志 57 条严格降序、无重复；计划文件 12 轮进度记录齐全；本轮不再加新功能，只做收官修正",
+            "本夜对齐 Rex 官方规范的差距清单已记入通宵计划文件末尾：元数据与参数、返回字段与详情/搜索、资源与字幕/弹幕、内容类型与多语言、模块搜索并入全局搜索五大块已对齐；平台限制做不了的如实列出——预告片入口未做、动态封面只标注不播、userId/configId 无应用级标识可注入、已保存全局参数尚无设置入口、栏目缓存默认 30 分钟（与 guide 默认 86400 有意偏差）",
+            "最终包全项验包：Info.plist 版本与最低 iOS 18.0、buildLabel 新旧计数、主程序 LC_LOAD_DYLIB 的 13 个 @rpath framework 与 Payload/*.app/Frameworks/ 清单逐个对照（含 AMSMB2）",
+        ]),
         Entry(version: "v2.36", title: "稳定扫荡与备份补全", lines: [
             "全仓强制解包复查：try!/as! 与显式 ! 仍为零（仅剩 WKWebView 协议签名的隐式解包与 required init 的 fatalError 桩）；DLNA 的 SSDP 端口此前是唯一一处真强制解包（NWEndpoint.Port(rawValue: 1900)!），现改 guard，拿不到端口直接返回空结果、不再赌它一定合法",
             "备份补上模块：此前备份只含线路、历史与设置，恢复后已导入的模块会静默丢失（模块存在 Application Support/widgets，不在配置库里）；现备份同时打包模块 index.json 与全部 .js 源码 + fwd.* 设置（各模块存储、自检结果、内容类型自选等），恢复时写回并清掉备份里没有的旧模块文件；恢复确认框的概要数字与实际恢复内容对齐（线路按实际写回数、模块只计 .js 文件）",
