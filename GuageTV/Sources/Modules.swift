@@ -3073,6 +3073,10 @@ func fwdDefaultParams(meta: FWDMeta, module: FWDModuleEntry) -> [String: Any] {
 
 struct FWDWidgetView: View {
     let record: FWDRecord
+    /// v2.45: open straight onto one column (Discover's
+    /// "模块推荐" row passes the recommended entry's id).
+    /// Nil = the old behaviour, first list column.
+    var initialEntryID: String? = nil
     @State private var items: [FWDItem] = []
     @State private var loading = true
     @State private var loadingMore = false
@@ -3170,7 +3174,16 @@ struct FWDWidgetView: View {
             SearchView(config: ConfigLibrary.activeID().flatMap { ConfigLibrary.load(id: $0) },
                        initialKeyword: searchSeed)
         }
-        .task { await load(reset: true) }
+        .task {
+            // v2.45: honour an initial column before the first
+            // load — moduleIndex must land before load(reset:)
+            // reads currentModule.
+            if let initialEntryID,
+               let idx = listModules.firstIndex(where: { $0.id == initialEntryID }) {
+                moduleIndex = idx
+            }
+            await load(reset: true)
+        }
     }
 
     private var content: some View {

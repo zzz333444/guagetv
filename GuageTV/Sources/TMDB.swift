@@ -210,6 +210,15 @@ enum TMDBClient {
     ]
 
     private static func fetchTitles(_ path: String, forcedType: String?) async -> [TMDBTitle] {
+        await fetchTitlesOptional(path, forcedType: forcedType) ?? []
+    }
+
+    /// v2.45: the nil-able twin of fetchTitles — nil means the
+    /// fetch itself failed (no network / no JSON / no results
+    /// key), [] means TMDB genuinely returned an empty list.
+    /// Discover rows need the distinction: a failed row gets a
+    /// retry button instead of silently vanishing.
+    private static func fetchTitlesOptional(_ path: String, forcedType: String?) async -> [TMDBTitle]? {
         guard isOn else { return [] }
         var comps = URLComponents(string: base + path)
         comps?.queryItems = [
@@ -218,7 +227,7 @@ enum TMDBClient {
         ]
         guard let url = comps?.url,
               let root = await getJSON(url),
-              let results = root["results"] as? [[String: Any]] else { return [] }
+              let results = root["results"] as? [[String: Any]] else { return nil }
         return results.compactMap { r in
             let type = forcedType ?? (r["media_type"] as? String ?? "")
             guard type == "movie" || type == "tv" else { return nil }
@@ -300,15 +309,35 @@ enum TMDBClient {
     }
 
     static func topRated() async -> [TMDBTitle] {
-        let movies = await fetchTitles("/3/movie/top_rated", forcedType: "movie")
-        let shows = await fetchTitles("/3/tv/top_rated", forcedType: "tv")
-        // Interleave so the row mixes both kinds evenly.
-        var merged: [TMDBTitle] = []
-        for i in 0..<max(movies.count, shows.count) {
-            if i < movies.count { merged.append(movies[i]) }
-            if i < shows.count { merged.append(shows[i]) }
+        await discoverList(5) ?? []
+    }
+
+    /// v2.45: one Discover list by the same key DiscoverView
+    /// uses (0 trending / 1 week / 2 now playing / 3 movies /
+    /// 4 shows / 5 top rated). Nil = that list's fetch failed,
+    /// so the row can offer a retry; [] = genuinely empty.
+    /// topRated fails only when BOTH its movie and TV calls fail
+    /// — a partial list still paints.
+    static func discoverList(_ key: Int) async -> [TMDBTitle]? {
+        switch key {
+        case 0: return await fetchTitlesOptional("/3/trending/all/day", forcedType: nil)
+        case 1: return await fetchTitlesOptional("/3/trending/all/week", forcedType: nil)
+        case 2: return await fetchTitlesOptional("/3/movie/now_playing", forcedType: "movie")
+        case 3: return await fetchTitlesOptional("/3/movie/popular", forcedType: "movie")
+        case 4: return await fetchTitlesOptional("/3/tv/popular", forcedType: "tv")
+        case 5:
+            let movies = await fetchTitlesOptional("/3/movie/top_rated", forcedType: "movie")
+            let shows = await fetchTitlesOptional("/3/tv/top_rated", forcedType: "tv")
+            guard movies != nil || shows != nil else { return nil }
+            let m = movies ?? [], s = shows ?? []
+            var merged: [TMDBTitle] = []
+            for i in 0..<max(m.count, s.count) {
+                if i < m.count { merged.append(m[i]) }
+                if i < s.count { merged.append(s[i]) }
+            }
+            return merged
+        default: return nil
         }
-        return merged
     }
 
     // MARK: Discover feed cache (v2.03)

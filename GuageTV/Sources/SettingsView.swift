@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.44 · Emby 离线海报·下载·同步时间"
+    static let buildLabel = "v2.45 · 发现页手势·模块推荐·行内重试"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.45", title: "发现页手势·模块推荐·行内重试", lines: [
+            "发现页手势冲突修掉：hero 轮播不再用分页 TabView，改横向分页 ScrollView（scrollPosition 驱动）；内层只横滑、外层只竖滑，hero 区竖滑不再误触轮播横滑，下拉刷新只在真正到顶时触发",
+            "发现页加「模块推荐」行：已装模块里带推荐栏目（标题含推荐/热门/精选，或 id 含 recommend/trending/popular/hot）的各出一张玻璃卡，点按直达该模块的栏目页；没有这类模块时整行不出现",
+            "各行加载失败给行内重试：TMDB 六行取数现在区分「拉取失败」与「确实为空」，失败的行保留标题、给「这一行没拉到数据 · 重试」按钮，只重拉这一行；只有六行全空时才整页显示「TMDB 没拉到数据」",
+        ]),
         Entry(version: "v2.44", title: "Emby 离线海报·下载·同步时间", lines: [
             "Emby 海报离线缓存：此前海报已走 PosterCache 磁盘层，但磁盘 key 就是带 api_key 的完整图片地址，重新登录换 token 后全部缓存失效；现改走稳定的服务器隔离 key（服务器 id＋条目 id），换 token 不失效、多服务器不串图；资源库的 Emby 海报预取走同一 key，断网时库页仍有图",
             "Emby 内容接入下载页：剧集详情页集数行新增长按菜单「下载这一集」「下载整季（当前季全部）」，走现有下载引擎（PlaybackInfo 取直链，m3u8 走 HLS 下载、文件走普通下载），按剧名分组显示、已下完角标与普通下载一致；取不到地址或探到不可下载时给中文原因",

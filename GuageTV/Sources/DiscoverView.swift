@@ -30,6 +30,16 @@ struct DiscoverView: View {
     @State private var searchSeed = ""
     @State private var showSearch = false
     @State private var detailItem: TMDBClient.TMDBTitle?
+    /// v2.45: per-row failure set (TMDB list keys 0–5) — a
+    /// failed row keeps its header and offers a retry instead
+    /// of the whole page going blank.
+    @State private var failedRows: Set<Int> = []
+    /// v2.45: paging-scroll position for the hero carousel
+    /// (replaces the page TabView — see hero).
+    @State private var heroScrollID: Int?
+    /// v2.45: installed modules that carry a recommended
+    /// column, resolved once per load from the on-disk index.
+    @State private var recommendedModules: [(record: FWDRecord, entry: FWDModuleEntry)] = []
 
     private var heroItems: [TMDBClient.TMDBTitle] { Array(trending.prefix(8)) }
     private var heroArt: String? {
@@ -38,11 +48,37 @@ struct DiscoverView: View {
         return item.backdrop.isEmpty ? item.poster : item.backdrop
     }
 
+    /// v2.45: the whole-page empty state only fires when every
+    /// list failed or came back empty — one failed list used to
+    /// blank the page even when five rows had painted.
+    private var allListsEmpty: Bool {
+        trending.isEmpty && week.isEmpty && nowPlaying.isEmpty
+            && movies.isEmpty && shows.isEmpty && top.isEmpty
+    }
+
+    /// v2.45: a module "recommended column" is a list entry
+    /// whose title reads 推荐 / 热门 / 精选, or whose id says
+    /// recommend / trending / popular / hot. The first such
+    /// entry per module wins; modules without one are skipped.
+    private static func recommendedEntries() -> [(record: FWDRecord, entry: FWDModuleEntry)] {
+        FWDStore.records().compactMap { record in
+            guard let entry = record.meta.listModules.first(where: { entry in
+                let title = entry.title.lowercased()
+                let id = entry.id.lowercased()
+                return title.contains("推荐") || title.contains("热门") || title.contains("精选")
+                    || id.contains("recommend") || id.contains("trending")
+                    || id.contains("popular") || id.contains("hot")
+            }) else { return nil }
+            return (record, entry)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 26) {
                     if !TMDBClient.isOn {
+                        if !recommendedModules.isEmpty { moduleRecommendRow }
                         EmptyStateView(
                             icon: "sparkles.tv",
                             title: "发现页由 TMDB 驱动",
@@ -56,7 +92,7 @@ struct DiscoverView: View {
                         // vanishing the instant the feed lands.
                         SkeletonHero().transition(.opacity)
                         SkeletonPosterGrid().padding(.horizontal, 18).transition(.opacity)
-                    } else if trending.isEmpty {
+                    } else if allListsEmpty {
                         EmptyStateView(
                             icon: "wifi.exclamationmark",
                             title: "TMDB 没拉到数据",
@@ -66,7 +102,8 @@ struct DiscoverView: View {
                             .padding(.horizontal, 18)
                             .padding(.top, 90)
                     } else {
-                        hero
+                        if !trending.isEmpty { hero }
+                        if !recommendedModules.isEmpty { moduleRecommendRow }
                         posterRow("本周热门", week, rowIndex: 0)
                         posterRow("正在热映", nowPlaying, rowIndex: 1)
                         posterRow("热门电影", movies, rowIndex: 2)
@@ -106,6 +143,7 @@ struct DiscoverView: View {
     /// a cold disk read. It now runs detached; the paint still
     /// lands on the main actor.
     private func load() async {
+        recommendedModules = Self.recommendedEntries()
         guard TMDBClient.isOn else { loading = false; return }
         let cache = await Task.detached(priority: .userInitiated) {
             TMDBClient.loadDiscoverCache()
@@ -142,16 +180,22 @@ struct DiscoverView: View {
     private func refresh() async {
         refreshGeneration += 1
         let generation = refreshGeneration
-        await withTaskGroup(of: (Int, [TMDBClient.TMDBTitle]).self) { group in
-            group.addTask { (0, await TMDBClient.trending()) }
-            group.addTask { (1, await TMDBClient.trendingWeek()) }
-            group.addTask { (2, await TMDBClient.nowPlaying()) }
-            group.addTask { (3, await TMDBClient.popularMovies()) }
-            group.addTask { (4, await TMDBClient.popularTV()) }
-            group.addTask { (5, await TMDBClient.topRated()) }
+        await withTaskGroup(of: (Int, [TMDBClient.TMDBTitle]?).self) { group in
+            for key in 0...5 {
+                group.addTask { (key, await TMDBClient.discoverList(key)) }
+            }
             for await (key, titles) in group {
                 // A newer refresh supersedes this one — stop painting.
-                guard generation == refreshGeneration, !titles.isEmpty else { continue }
+                guard generation == refreshGeneration else { continue }
+                // v2.45: nil = this list's fetch failed — keep any
+                // painted rows and mark the row failed so it
+                // offers its own retry. [] = genuinely empty.
+                guard let titles else {
+                    failedRows.insert(key)
+                    continue
+                }
+                failedRows.remove(key)
+                guard !titles.isEmpty else { continue }
                 applyList(key, titles)
             }
         }
@@ -178,6 +222,18 @@ struct DiscoverView: View {
                 logos[id] = url
             }
         }
+    }
+
+    /// v2.45: re-fetch one failed list — the row retry button
+    /// and the pull-to-refresh path both land here. A retry that
+    /// still fails leaves the row marked failed, so the button
+    /// stays; a retry that returns an empty list clears the
+    /// failure and the row simply stays hidden.
+    private func retryRow(_ key: Int) async {
+        guard let titles = await TMDBClient.discoverList(key) else { return }
+        failedRows.remove(key)
+        guard !titles.isEmpty else { return }
+        applyList(key, titles)
     }
 
     /// One list arriving early paints its row immediately instead
@@ -254,19 +310,45 @@ struct DiscoverView: View {
         }
     }
 
+    /// v2.45: the hero carousel is a horizontal paging
+    /// ScrollView driven by scrollPosition, not a page TabView.
+    /// The TabView's own pager swallowed vertical drags that
+    /// started on the hero, so a pull-down meant to scroll the
+    /// page could flip hero pages — or trip pull-to-refresh
+    /// mid-page. The inner scroll view now only ever scrolls
+    /// horizontally; vertical drags go straight to the outer
+    /// ScrollView, so refresh only engages at the true top with
+    /// the system threshold. Auto-advance and the dots still
+    /// drive heroIndex; heroIndex drives the scroll position
+    /// back the other way (each direction guarded so the two
+    /// bindings never ping-pong).
     private var hero: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $heroIndex) {
-                ForEach(Array(heroItems.enumerated()), id: \.element.id) { pair in
-                    heroPage(pair.element)
-                        .tag(pair.offset)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(heroItems) { item in
+                        heroPage(item)
+                            .containerRelativeFrame(.horizontal)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $heroScrollID)
             .frame(height: 540)
-            .onChange(of: heroIndex) { _, _ in
+            .onChange(of: heroScrollID) { _, newID in
+                guard let newID,
+                      let idx = heroItems.firstIndex(where: { $0.id == newID }),
+                      idx != heroIndex else { return }
+                heroIndex = idx
                 lastHeroTouch = Date()
                 prefetchNextHeroArt()
+            }
+            .onChange(of: heroIndex) { _, _ in
+                guard heroItems.indices.contains(heroIndex) else { return }
+                let id = heroItems[heroIndex].id
+                guard heroScrollID != id else { return }
+                heroScrollID = id
             }
 
             // Dot indicators (Rex: small dots under the synopsis;
@@ -379,6 +461,10 @@ struct DiscoverView: View {
 
     @ViewBuilder
     private func posterRow(_ title: String, _ items: [TMDBClient.TMDBTitle], rowIndex: Int) -> some View {
+        // Row keys in refresh() are 0 trending / 1 week / 2 now
+        // playing / 3 movies / 4 shows / 5 top — the hero owns
+        // key 0, so a poster's list key is its row index + 1.
+        let listKey = rowIndex + 1
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -409,6 +495,81 @@ struct DiscoverView: View {
                 }
             }
             .onAppear { rowAppeared(rowIndex) }
+        } else if failedRows.contains(listKey) {
+            // v2.45: this list's fetch failed — the row keeps its
+            // header and offers a retry instead of the page
+            // going blank or the row silently vanishing.
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(title).font(.title3.bold()).foregroundStyle(Theme.text)
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                Button {
+                    Haptics.tap()
+                    Task { await retryRow(listKey) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text("这一行没拉到数据")
+                        Text("重试").font(.subheadline.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 18)
+            }
+        }
+    }
+
+    /// v2.45: "模块推荐" — one glass card per installed module
+    /// that declares a recommended column (see
+    /// recommendedEntries). Tapping opens that module's column
+    /// page directly; modules without such a column contribute
+    /// nothing, and with no module at all the row hides.
+    private var moduleRecommendRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("模块推荐").font(.title3.bold()).foregroundStyle(Theme.text)
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(recommendedModules, id: \.record.id) { pair in
+                        NavigationLink {
+                            FWDWidgetView(record: pair.record, initialEntryID: pair.entry.id)
+                        } label: {
+                            HStack(spacing: 10) {
+                                if !pair.record.meta.icon.isEmpty {
+                                    PosterImage(urlString: pair.record.meta.icon, pixelSize: 240)
+                                        .frame(width: 34, height: 34)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "puzzlepiece.extension")
+                                        .foregroundStyle(Theme.accent)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(pair.record.meta.localized(pair.entry.title))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Theme.text).lineLimit(1)
+                                    Text(pair.record.meta.localized(
+                                        pair.record.meta.title.isEmpty ? pair.record.id : pair.record.meta.title))
+                                        .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
+                                }
+                            }
+                            .padding(10)
+                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 18)
+            }
         }
     }
 
