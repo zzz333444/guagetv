@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.45 · 发现页手势·模块推荐·行内重试"
+    static let buildLabel = "v2.46 · 性能深挖·冷启动二段"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.46", title: "性能深挖·冷启动二段", lines: [
+            "冷启动二段：模块索引（读模块 index.json＋解码）此前在主线程同步跑，现改走后台任务，首帧不再等它；线路解析、模块索引、首帧三处耗时记进诊断日志（设置 → 关于 → 诊断里看「冷启动」分类），配置解析本身 v2.03 已在后台",
+            "py 首次加载预热：启动后配置落定、有 py 站时在后台悄悄启动 Python 解释器（只触发一次、不阻塞首屏），首个 py 站打开不再等解释器冷启；无 py 站的用户不花这份成本，预热失败不影响、打开 py 站时照常再试",
+            "图片解码后台化审计：全仓查完——海报解码在 PosterStore actor 内（不在主线程）、截图 mpv 路已是异步、原生截图是唯一主线程同步解码点，现改异步生成器 API；预览图本来就是异步。主线程解码点清零",
+            "内存档随压力自动降：海报内存上限仍按本机内存分档（160/120/48 MB），但每次内存告警除清空缓存外再把上限减半（下限 12 MB），本轮启动内不再回升；磁盘缓存层不受影响，图仍可从磁盘重载；缓存页显示的上限改为实际生效值，降档时注明原因",
+        ]),
         Entry(version: "v2.45", title: "发现页手势·模块推荐·行内重试", lines: [
             "发现页手势冲突修掉：hero 轮播不再用分页 TabView，改横向分页 ScrollView（scrollPosition 驱动）；内层只横滑、外层只竖滑，hero 区竖滑不再误触轮播横滑，下拉刷新只在真正到顶时触发",
             "发现页加「模块推荐」行：已装模块里带推荐栏目（标题含推荐/热门/精选，或 id 含 recommend/trending/popular/hot）的各出一张玻璃卡，点按直达该模块的栏目页；没有这类模块时整行不出现",

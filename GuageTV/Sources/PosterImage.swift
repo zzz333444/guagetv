@@ -68,6 +68,9 @@ final class PosterCache {
     private let memory = NSCache<NSString, UIImage>()
     private let store = PosterStore()
     private var warningObserver: NSObjectProtocol?
+    /// v2.46: 运行时压力步数——每次内存告警降一档（见
+    /// applyMemoryPressure），本轮启动内不回升。
+    private var pressureSteps = 0
 
     init() {
         // v2.16 memory tiering: the old flat 80 MB cap starved
@@ -79,12 +82,27 @@ final class PosterCache {
         warningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil, queue: .main) { [weak self] _ in
-                // Drop the memory level only — the disk level
-                // (Caches/posters) survives, so grids reload from
-                // disk instead of the network.
-                self?.memory.removeAllObjects()
+                self?.applyMemoryPressure()
             }
     }
+
+    /// v2.46: 运行时压力响应——光清缓存不够：清完后缓存会
+    /// 按旧上限立刻重新填满，下一次告警不可避免。每次告警
+    /// 把上限减半（160→80→40→20→12 MB 下限），内存档随
+    /// 压力自动降档；磁盘层（Caches/posters）不受影响，图
+    /// 片仍可从磁盘重载，只是不再常驻内存。
+    private func applyMemoryPressure() {
+        memory.removeAllObjects()
+        pressureSteps += 1
+        let base = Self.memoryLimitBytes()
+        let stepped = max(base >> min(pressureSteps, 4), 12 * 1024 * 1024)
+        memory.totalCostLimit = stepped
+        Diagnostics.log("内存", "内存告警 · 海报内存缓存已清空，上限降至 \(stepped / 1_048_576) MB（第 \(pressureSteps) 次告警，本轮启动内不再回升）")
+    }
+
+    /// 当前实际生效的内存上限（MB）：基础分档经告警降档后
+    /// 的值，缓存页显示的数字与实际强制的上限一致。
+    var effectiveLimitMB: Int { memory.totalCostLimit / 1_048_576 }
 
     deinit { if let warningObserver { NotificationCenter.default.removeObserver(warningObserver) } }
 
@@ -119,7 +137,11 @@ final class PosterCache {
         let mem = ProcessInfo.processInfo.physicalMemory
         let tier = mem >= 6 * gib ? "6 GiB 以上档位"
             : mem >= 4 * gib ? "4 GiB 以上档位" : "4 GiB 以下档位"
-        return "\(memoryLimitMB) MB（\(tier)，本机内存 \(mem / gib) GiB）"
+        // v2.46: 显示实际生效的上限（告警降档后小于基础分档），
+        // 数字与缓存真正强制的上限一致；降档时注明原因。
+        let eff = shared.effectiveLimitMB
+        let stepped = eff < memoryLimitMB ? "，内存告警后已降档" : ""
+        return "\(eff) MB（\(tier)，本机内存 \(mem / gib) GiB\(stepped)）"
     }
 
     /// v2.16 memory tier (see init): 6 GiB+ → 160 MB, 4 GiB+ →

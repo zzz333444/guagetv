@@ -2308,7 +2308,11 @@ struct PlayerView: View {
                 finishSnapshot(await mpv.snapshot().map { UIImage(cgImage: $0) })
             }
         } else {
-            finishSnapshot(native.snapshot())
+            // v2.46: 原生截图已改异步（见 NativeController.snapshot），
+            // 不再在主线程同步解码。
+            Task { @MainActor in
+                finishSnapshot(await native.snapshot())
+            }
         }
     }
 
@@ -2943,13 +2947,19 @@ final class NativeController: NSObject, ObservableObject {
         return UIImage(cgImage: result.image)
     }
 
-    func snapshot() -> UIImage? {
+    /// v2.46: async — the old sync copyCGImage decoded the
+    /// frame on the calling thread, and saveSnapshot calls this
+    /// from the main thread (screenshot button), so a 720p
+    /// decode stalled the player chrome. The async generator
+    /// API does the decode off the main thread, like
+    /// previewImage above.
+    func snapshot() async -> UIImage? {
         guard let item = player.currentItem else { return nil }
         let generator = AVAssetImageGenerator(asset: item.asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 1280, height: 720)
-        guard let cg = try? generator.copyCGImage(at: player.currentTime(), actualTime: nil) else { return nil }
-        return UIImage(cgImage: cg)
+        guard let result = try? await generator.image(at: player.currentTime()) else { return nil }
+        return UIImage(cgImage: result.image)
     }
 }
 

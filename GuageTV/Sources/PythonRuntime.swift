@@ -35,11 +35,34 @@ final class PythonRuntime {
     private var runnerModule: UnsafeMutablePointer<PyObject>?
     private(set) var bootError: String?
     private(set) var versionText = ""
+    /// v2.46: 预热只触发一次（失败也不重复预热；真正的
+    /// invoke 调用仍会按需重试启动）。
+    private var prewarmStarted = false
 
     var statusText: String {
         if booted { return versionText }
         if bootError != nil { return "启动失败" }
         return "未启动（打开 py 站点时自动启动）"
+    }
+
+    /// Idle prewarm (v2.46): boot the interpreter on its own
+    /// serial queue, in the background, after the first frame —
+    /// so the first py site opens without the cold-boot wait.
+    /// Fire-and-forget: returns immediately, never blocks the
+    /// caller. A later invoke() just finds the runtime already
+    /// booted (queue.sync waits out an in-flight boot).
+    func prewarm() {
+        queue.async {
+            guard !self.booted, self.bootError == nil, !self.prewarmStarted else { return }
+            self.prewarmStarted = true
+            let start = CFAbsoluteTimeGetCurrent()
+            self.bootLocked()
+            if self.booted {
+                Diagnostics.log("启动", "Python 预热完成，用时 \(Int((CFAbsoluteTimeGetCurrent() - start) * 1000))ms（\(self.versionText)）")
+            } else {
+                Diagnostics.log("启动", "Python 预热失败：\(self.bootError ?? "未知原因")，首个 py 站打开时再试")
+            }
+        }
     }
 
     /// Call a spider_runner module function with string arguments; the

@@ -238,3 +238,34 @@ enum Diagnostics {
         return out
     }
 }
+
+/// 冷启动二段打点（v2.46）：进程启动时刻由 GuageTVApp.init 在
+/// 最早时机记下；首帧、线路解析、模块索引三处各记一条诊断
+/// 日志（分类「冷启动」），供设置 → 关于 → 诊断里核对二段
+/// 化前后耗时。start() 只在首次调用时记时刻，重复调用不
+/// 覆盖；首帧只记一次（ContentView.onAppear 在切 tab 时也
+/// 会触发，不应重复记）。
+enum StartupTiming {
+    private static var t0: CFAbsoluteTime?
+    private static var firstFrameMarked = false
+
+    static func start() {
+        if t0 == nil { t0 = CFAbsoluteTimeGetCurrent() }
+    }
+
+    /// 相对进程启动的毫秒数（start 未调过时返回 0，不崩）。
+    static func msSinceStart() -> Int {
+        guard let t0 else { return 0 }
+        return Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
+    }
+
+    static func mark(_ stage: String) {
+        Diagnostics.log("冷启动", "\(stage) · 启动后 \(msSinceStart())ms")
+    }
+
+    static func markFirstFrameOnce() {
+        guard !firstFrameMarked else { return }
+        firstFrameMarked = true
+        mark("首帧已出")
+    }
+}

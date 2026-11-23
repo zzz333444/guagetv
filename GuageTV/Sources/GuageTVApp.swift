@@ -5,6 +5,9 @@ struct GuageTVApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
+        // v2.46: 冷启动打点起点——最早时机记下进程启动时刻，
+        // 供首帧/线路解析/模块索引三处对照耗时。
+        StartupTiming.start()
         SelfHeal.checkPreviousRun()
     }
 

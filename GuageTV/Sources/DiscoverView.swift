@@ -143,7 +143,14 @@ struct DiscoverView: View {
     /// a cold disk read. It now runs detached; the paint still
     /// lands on the main actor.
     private func load() async {
-        recommendedModules = Self.recommendedEntries()
+        // v2.46: 模块索引（读 index.json + 解码）此前在主 actor
+        // 上同步跑——.task 是主线程隔离的，冷启动首帧前多一次
+        // 磁盘读。现改走 detached utility 任务，绘图仍回主线程。
+        let indexStart = Date()
+        recommendedModules = await Task.detached(priority: .utility) {
+            Self.recommendedEntries()
+        }.value
+        Diagnostics.log("冷启动", "模块索引完成 · \(recommendedModules.count) 个推荐栏目 · 用时 \(Int(Date().timeIntervalSince(indexStart) * 1000))ms · 启动后 \(StartupTiming.msSinceStart())ms")
         guard TMDBClient.isOn else { loading = false; return }
         let cache = await Task.detached(priority: .userInitiated) {
             TMDBClient.loadDiscoverCache()

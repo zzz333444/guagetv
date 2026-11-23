@@ -88,13 +88,27 @@ struct ContentView: View {
             // Runs after the first frame, so the shell is already
             // interactive while the 700-site config parses.
             if config == nil {
+                let parseStart = Date()
                 let cfg = await Task.detached(priority: .userInitiated) {
                     ConfigLibrary.loadActive()
                 }.value
                 config = cfg
+                if let cfg {
+                    // v2.46: 线路解析打点（冷启动二段对照用）。
+                    Diagnostics.log("冷启动", "线路解析完成 · \(cfg.sites.count) 站 · 用时 \(Int(Date().timeIntervalSince(parseStart) * 1000))ms · 启动后 \(StartupTiming.msSinceStart())ms")
+                    // v2.46: py 预热——配置里有 py 站才预热（无 py
+                    // 站的用户不花这份启动成本）；预热在运行时
+                    // 自己的串行队列上后台跑，不阻塞首屏，首个
+                    // py 站打开时不再等解释器冷启。
+                    if cfg.sites.contains(where: { $0.kind == .spiderPY }) {
+                        PythonRuntime.shared.prewarm()
+                    }
+                }
             }
         }
         .onAppear {
+            // v2.46: 首帧打点（只记一次）。
+            StartupTiming.markFirstFrameOnce()
             clampTab()
             if appLockEnabled { appLocked = true }
             guard !launchWorkDone else { return }
