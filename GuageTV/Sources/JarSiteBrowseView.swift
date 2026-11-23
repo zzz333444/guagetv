@@ -309,7 +309,7 @@ struct JarSiteBrowseView: View {
                         Button {
                             Task { await prepare() }
                         } label: {
-                            Label("重试", systemImage: "arrow.clockwise")
+                            Label("重新加载", systemImage: "arrow.clockwise")
                                 .font(.subheadline.weight(.semibold))
                                 .padding(.horizontal, 18).padding(.vertical, 9)
                                 .background(Theme.glass, in: Capsule())
@@ -483,7 +483,7 @@ struct JarDetailLoaderView: View {
                         Button {
                             Task { await loadDetail() }
                         } label: {
-                            Label("重试", systemImage: "arrow.clockwise")
+                            Label("重新加载", systemImage: "arrow.clockwise")
                                 .font(.subheadline.weight(.semibold))
                                 .padding(.horizontal, 18).padding(.vertical, 9)
                                 .background(Theme.glass, in: Capsule())
