@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.42 · 快进三改可调"
+    static let buildLabel = "v2.43 · 直播时移·频道级回看"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.43", title: "直播时移·频道级回看", lines: [
+            "M3U 频道级回看接线：解析 #EXTINF 行的 catchup / catchup-source / catchup-days 属性；频道自带回看模板时优先于线路级 catchup，没有时回落线路级；完整 URL 模板直接用，append 模板拼到频道地址后；${(b)/(e)} 与 {utc}/{lutc} 两种占位符都展开",
+            "频道行「可回看」角标按频道级或线路级任一有回看就显示；节目单里超出 catchup-days 回看期的节目不再给「回看」按钮，改显示「超出回看范围」；未声明天数的频道/线路不限期，沿用旧行为",
+            "直播时移：支持回看的直播频道在播放器底部加「-30 分钟」按钮，按当前时间前推 30 分钟拼回看地址播，模板拼不出来给中文原因；时移中出现「回直播」按钮，一键回实时流；切集/换线自动回实时流",
+            "回看模板展开逻辑抽成 CatchupTemplate 一处共用：线路级回看、频道级回看、播放器时移走同一份占位符规则，不再各写一份",
+        ]),
         Entry(version: "v2.42", title: "快进三改可调", lines: [
             "横滑快进范围可调：设置 → 播放 → 横滑快进（播放器内设置页也有同一区），一屏走全片 20% / 30% / 50% / 整片四档（默认 30%），封顶 300 / 600 / 900 秒（默认 600）；4 分钟内的短片一律整片映射，不受档位与封顶影响",
             "逐格反馈可调：格长倍率 细 / 标准 / 粗（格长按片长 2–10 秒再乘倍率），另有「拖动逐格震动」开关；关掉后拖动无震、松手确认震保留；底部进度条拖动同规格",

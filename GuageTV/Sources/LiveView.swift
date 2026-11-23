@@ -11,6 +11,11 @@ struct LiveView: View {
     @State private var loading = true
     @State private var errorText: String?
     @State private var playChannel: LiveListParser.Channel?
+    /// v2.43: 本次播放的回看上下文——生效的回看模板（频道级
+    /// 优先、线路级兜底）与拼模板用的原始频道地址（回看地址
+    /// 本身不能再当模板底）。随 playChannel 一起设置。
+    @State private var playCatchupTemplate: String?
+    @State private var playCatchupBaseURL: String?
     @State private var epgByKey: [String: [EPGProgramme]] = [:]
     @State private var templateCache: [String: [EPGProgramme]] = [:]
     @State private var sheetProgrammes: ProgrammeSheetItem?
@@ -114,6 +119,46 @@ struct LiveView: View {
         live.ua.map { ["User-Agent": $0] } ?? [:]
     }
 
+    /// v2.43: 频道生效的回看模板——频道级 catchup-source 优先，
+    /// 没有时回落到线路级 catchup。返回模板与频道声明的回看天数。
+    private func effectiveCatchup(for channel: LiveListParser.Channel) -> (template: String, days: Int?)? {
+        if !channel.catchupSource.isEmpty {
+            return (channel.catchupSource, channel.catchupDays)
+        }
+        if let source = live.catchup?.source, !source.isEmpty {
+            return (source, nil)
+        }
+        return nil
+    }
+
+    /// 按频道地址找生效模板（节目单行只有地址、没有 Channel 对象时用）。
+    private func effectiveCatchup(forChannelURL url: String) -> (template: String, days: Int?)? {
+        if let channel = allChannels.first(where: { $0.url == url }) {
+            return effectiveCatchup(for: channel)
+        }
+        if let source = live.catchup?.source, !source.isEmpty {
+            return (source, nil)
+        }
+        return nil
+    }
+
+    /// 用生效模板拼回看地址；拼不出来（模板无占位符）返回 nil。
+    private func replayURL(channelURL: String, start: Date, end: Date) -> String? {
+        guard let hit = effectiveCatchup(forChannelURL: channelURL) else { return nil }
+        return TVBoxConfig.CatchupTemplate.buildURL(template: hit.template, channelURL: channelURL,
+                                                    start: start, end: end)
+    }
+
+    /// v2.43 EPG 与回看范围对齐校验：节目开始时间早于
+    /// catchup-days 的起点时已出回看期，不给回看入口。
+    /// 未声明天数的频道/线路不限期（沿用旧行为）。
+    private func catchupExpired(_ programme: EPGProgramme, channelURL: String, now: Date = Date()) -> Bool {
+        guard let days = effectiveCatchup(forChannelURL: channelURL)?.days,
+              let earliest = TVBoxConfig.CatchupTemplate.earliestDate(days: days, now: now)
+        else { return false }
+        return programme.start < earliest
+    }
+
     var body: some View {
         Group {
             if loading {
@@ -154,7 +199,9 @@ struct LiveView: View {
         .task(id: selectedGroup) { await loadTemplateEPG() }
         .fullScreenCover(item: $playChannel) { channel in
             PlayerView(episodes: [PlayerView.EpisodeRef(name: channel.name, url: channel.url)],
-                       startIndex: 0, header: playHeader, title: channel.name, isLive: true)
+                       startIndex: 0, header: playHeader, title: channel.name, isLive: true,
+                       catchupTemplate: playCatchupTemplate,
+                       catchupBaseURL: playCatchupBaseURL ?? channel.url)
         }
         .sheet(item: $sheetProgrammes) { entry in
             programmeSheet(entry)
@@ -286,9 +333,9 @@ struct LiveView: View {
                     }
                 }
                 Spacer()
-                // v2.35 回看：该直播源在配置里带 catchup 字段时，
-                // 频道行挂「可回看」角标；不带的源维持原样。
-                if live.catchup?.source?.isEmpty == false {
+                // v2.43 回看：频道级 catchup-source 或线路级
+                // catchup 任一存在时，频道行挂「可回看」角标。
+                if effectiveCatchup(for: channel) != nil {
                     Text("可回看")
                         .font(.caption2.weight(.semibold)).foregroundStyle(Theme.ok)
                         .padding(.horizontal, 7).padding(.vertical, 3)
@@ -323,7 +370,12 @@ struct LiveView: View {
         // at Theme.innerCardRadius, like the detail line cards.
         .glassPanel(cornerRadius: Theme.innerCardRadius, shadow: false)
         .contentShape(Rectangle())
-        .onTapGesture { Haptics.medium(); playChannel = channel }
+        .onTapGesture {
+            Haptics.medium()
+            playCatchupTemplate = effectiveCatchup(for: channel)?.template
+            playCatchupBaseURL = channel.url
+            playChannel = channel
+        }
         .contextMenu {
             Button {
                 toggleFavourite(channel)
@@ -407,10 +459,11 @@ struct LiveView: View {
         .presentationDetents([.medium, .large])
     }
 
-    /// v2.35 回看：已播完的节目（end ≤ 现在）且该直播源带
-    /// catchup 时，给出「回看」按钮——按节目起止时刻展开
-    /// catchup 模板拼出回看地址，走同一播放器播。正在播 /
-    /// 未开播的节目没有回看；无 catchup 的源不显示入口。
+    /// v2.43 回看：已播完的节目（end ≤ 现在）且该频道有生效
+    /// 回看模板（频道级 catchup-source 优先、线路级兜底）时，
+    /// 给出「回看」按钮——按节目起止时刻展开模板拼出回看地址、
+    /// 走同一播放器播；超出 catchup-days 回看期的节目只显示
+    /// 「超出回看范围」。正在播 / 未开播的节目没有回看。
     /// 点按先关节目单 sheet，0.35 秒后再弹播放器全屏盖板
     /// （sheet 未收起时直接弹盖板会被系统吞掉）。
     private func programmeRow(_ programme: EPGProgramme,
@@ -423,13 +476,20 @@ struct LiveView: View {
             if programme.contains(Date()) {
                 Spacer()
                 Text("正在播").font(.caption2.weight(.bold)).foregroundStyle(Theme.accent)
+            } else if programme.end <= Date(), catchupExpired(programme, channelURL: channelURL) {
+                // v2.43: 节目开始时间已超出该频道声明的
+                // catchup-days 回看期，不给回看入口。
+                Spacer()
+                Text("超出回看范围").font(.caption2).foregroundStyle(Theme.textDim)
             } else if programme.end <= Date(),
-                      let url = live.catchupURL(channelURL: channelURL,
-                                                start: programme.start, end: programme.end) {
+                      let url = replayURL(channelURL: channelURL,
+                                          start: programme.start, end: programme.end) {
                 Spacer()
                 Button("回看") {
                     Haptics.medium()
                     sheetProgrammes = nil
+                    playCatchupTemplate = effectiveCatchup(forChannelURL: channelURL)?.template
+                    playCatchupBaseURL = channelURL
                     let replay = LiveListParser.Channel(
                         name: "\(channelName) · \(programme.title)", url: url, group: "")
                     Task {

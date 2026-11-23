@@ -103,36 +103,8 @@ struct TVBoxConfig: Decodable {
         /// 起止时间的回看地址拼出来也是错的，不如不显示入口。
         func catchupURL(channelURL: String, start: Date, end: Date) -> String? {
             guard let source = catchup?.source, !source.isEmpty else { return nil }
-            let expanded = Self.expandCatchupTemplate(source, start: start, end: end)
-            guard expanded != source else { return nil }
-            if channelURL.contains("?") && expanded.hasPrefix("?") {
-                return channelURL + "&" + expanded.dropFirst()
-            }
-            if !channelURL.contains("?") && expanded.hasPrefix("&") {
-                return channelURL + "?" + expanded.dropFirst()
-            }
-            return channelURL + expanded
-        }
-
-        private static func expandCatchupTemplate(_ template: String,
-                                                  start: Date, end: Date) -> String {
-            guard let re = try? NSRegularExpression(pattern: #"\$\{(b|e)([^}]*)\}"#) else {
-                return template
-            }
-            var out = template
-            let range = NSRange(template.startIndex..., in: template)
-            for m in re.matches(in: template, range: range).reversed() {
-                guard let whole = Range(m.range, in: template),
-                      let flag = Range(m.range(at: 1), in: template),
-                      let fmt = Range(m.range(at: 2), in: template) else { continue }
-                let date = template[flag] == "b" ? start : end
-                let formatter = DateFormatter()
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                formatter.timeZone = TimeZone(secondsFromGMT: 0)
-                formatter.dateFormat = String(template[fmt])
-                out.replaceSubrange(whole, with: formatter.string(from: date))
-            }
-            return out
+            return CatchupTemplate.buildURL(template: source, channelURL: channelURL,
+                                            start: start, end: end)
         }
 
         struct Catchup: Decodable {
@@ -156,6 +128,67 @@ struct TVBoxConfig: Decodable {
         struct Channel: Decodable {
             var name: String
             var urls: [String]
+        }
+    }
+
+    /// v2.43: 回看模板的唯一展开口——线路级 catchup（Live.catchupURL）
+    /// 与 M3U 频道级 catchup-source（LiveView）及播放器时移
+    /// （PlayerView）共用，同一份占位符规则，不再各写一份。
+    enum CatchupTemplate {
+        /// 展开模板并拼出回看地址。模板本身是完整 URL 时（以
+        /// http 开头）直接用展开后的模板；否则按 append 拼到
+        /// 频道地址后（? / & 接头按频道地址现状处理）。模板里
+        /// 没有任何占位符时返回 nil——没有起止时间的回看地址
+        /// 拼出来也是错的，不如不显示入口。
+        static func buildURL(template: String, channelURL: String,
+                             start: Date, end: Date) -> String? {
+            guard !template.isEmpty else { return nil }
+            let expanded = expand(template, start: start, end: end)
+            guard expanded != template else { return nil }
+            if expanded.hasPrefix("http://") || expanded.hasPrefix("https://") {
+                return expanded
+            }
+            if channelURL.contains("?") && expanded.hasPrefix("?") {
+                return channelURL + "&" + expanded.dropFirst()
+            }
+            if !channelURL.contains("?") && expanded.hasPrefix("&") {
+                return channelURL + "?" + expanded.dropFirst()
+            }
+            return channelURL + expanded
+        }
+
+        /// ${ (b)FORMAT } / ${ (e)FORMAT } 按起止时刻（UTC）
+        /// 格式化；{utc} / {lutc} 换成起止时刻的 Unix 秒数
+        /// （M3U catchup-source 的另一种常见写法）。
+        static func expand(_ template: String, start: Date, end: Date) -> String {
+            var out = template
+            out = out.replacingOccurrences(of: "{utc}",
+                                           with: String(Int(start.timeIntervalSince1970)))
+            out = out.replacingOccurrences(of: "{lutc}",
+                                           with: String(Int(end.timeIntervalSince1970)))
+            guard let re = try? NSRegularExpression(pattern: #"\$\{(b|e)([^}]*)\}"#) else {
+                return out
+            }
+            let range = NSRange(out.startIndex..., in: out)
+            for m in re.matches(in: out, range: range).reversed() {
+                guard let whole = Range(m.range, in: out),
+                      let flag = Range(m.range(at: 1), in: out),
+                      let fmt = Range(m.range(at: 2), in: out) else { continue }
+                let date = out[flag] == "b" ? start : end
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.dateFormat = String(out[fmt])
+                out.replaceSubrange(whole, with: formatter.string(from: date))
+            }
+            return out
+        }
+
+        /// catchup-days 对应的最早可回看起点；未声明天数时
+        /// 不限（返回 nil），沿用线路级 catchup 的旧行为。
+        static func earliestDate(days: Int?, now: Date) -> Date? {
+            guard let days, days >= 0 else { return nil }
+            return now.addingTimeInterval(-Double(days) * 86_400)
         }
     }
 

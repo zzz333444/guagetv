@@ -85,6 +85,15 @@ struct PlayerView: View {
     /// this session; nil leaves the user's global
     /// "自动播放下一集" switch in charge.
     let autoNextOverride: Bool?
+    /// v2.43: 直播时移——生效的回看模板与拼模板用的原始频道
+    /// 地址（回看地址本身不能再当模板底）。有模板时播放器
+    /// 底部出现「-30 分钟」回退钮；无模板时不显示。
+    let catchupTemplate: String?
+    let catchupBaseURL: String?
+    /// 时移中正在播的回看地址（nil = 实时直播流）；时移起点
+    /// 时刻只用于 toast 文案。
+    @State private var timeshiftURL: String?
+    @State private var timeshiftStart: Date?
     @State private var availableModuleSubtitles: [FWDSubtitle] = []
     @State private var moduleSubtitleLoadedFor: Int?
     /// Toggle binding for the in-player settings sheet: on =
@@ -180,11 +189,14 @@ struct PlayerView: View {
     private enum DragMode { case scrub, brightness, volume, episodeSwipe }
     @Environment(\.dismiss) private var dismiss
 
-    init(urlString: String, header: [String: String] = [:], title: String = "", isLive: Bool = false) {
+    init(urlString: String, header: [String: String] = [:], title: String = "", isLive: Bool = false,
+         catchupTemplate: String? = nil, catchupBaseURL: String? = nil) {
         _episodes = State(initialValue: [EpisodeRef(name: "", url: urlString)])
         self.baseHeader = header
         self.title = title
         self.isLive = isLive
+        self.catchupTemplate = catchupTemplate
+        self.catchupBaseURL = catchupBaseURL
         self.lineNames = []
         self.lineEpisodes = []
         self.episodeResolver = nil
@@ -214,7 +226,8 @@ struct PlayerView: View {
          modulePlayerType: String = "",
          initialSubtitles: [FWDSubtitle] = [],
          subtitleLoader: ((Int) async -> [FWDSubtitle])? = nil,
-         autoNextOverride: Bool? = nil) {
+         autoNextOverride: Bool? = nil,
+         catchupTemplate: String? = nil, catchupBaseURL: String? = nil) {
         let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
         _episodes = State(initialValue: episodes)
         self.baseHeader = header
@@ -233,6 +246,8 @@ struct PlayerView: View {
         self.initialSubtitles = initialSubtitles
         self.subtitleLoader = subtitleLoader
         self.autoNextOverride = autoNextOverride
+        self.catchupTemplate = catchupTemplate
+        self.catchupBaseURL = catchupBaseURL
         self.initialLine = lineIndex
         self.initialIndex = start
         _activeLine = State(initialValue: lineIndex)
@@ -254,6 +269,11 @@ struct PlayerView: View {
 
     private var current: EpisodeRef {
         let raw = episodes[min(index, episodes.count - 1)]
+        // v2.43 时移中播的是回看地址（两个引擎都监听 playURL
+        // 变化重载，见 engineLayer / MPVPlayerView.onChange）。
+        if let timeshiftURL {
+            return EpisodeRef(name: raw.name, url: timeshiftURL)
+        }
         if let hit = resolved[index] {
             return EpisodeRef(name: raw.name, url: hit.url)
         }
@@ -1065,6 +1085,14 @@ struct PlayerView: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
                 }
+                // v2.43: 时移中在标题下挂「回看中 · HH:mm」，
+                // 一眼知道现在看的不是实时流。
+                if let start = timeshiftStart, timeshiftURL != nil {
+                    Text("回看中 · \(Self.clockFormatter.string(from: start))")
+                        .font(.system(size: compact ? 11 : 12))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 2)
             HStack(spacing: compact ? 6 : 14) {
@@ -1195,6 +1223,31 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                 }
                 Spacer(minLength: 4)
+                // v2.43 直播时移：有回看模板的直播频道才出现。
+                // 时移中「回直播」与「-30 分钟」并列：前者回
+                // 实时流，后者按新的「现在」重算 30 分钟前。
+                if isLive, let catchupTemplate, !catchupTemplate.isEmpty {
+                    Button { Haptics.selection(); enterTimeshift(); pokeChrome() } label: {
+                        Text("-30 分钟")
+                            .font(.system(size: compact ? 14 : 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                    if timeshiftURL != nil {
+                        Button { Haptics.selection(); exitTimeshift(); pokeChrome() } label: {
+                            Text("回直播")
+                                .font(.system(size: compact ? 14 : 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                 Button { Haptics.selection(); switchEngine(manual: true); pokeChrome() } label: {
                     Text(isMPV ? "MPV" : "原生")
                         .font(.system(size: compact ? 14 : 15, weight: .semibold))
@@ -1899,6 +1952,39 @@ struct PlayerView: View {
         if index > 0 { goToEpisode(index - 1) } else { showToast("已经是第一集") }
     }
 
+    /// v2.43 直播时移：按「现在 − 30 分钟 → 现在」展开回看
+    /// 模板拼出回看地址，切过去播。模板拼不出来（无占位符）
+    /// 时给中文原因、不切台。重复点按按新的「现在」重算。
+    private func enterTimeshift() {
+        guard let template = catchupTemplate, !template.isEmpty else {
+            showToast("该频道不支持回看")
+            return
+        }
+        let end = Date()
+        let start = end.addingTimeInterval(-30 * 60)
+        guard let url = TVBoxConfig.CatchupTemplate.buildURL(
+            template: template, channelURL: catchupBaseURL ?? current.url,
+            start: start, end: end) else {
+            showToast("回看地址拼不出来：该频道回看模板缺少起止时间占位符")
+            return
+        }
+        Haptics.selection()
+        timeshiftURL = url
+        timeshiftStart = start
+        pendingStart = nil
+        recoveryStep = 0
+        showToast("正在回看 30 分钟前（\(Self.clockFormatter.string(from: start))）")
+    }
+
+    /// v2.43 回到实时直播流。
+    private func exitTimeshift() {
+        Haptics.selection()
+        timeshiftURL = nil
+        timeshiftStart = nil
+        pendingStart = nil
+        showToast("已回到直播")
+    }
+
     private func nextEpisode() {
         if index < episodes.count - 1 { goToEpisode(index + 1) } else { showToast("已经是最后一集") }
     }
@@ -1909,6 +1995,9 @@ struct PlayerView: View {
     /// unchanged). A failed resolve keeps the current episode.
     private func goToEpisode(_ target: Int) {
         Haptics.selection()
+        // v2.43: 切集回到实时流（时移只属于当前这一集）。
+        timeshiftURL = nil
+        timeshiftStart = nil
         guard episodes.indices.contains(target), target != index else { return }
         guard episodeResolver != nil, resolved[target] == nil else {
             index = target
@@ -1939,6 +2028,9 @@ struct PlayerView: View {
     /// playback continues at the current position.
     private func switchLine(_ target: Int) {
         Haptics.selection()
+        // v2.43: 换线回到实时流（时移只属于当前这条线）。
+        timeshiftURL = nil
+        timeshiftStart = nil
         guard lineEpisodes.indices.contains(target), target != activeLine else { return }
         let targetEpisodes = lineEpisodes[target]
         guard !targetEpisodes.isEmpty else { showToast("这条线路没有集数"); return }

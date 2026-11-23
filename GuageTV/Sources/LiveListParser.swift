@@ -13,6 +13,12 @@ enum LiveListParser {
         var group: String
         var logo: String = ""
         var tvgId: String = ""
+        /// v2.43: M3U 频道级回看属性（#EXTINF 行的 catchup /
+        /// catchup-source / catchup-days）。有值时优先于线路级
+        /// catchup；全空时回落到线路级。
+        var catchupSource: String = ""
+        var catchupType: String = ""
+        var catchupDays: Int? = nil
         var id: String { name + "|" + url }
     }
 
@@ -30,7 +36,8 @@ enum LiveListParser {
     private static func parseM3U(_ text: String) -> [(name: String, channels: [Channel])] {
         var groups: [String: [Channel]] = [:]
         var order: [String] = []
-        var pending: (name: String, group: String, logo: String, tvgId: String)?
+        var pending: (name: String, group: String, logo: String, tvgId: String,
+                      catchupSource: String, catchupType: String, catchupDays: Int?)?
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#EXTINF") {
@@ -39,11 +46,23 @@ enum LiveListParser {
                 let group = capture("group-title=\"([^\"]+)\"", in: line) ?? "未分组"
                 let logo = capture("tvg-logo=\"([^\"]+)\"", in: line) ?? ""
                 let tvgId = capture("tvg-id=\"([^\"]+)\"", in: line) ?? ""
-                pending = (name, group, logo, tvgId)
+                // v2.43: 频道级回看属性。catchup-source 模板里
+                // 常带 ${...} 占位符、引号内外都可能出现，带引
+                // 号的先取双引号再取单引号，最后兜底无引号形态。
+                let catchupSource = capture("catchup-source=\"([^\"]+)\"", in: line)
+                    ?? capture("catchup-source='([^']+)'", in: line)
+                    ?? capture("catchup-source=([^\\s,]+)", in: line) ?? ""
+                let catchupType = capture("catchup=\"([^\"]+)\"", in: line)
+                    ?? capture("catchup='([^']+)'", in: line) ?? ""
+                let catchupDays = capture("catchup-days=\"?(\\d+)\"?", in: line)
+                    .flatMap(Int.init)
+                pending = (name, group, logo, tvgId, catchupSource, catchupType, catchupDays)
             } else if line.hasPrefix("http"), let p = pending {
                 if groups[p.group] == nil { order.append(p.group) }
                 groups[p.group, default: []].append(
-                    Channel(name: p.name, url: line, group: p.group, logo: p.logo, tvgId: p.tvgId))
+                    Channel(name: p.name, url: line, group: p.group, logo: p.logo, tvgId: p.tvgId,
+                            catchupSource: p.catchupSource, catchupType: p.catchupType,
+                            catchupDays: p.catchupDays))
                 pending = nil
             }
         }
