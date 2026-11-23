@@ -3907,8 +3907,22 @@ struct FWDDetailView: View {
                     .padding(10)
                     .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
                 }
+                // v2.47: a failed play used to end at the orange
+                // note with no way forward — a TMDB search hit
+                // whose module has no playable address lands here.
+                // Offer the same cross-line search v2.35 added for
+                // a failed detail load, right next to the note.
                 if let resolvingNote {
-                    Text(resolvingNote).font(.footnote).foregroundStyle(.orange)
+                    HStack(spacing: 10) {
+                        Text(resolvingNote).font(.footnote).foregroundStyle(.orange)
+                        Spacer()
+                        Button("跨线搜索") {
+                            Haptics.tap()
+                            showCrossSearch = true
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
                 }
                 // v2.39 (R1): trailer entry — the detail's
                 // previewUrl / trailers fields (guide 播放章,
@@ -3948,6 +3962,25 @@ struct FWDDetailView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 13)
                                 .background(.white, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        // v2.47: a thin item with no playable entry
+                        // at all (no videoUrl, no loadResource, no
+                        // link for loadDetail) used to show a bare
+                        // page with no way forward — a TMDB search
+                        // hit with no link lands here. Same
+                        // cross-line search v2.35 added for a failed
+                        // detail load, as a glass capsule.
+                        Button {
+                            Haptics.tap()
+                            showCrossSearch = true
+                        } label: {
+                            Label("跨线搜索找片源", systemImage: "magnifyingglass")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .background(Theme.glass, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }

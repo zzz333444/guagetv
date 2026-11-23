@@ -110,6 +110,30 @@ struct SearchView: View {
     private var hasSites: Bool {
         !cmsSites.isEmpty || !pySites.isEmpty || !jsSites.isEmpty || !probeableSites.isEmpty
     }
+    /// Module "type" for the poster subline (v2.47): genre wins
+    /// (modules send genreTitle localised), then mediaType
+    /// (movie/tv/album… mapped to Chinese); the raw `type` is a
+    /// source marker ("tmdb"/"url"/"person"), never a content
+    /// type, so it is only used when it is none of those.
+    private static func moduleTypeName(for item: FWDItem) -> String {
+        if !item.genreTitle.isEmpty { return item.genreTitle }
+        switch item.mediaType {
+        case "movie": return "电影"
+        case "tv": return "电视剧"
+        case "music": return "音乐"
+        case "album": return "专辑"
+        case "albumList": return "专辑列表"
+        case "playlist": return "歌单"
+        case "song": return "歌曲"
+        case "person": return "人物"
+        case "live": return "直播"
+        case "": break
+        default: return item.mediaType
+        }
+        if item.type.isEmpty || item.type == "tmdb" || item.type == "url" { return "" }
+        return item.type
+    }
+
     /// Module hits for the poster cell: the shared cell only
     /// knows VodItem, so a module item maps onto it (id falls
     /// back to the title when the module sends no id; pic is
@@ -119,7 +143,8 @@ struct SearchView: View {
                 name: item.title, pic: item.posterURL,
                 remarks: item.subtitle,
                 year: String(item.releaseDate.prefix(4)),
-                score: item.rating)
+                score: item.rating,
+                typeName: Self.moduleTypeName(for: item))
     }
     /// Two poster columns beside the site rail (the rail takes the
     /// rest of the width budget, like the reference layout).
@@ -417,6 +442,7 @@ struct SearchView: View {
     struct TitleGroup: Identifiable {
         var key: String
         var title: String
+        var year: String
         var entries: [(site: TVBoxConfig.Site, item: VodItem)]
         var id: String { key }
         var representative: VodItem { entries[0].item }
@@ -499,14 +525,20 @@ struct SearchView: View {
         .buttonStyle(.plain)
     }
 
+    /// v2.47: the merge key is title + year, not title alone —
+    /// v1.42 merged on the bare title, so two different films
+    /// sharing a name (remake, same-name series) folded into
+    /// one card. Same name + same year merges; a different year
+    /// stays its own card; year-less hits group together under
+    /// the bare title (their year is unknown, not a mismatch).
     private var titleGroups: [TitleGroup] {
         var order: [String] = []
         var map: [String: TitleGroup] = [:]
         for group in filteredResults {
             for item in group.items {
-                let key = Self.normalizedTitle(item.name)
+                let key = Self.normalizedTitle(item.name) + "|" + item.year
                 if map[key] == nil {
-                    map[key] = TitleGroup(key: key, title: item.name, entries: [])
+                    map[key] = TitleGroup(key: key, title: item.name, year: item.year, entries: [])
                     order.append(key)
                 }
                 map[key]?.entries.append((group.site, item))
@@ -546,7 +578,11 @@ struct SearchView: View {
         }
         .sheet(item: $selectedTitleGroup) { group in
             NavigationStack {
-                List(group.entries, id: \.site.key) { entry in
+                // Entries are keyed by list position, not site key:
+                // one site can return the same title twice, and two
+                // rows sharing an id break the List (v2.47).
+                List(Array(group.entries.enumerated()), id: \.offset) { pair in
+                    let entry = pair.element
                     NavigationLink {
                         destination(for: entry.site, item: entry.item)
                     } label: {
@@ -572,7 +608,7 @@ struct SearchView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Theme.bg)
-                .navigationTitle(group.title)
+                .navigationTitle(group.year.isEmpty ? group.title : "\(group.title)（\(group.year)）")
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
@@ -1494,8 +1530,12 @@ private struct SearchPosterCell: View {
             Text(item.name)
                 .font(.footnote).foregroundStyle(Theme.text.opacity(0.92))
                 .lineLimit(1)
-            if !item.year.isEmpty {
-                Text(item.year).font(.caption).foregroundStyle(Theme.textDim)
+            // v2.47: the subline is "year · type" (each only when
+            // the source sent it — the same typeName the v2.09
+            // filter chips read, so the card and the chips agree).
+            let subline = [item.year, item.typeName].filter { !$0.isEmpty }.joined(separator: " · ")
+            if !subline.isEmpty {
+                Text(subline).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
             }
         }
     }

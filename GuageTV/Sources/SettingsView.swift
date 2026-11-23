@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.46 · 性能深挖·冷启动二段"
+    static let buildLabel = "v2.47 · 搜索深挖·同名合并"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.47", title: "搜索深挖·同名合并", lines: [
+            "同名合并按片名＋年份：同名同年份的多站结果折叠成一张卡（角标仍是「N 条线」，点开看各站线路），不同年份的同名片不再错并成一张；没有年份的结果按片名合在一起；「同名聚合」开关保留，关掉即展开看全部",
+            "结果卡补年份·类型副行：海报下的第二行现在是「年份 · 类型」（有才显示，类型口径与搜索筛选 chips 一致——站点结果取 type_name/vod_class；模块结果取分类名，没有分类时取 movie/tv 这类媒体类型并转中文）",
+            "模块搜索最后一跳：点模块卡片进模块详情页本来就通，但纯 TMDB 类命中常是只有海报简介、没有可播地址的薄条目，详情页会走到死胡同；现在无可播内容时给「跨线搜索找片源」入口，点播放失败时「没有可播放地址」提示旁也有跨线搜索按钮，一步去别的线路找同名片源",
+        ]),
         Entry(version: "v2.46", title: "性能深挖·冷启动二段", lines: [
             "冷启动二段：模块索引（读模块 index.json＋解码）此前在主线程同步跑，现改走后台任务，首帧不再等它；线路解析、模块索引、首帧三处耗时记进诊断日志（设置 → 关于 → 诊断里看「冷启动」分类），配置解析本身 v2.03 已在后台",
             "py 首次加载预热：启动后配置落定、有 py 站时在后台悄悄启动 Python 解释器（只触发一次、不阻塞首屏），首个 py 站打开不再等解释器冷启；无 py 站的用户不花这份成本，预热失败不影响、打开 py 站时照常再试",
