@@ -16,6 +16,10 @@ enum EmbyClient {
         var userID: String
         var token: String
         var userName: String
+        /// v2.44: last time this server answered a browse call
+        /// (home load or a fresh login). Nil = never synced yet;
+        /// old installs decode without the key and get nil.
+        var lastSyncAt: Date? = nil
     }
 
     private static let serversKey = "emby.servers.v1"
@@ -75,6 +79,28 @@ enum EmbyClient {
     static func setActiveServer(_ id: String) {
         UserDefaults.standard.set(id, forKey: activeKey)
         syncLegacy()
+    }
+
+    /// v2.44: stamp a successful browse as this server's last
+    /// sync. Called from EmbyHomeView after libraryViews lands;
+    /// a login counts too (see authenticate).
+    static func noteSync(serverID: String? = nil) {
+        let id = serverID ?? activeServerID
+        guard !id.isEmpty else { return }
+        var list = servers
+        guard let idx = list.firstIndex(where: { $0.id == id }) else { return }
+        list[idx].lastSyncAt = Date()
+        saveServers(list)
+    }
+
+    /// v2.44: short "MM-dd HH:mm" for the server card, or nil
+    /// when this server has never synced.
+    static func lastSyncText(serverID: String) -> String? {
+        guard let at = servers.first(where: { $0.id == serverID })?.lastSyncAt else { return nil }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "zh_CN")
+        fmt.dateFormat = "MM-dd HH:mm"
+        return fmt.string(from: at)
     }
 
     static func removeServer(_ id: String) {
@@ -137,7 +163,8 @@ enum EmbyClient {
         let server = Server(id: root + "|" + uid,
                             name: (userObj["Name"] as? String) ?? user,
                             url: root, userID: uid,
-                            token: accessToken, userName: user)
+                            token: accessToken, userName: user,
+                            lastSyncAt: Date())
         var list = servers
         if let idx = list.firstIndex(where: { $0.id == server.id }) {
             list[idx] = server
@@ -216,6 +243,16 @@ enum EmbyClient {
 
     static func imageURL(itemID: String) -> String {
         "\(base)/Items/\(itemID)/Images/Primary?api_key=\(token)&maxHeight=480"
+    }
+
+    /// v2.44: stable poster-cache key for one item on one server.
+    /// The fetch URL carries api_key, and the token rotates on
+    /// re-login — keying the disk cache on the URL orphaned every
+    /// cached poster. The key here is server id (url + userID) +
+    /// item id, so posters survive token rotation and two servers
+    /// never share one item's cached art.
+    static func imageCacheKey(itemID: String) -> String {
+        "emby|\(activeServerID)|\(itemID)"
     }
 
     static func libraryViews() async throws -> [Item] {
@@ -594,7 +631,7 @@ struct EmbyHomeView: View {
                     EmbyItemDestination(item: item)
                 } label: {
                     VStack(alignment: .leading, spacing: 5) {
-                        PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                        PosterImage(urlString: EmbyClient.imageURL(itemID: item.id), cacheKey: EmbyClient.imageCacheKey(itemID: item.id))
                             .aspectRatio(2/3, contentMode: .fill)
                             .frame(maxWidth: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
@@ -624,7 +661,7 @@ struct EmbyHomeView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
                             ZStack(alignment: .bottom) {
-                                PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                                PosterImage(urlString: EmbyClient.imageURL(itemID: item.id), cacheKey: EmbyClient.imageCacheKey(itemID: item.id))
                                     .aspectRatio(16/9, contentMode: .fill)
                                     .frame(width: 232, height: 130)
                                     .clipped()
@@ -676,7 +713,7 @@ struct EmbyHomeView: View {
     /// wide 16:9 cards, posterGrid its own 3-column cards).
     private func posterCard(_ item: EmbyClient.Item) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id), cacheKey: EmbyClient.imageCacheKey(itemID: item.id))
                 .aspectRatio(2/3, contentMode: .fill)
                 .frame(width: 104, height: 156)
                 .clipped()
@@ -745,6 +782,9 @@ struct EmbyHomeView: View {
         errorText = nil
         do {
             views = try await EmbyClient.libraryViews()
+            // v2.44: a successful browse is this server's sync
+            // stamp — the server card shows "上次同步" from it.
+            EmbyClient.noteSync()
             latestItems = (try? await EmbyClient.latest()) ?? []
             resumeItems = (try? await EmbyClient.resume()) ?? []
             favoriteItems = (try? await EmbyClient.favorites()) ?? []
@@ -872,7 +912,7 @@ struct EmbyLibraryView: View {
                                         EmbyItemDestination(item: item)
                                     } label: {
                                         VStack(alignment: .leading, spacing: 5) {
-                                            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id))
+                                            PosterImage(urlString: EmbyClient.imageURL(itemID: item.id), cacheKey: EmbyClient.imageCacheKey(itemID: item.id))
                                                 .aspectRatio(2/3, contentMode: .fill)
                                                 .frame(maxWidth: .infinity)
                                                 .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
@@ -958,6 +998,9 @@ struct EmbySeriesView: View {
     @State private var loading = true
     @State private var errorText: String?
     @State private var playSelection: EmbyPlaySelection?
+    /// v2.44: one-line download feedback under the season chips
+    /// ("已加入下载：第 3 集" / "这一集取不到地址，下载不了").
+    @State private var downloadNote: String?
     /// v2.12: full item (People/Genres/OfficialRating) for the
     /// media-info card + cast row; nil until the fetch lands or
     /// when it fails — the page works off `series` either way.
@@ -1064,6 +1107,12 @@ struct EmbySeriesView: View {
                                 }
                             }
                         }
+                        if let note = downloadNote {
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(Theme.textDim)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         ForEach(episodes) { ep in
                             Button {
                                 Haptics.medium()
@@ -1099,6 +1148,16 @@ struct EmbySeriesView: View {
                                 .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("下载这一集") {
+                                    Haptics.medium()
+                                    Task { await downloadEpisode(ep) }
+                                }
+                                Button("下载整季（\(episodes.count) 集）") {
+                                    Haptics.medium()
+                                    Task { await downloadSeason() }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 18)
@@ -1182,6 +1241,70 @@ struct EmbySeriesView: View {
                     return .failed(error.localizedDescription)
                 }
             })
+    }
+
+    /// v2.44: Emby downloads ride the existing DownloadManager
+    /// engine — same manifest, same HLS/file split, same
+    /// vodName grouping on the downloads page as spider lines.
+    /// The stream URL comes from PlaybackInfo (direct stream or
+    /// static /Videos/.../stream), exactly like playback.
+    private func episodeDisplayName(_ ep: EmbyClient.Item) -> String {
+        ep.indexNumber.map { "第\($0)集" } ?? ep.name
+    }
+
+    private func downloadEpisode(_ ep: EmbyClient.Item) async {
+        let name = episodeDisplayName(ep)
+        downloadNote = "正在取 \(name) 的下载地址…"
+        guard let url = try? await EmbyClient.streamURL(itemID: ep.id) else {
+            downloadNote = "\(name) 取不到播放地址，下载不了"
+            return
+        }
+        guard await DownloadManager.probeDownloadable(url: url, header: [:]) else {
+            downloadNote = "\(name) 的地址下载不了"
+            return
+        }
+        DownloadManager.shared.enqueue(
+            vodName: series.name, episodeName: name,
+            pic: EmbyClient.imageURL(itemID: series.id),
+            url: url, header: [:])
+        downloadNote = "已加入下载：\(name)"
+    }
+
+    /// Whole current season: resolve up to 3 episodes at a time
+    /// (same chunking as DetailView's whole-line download), skip
+    /// the ones that won't resolve or probe, report the count.
+    private func downloadSeason() async {
+        guard !episodes.isEmpty else { return }
+        downloadNote = "正在取整季下载地址…"
+        var added = 0
+        var skipped = 0
+        for chunkStart in stride(from: 0, to: episodes.count, by: 3) {
+            let chunkEnd = min(chunkStart + 3, episodes.count)
+            let outcomes = await withTaskGroup(of: (String, String?).self) { group in
+                for ep in episodes[chunkStart..<chunkEnd] {
+                    group.addTask {
+                        guard let url = try? await EmbyClient.streamURL(itemID: ep.id),
+                              await DownloadManager.probeDownloadable(url: url, header: [:])
+                        else { return (ep.id, nil) }
+                        return (ep.id, url)
+                    }
+                }
+                var results: [(String, String?)] = []
+                for await result in group { results.append(result) }
+                return results
+            }
+            for (id, url) in outcomes {
+                guard let ep = episodes.first(where: { $0.id == id }),
+                      let url else { skipped += 1; continue }
+                DownloadManager.shared.enqueue(
+                    vodName: series.name, episodeName: episodeDisplayName(ep),
+                    pic: EmbyClient.imageURL(itemID: series.id),
+                    url: url, header: [:])
+                added += 1
+            }
+        }
+        downloadNote = "整季下载已加入 \(added) 集"
+            + (skipped > 0 ? "，\(skipped) 集下不了跳过" : "")
     }
 }
 

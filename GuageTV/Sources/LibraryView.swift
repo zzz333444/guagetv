@@ -521,12 +521,17 @@ struct LibraryView: View {
             let resume = (try? await EmbyClient.resume()) ?? []
             let favorites = (try? await EmbyClient.favorites()) ?? []
             let latest = (try? await EmbyClient.latest()) ?? []
-            let urls = Array(Set(
-                (Array(resume.prefix(5)) + Array(favorites.prefix(5)) + Array(latest.prefix(5)))
-                    .map { EmbyClient.imageURL(itemID: $0.id) }
-            )).prefix(14)
+            // prefetch() itself dedups by URL, so no Set here
+            // (tuples aren't Hashable).
+            let pairs = (Array(resume.prefix(5)) + Array(favorites.prefix(5)) + Array(latest.prefix(5)))
+                .map { (url: EmbyClient.imageURL(itemID: $0.id),
+                        cacheKey: EmbyClient.imageCacheKey(itemID: $0.id) as String?) }
+                .prefix(14)
             guard !Task.isCancelled else { return }
-            embyPrefetchTask = PosterCache.shared.prefetch(Array(urls))
+            // v2.44: prefetch with the same stable server-scoped
+            // cache key the Emby grids read by, or the warmed
+            // bytes land under a different key and never hit.
+            embyPrefetchTask = PosterCache.shared.prefetch(Array(pairs))
         }
     }
 

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.43 · 直播时移·频道级回看"
+    static let buildLabel = "v2.44 · Emby 离线海报·下载·同步时间"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.44", title: "Emby 离线海报·下载·同步时间", lines: [
+            "Emby 海报离线缓存：此前海报已走 PosterCache 磁盘层，但磁盘 key 就是带 api_key 的完整图片地址，重新登录换 token 后全部缓存失效；现改走稳定的服务器隔离 key（服务器 id＋条目 id），换 token 不失效、多服务器不串图；资源库的 Emby 海报预取走同一 key，断网时库页仍有图",
+            "Emby 内容接入下载页：剧集详情页集数行新增长按菜单「下载这一集」「下载整季（当前季全部）」，走现有下载引擎（PlaybackInfo 取直链，m3u8 走 HLS 下载、文件走普通下载），按剧名分组显示、已下完角标与普通下载一致；取不到地址或探到不可下载时给中文原因",
+            "服务器卡加「上次同步」：设置 → 媒体服务器里每台 Emby 服务器卡下显示上次同步时间（MM-dd HH:mm，未同步过显示「尚未同步」）；首页成功拉到媒体库即记一次同步，登录新服务器也记一次",
+        ]),
         Entry(version: "v2.43", title: "直播时移·频道级回看", lines: [
             "M3U 频道级回看接线：解析 #EXTINF 行的 catchup / catchup-source / catchup-days 属性；频道自带回看模板时优先于线路级 catchup，没有时回落线路级；完整 URL 模板直接用，append 模板拼到频道地址后；${(b)/(e)} 与 {utc}/{lutc} 两种占位符都展开",
             "频道行「可回看」角标按频道级或线路级任一有回看就显示；节目单里超出 catchup-days 回看期的节目不再给「回看」按钮，改显示「超出回看范围」；未声明天数的频道/线路不限期，沿用旧行为",

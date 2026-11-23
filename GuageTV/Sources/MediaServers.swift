@@ -64,6 +64,11 @@ struct MediaServerSettingsView: View {
                                     }
                                     Text(server.url)
                                         .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
+                                    // v2.44: last successful browse
+                                    // for this server; nil = never
+                                    // synced since the field landed.
+                                    Text("上次同步：\(EmbyClient.lastSyncText(serverID: server.id) ?? "尚未同步")")
+                                        .font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
                                 }
                                 Spacer()
                                 if server.id != EmbyClient.activeServerID {

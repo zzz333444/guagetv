@@ -10,6 +10,12 @@ import UIKit
 /// (Caches/posters) so grids survive relaunches.
 struct PosterImage: View {
     let urlString: String
+    /// Stable cache key override: when set, the disk/memory key is
+    /// this value instead of the URL — used by Emby, whose image
+    /// URLs carry a rotating api_key token (a token change used to
+    /// orphan every cached poster) and whose item ids collide
+    /// across servers. The fetch itself still uses urlString.
+    var cacheKey: String? = nil
     /// Fit instead of fill: for transparent title artwork (logos),
     /// where cropping would cut the lettering.
     var fit: Bool = false
@@ -41,7 +47,7 @@ struct PosterImage: View {
         .clipped()
         .onChange(of: urlString) { _ in appeared = false }
         .task(id: urlString) {
-            image = await PosterCache.shared.load(urlString, maxPixelSize: pixelSize)
+            image = await PosterCache.shared.load(urlString, maxPixelSize: pixelSize, cacheKey: cacheKey)
         }
     }
 }
@@ -82,14 +88,19 @@ final class PosterCache {
 
     deinit { if let warningObserver { NotificationCenter.default.removeObserver(warningObserver) } }
 
-    func load(_ urlString: String, maxPixelSize: Int = 480) async -> UIImage? {
-        let key = "\(urlString)|\(maxPixelSize)" as NSString
+    func load(_ urlString: String, maxPixelSize: Int = 480,
+              cacheKey: String? = nil) async -> UIImage? {
+        // cacheKey (when given) replaces the URL in both cache
+        // levels: the URL itself may carry a rotating credential
+        // (Emby api_key) that must not be part of the identity.
+        let identity = cacheKey ?? urlString
+        let key = "\(identity)|\(maxPixelSize)" as NSString
         if let hit = memory.object(forKey: key) { return hit }
         var text = urlString.trimmingCharacters(in: .whitespaces)
         if text.hasPrefix("//") { text = "https:" + text }
         else if !text.contains("://") { text = "https://" + text }
         guard let url = URL(string: text) else { return nil }
-        guard let img = await store.image(for: text, url: url, maxPixelSize: maxPixelSize) else { return nil }
+        guard let img = await store.image(for: identity, url: url, maxPixelSize: maxPixelSize) else { return nil }
         memory.setObject(img, forKey: key, cost: Self.cost(of: img))
         return img
     }
@@ -133,11 +144,20 @@ final class PosterCache {
     /// with on-screen cells through PosterStore); only the pending
     /// queue is dropped.
     func prefetch(_ urls: [String], maxPixelSize: Int = 480) -> Task<Void, Never> {
-        let targets = Array(Set(urls.filter { !$0.isEmpty }))
+        prefetch(urls.map { (url: $0, cacheKey: nil as String?) }, maxPixelSize: maxPixelSize)
+    }
+
+    /// Paired prefetch: same batch semantics, but each URL may
+    /// carry its own stable cache key (Emby posters).
+    func prefetch(_ pairs: [(url: String, cacheKey: String?)],
+                  maxPixelSize: Int = 480) -> Task<Void, Never> {
+        var seen = Set<String>()
+        let targets = pairs.filter { !$0.url.isEmpty }
+            .filter { seen.insert($0.url).inserted }
         return Task.detached(priority: .utility) {
-            for url in targets {
+            for target in targets {
                 guard !Task.isCancelled else { return }
-                _ = await self.load(url, maxPixelSize: maxPixelSize)
+                _ = await self.load(target.url, maxPixelSize: maxPixelSize, cacheKey: target.cacheKey)
             }
         }
     }
