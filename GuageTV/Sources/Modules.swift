@@ -544,6 +544,10 @@ struct FWDItem: Identifiable {
         fill(\.poster, with: d.poster)
         fill(\.backdrop, with: d.backdrop)
         fill(\.detailPoster, with: d.detailPoster)
+        // v2.39 (R1 子项核查): guide 返回数据表的 4 类字段
+        // 逐项对过后，只剩 cover（coverUrl）没进合并——详情
+        // 返回的 cover 会静默丢掉，列表的旧 cover 留下来。
+        fill(\.cover, with: d.cover)
         fill(\.releaseDate, with: d.releaseDate)
         fill(\.rating, with: d.rating)
         fill(\.overview, with: d.overview)
@@ -1315,25 +1319,41 @@ final class FWDRuntime {
         return ""
     }
 
-    func call(function: String, params: [String: Any], source: String) async throws -> Any? {
+    /// v2.39: `context` is a human-readable call label
+    /// ("模块「X」· 栏目「Y」") carried into timeout errors,
+    /// which previously named only the function — useless when
+    /// several columns share one function name. Callers that
+    /// swallow errors (danmu / resource / subtitle resolution)
+    /// leave it empty; the visible paths (column, search,
+    /// detail, self-check) always pass one.
+    static func callContext(moduleTitle: String, action: String) -> String {
+        "模块「\(moduleTitle)」· \(action)"
+    }
+
+    func call(function: String, params: [String: Any], source: String,
+             context: String = "") async throws -> Any? {
         let paramsJSON = (try? JSONSerialization.data(withJSONObject: params))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        return try await callRaw(function: function, argumentJSON: paramsJSON, source: source)
+        return try await callRaw(function: function, argumentJSON: paramsJSON, source: source,
+                                 context: context)
     }
 
     /// loadDetail is the one handler that takes a bare string
     /// (the item's link), not a params object.
-    func callString(function: String, argument: String, source: String) async throws -> Any? {
+    func callString(function: String, argument: String, source: String,
+                    context: String = "") async throws -> Any? {
         let argumentJSON = (try? JSONSerialization.data(withJSONObject: [argument]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
         let inner = String(argumentJSON.dropFirst().dropLast())
-        return try await callRaw(function: function, argumentJSON: inner, source: source)
+        return try await callRaw(function: function, argumentJSON: inner, source: source,
+                                 context: context)
     }
 
-    private func callRaw(function: String, argumentJSON: String, source: String) async throws -> Any? {
+    private func callRaw(function: String, argumentJSON: String, source: String,
+                         context: String = "") async throws -> Any? {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                do { continuation.resume(returning: try self.callLocked(function: function, argumentJSON: argumentJSON, source: source)) }
+                do { continuation.resume(returning: try self.callLocked(function: function, argumentJSON: argumentJSON, source: source, context: context)) }
                 catch { continuation.resume(throwing: error) }
             }
         }
@@ -1502,7 +1522,8 @@ final class FWDRuntime {
         return meta
     }
 
-    private func callLocked(function: String, argumentJSON: String, source: String) throws -> Any? {
+    private func callLocked(function: String, argumentJSON: String, source: String,
+                            context: String = "") throws -> Any? {
         let ctx = try makeContext(source: source)
         var settled = false
         var errorText: String?
@@ -1594,7 +1615,15 @@ final class FWDRuntime {
             let extra = lastException.map { "；最近异常：\($0)" } ?? ""
             let timerExtra = FWDRuntime.timerErrorText(ctx)
                 .map { "；定时器异常：\($0)" } ?? ""
-            throw FWDfailure(message: "模块调用超时（60 秒）[\(probe)]\(extra)\(timerExtra)",
+            // v2.39: the timeout names the module + column/entry
+            // when the caller supplied one ("模块「X」· 栏目「Y」
+            // 调用超时（60 秒）…"); without context the old bare
+            // wording stays so callers that swallow the error
+            // (danmu / resource) keep their old behaviour.
+            let timeoutHead = context.isEmpty
+                ? "模块调用超时（60 秒）"
+                : "\(context)调用超时（60 秒）"
+            throw FWDfailure(message: "\(timeoutHead)[\(probe)]\(extra)\(timerExtra)",
                              kind: .timeout)
         }
         if jsonText == "null" { return nil }
@@ -2642,7 +2671,10 @@ struct ModulesView: View {
                     let result = try await FWDRuntime(widgetID: record.id)
                         .call(function: module.functionName,
                               params: fwdDefaultParams(meta: record.meta, module: module),
-                              source: source)
+                              source: source,
+                              context: FWDRuntime.callContext(
+                                moduleTitle: title,
+                                action: "自检·栏目「\(module.title.isEmpty ? module.functionName : module.title)」"))
                     let n = Self.fwdResultCount(result)
                     let ms = Int(Date().timeIntervalSince(start) * 1000)
                     totalItems += n
@@ -2970,6 +3002,11 @@ struct FWDWidgetView: View {
     @State private var detailItem: FWDItem?
     @State private var showSearch = false
     @State private var searchSeed = ""
+    /// v2.39: per-module global-params editor (guide rule 1 —
+    /// saved globals override caller values). FWDStore already
+    /// persisted them since v2.26; this is the first UI that
+    /// writes them. Shown only when the module declares any.
+    @State private var showGlobalParams = false
     /// v2.19: the keyword of the last search, so the error
     /// banner's retry re-runs the SEARCH instead of reloading
     /// the column (the old retry called load(reset:) and the
@@ -3025,6 +3062,25 @@ struct FWDWidgetView: View {
         .background(AmbientBackground(imageURL: nil))
         .navigationTitle(meta.localized(meta.title.isEmpty ? record.id : meta.title))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // v2.39: global-params editor — only when the module
+            // declares globalParams (e.g. danmu.js's `server`).
+            if !meta.globalParams.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        Haptics.tap()
+                        showGlobalParams = true
+                    } label: {
+                        Label("全局参数", systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showGlobalParams) {
+            FWDGlobalParamsView(record: record) {
+                Task { await load(reset: true, bypassCache: true) }
+            }
+        }
         .navigationDestination(item: $detailItem) { item in
             FWDDetailView(record: record, item: item)
         }
@@ -3332,7 +3388,10 @@ struct FWDWidgetView: View {
             let result = try await FWDRuntime(widgetID: record.id)
                 .call(function: module.functionName,
                       params: params,
-                      source: source)
+                      source: source,
+                      context: FWDRuntime.callContext(
+                        moduleTitle: meta.localized(meta.title.isEmpty ? record.id : meta.title),
+                        action: "栏目「\(meta.localized(module.title.isEmpty ? module.functionName : module.title))」"))
             let rows = (result as? [[String: Any]] ?? [])
             items = reset ? rows.map(FWDItem.init) : items + rows.map(FWDItem.init)
             if reset, page == 1, !rows.isEmpty {
@@ -3415,7 +3474,10 @@ struct FWDWidgetView: View {
             page: searchPage, savedGlobals: FWDStore.savedGlobalParams(for: record.id))
         do {
             let result = try await FWDRuntime(widgetID: record.id)
-                .call(function: fn, params: params, source: source)
+                .call(function: fn, params: params, source: source,
+                      context: FWDRuntime.callContext(
+                        moduleTitle: meta.localized(meta.title.isEmpty ? record.id : meta.title),
+                        action: "搜索「\(keyword)」"))
             let rows = (result as? [[String: Any]] ?? []).map(FWDItem.init)
             items = append ? items + rows : rows
             errorText = nil
@@ -3426,6 +3488,91 @@ struct FWDWidgetView: View {
                 : "搜索失败：\(error.localizedDescription)"
             return false
         }
+    }
+}
+
+/// v2.39 (R1): per-module global-params editor. Reads the
+/// module's declared globalParams, pre-fills each row with the
+/// saved value (or the module default), and writes back through
+/// FWDStore.saveGlobalParams — the combine layer
+/// (fwdCombineParams) then feeds them into every column /
+/// search / playback call. Saving reloads the column via
+/// onSaved. An emptied field stores nothing, so the module
+/// default applies again (the editor's "clear" — distinct
+/// from the guide's stored-empty-string override, which no
+/// UI here produces).
+struct FWDGlobalParamsView: View {
+    let record: FWDRecord
+    var onSaved: () -> Void = {}
+    @Environment(\.dismiss) private var dismiss
+    @State private var values: [String: String] = [:]
+
+    private var meta: FWDMeta { record.meta }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(meta.globalParams, id: \.name) { param in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(meta.localized(param.title.isEmpty ? param.name : param.title))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                            if !param.desc.isEmpty {
+                                Text(meta.localized(param.desc))
+                                    .font(.caption).foregroundStyle(Theme.textDim)
+                            }
+                            if !param.enumOptions.isEmpty {
+                                Picker("取值", selection: binding(for: param)) {
+                                    ForEach(param.enumOptions, id: \.value) { opt in
+                                        Text(meta.localized(opt.title)).tag(opt.value)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .labelsHidden()
+                            } else {
+                                TextField(param.value.isEmpty ? "留空用模块默认值" : "默认：\(param.value)",
+                                          text: binding(for: param))
+                                    .font(.subheadline)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } footer: {
+                    Text("保存后下次调用生效；留空用模块默认值。")
+                }
+            }
+            .navigationTitle("全局参数")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        // Empty fields store nothing (module
+                        // default applies); non-empty values
+                        // override defaults on the next call.
+                        FWDStore.saveGlobalParams(
+                            values.filter { !$0.value.isEmpty },
+                            for: record.id)
+                        Haptics.success()
+                        dismiss()
+                        onSaved()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
+        }
+        .onAppear { values = FWDStore.savedGlobalParams(for: record.id) }
+    }
+
+    private func binding(for param: FWDParam) -> Binding<String> {
+        Binding(
+            get: { values[param.name] ?? param.value },
+            set: { values[param.name] = $0 })
     }
 }
 
@@ -3442,6 +3589,9 @@ struct FWDDetailView: View {
     @State private var detailError: String?
     @State private var playSelection: FWDPlaySelection?
     @State private var resolvingNote: String?
+    /// v2.39 (R1): trailer picker — shown when the detail
+    /// carries more than one preview/trailer URL.
+    @State private var showTrailerPicker = false
     /// v2.35：详情加载失败时的跨线搜索兜底（播出日历点按
     /// 进详情是同一条链路：模块详情拉不到时不只剩重试，
     /// 还能拿片名直接去全局搜索找其他线路的同名资源）。
@@ -3498,6 +3648,19 @@ struct FWDDetailView: View {
         if !full.episodeItems.isEmpty { return full.episodeItems }
         if !full.childItems.isEmpty { return full.childItems }
         return []
+    }
+
+    /// v2.39 (R1): playable preview/trailer URLs from the
+    /// detail — previewUrl first, then each trailers entry.
+    /// A lone URL is just "预告"; several get numbered.
+    private var trailerOptions: [(name: String, url: String)] {
+        var out: [(name: String, url: String)] = []
+        if !full.previewUrl.isEmpty { out.append((name: "预告", url: full.previewUrl)) }
+        for (i, t) in full.trailers.enumerated() {
+            out.append((name: "预告 \(i + 1)", url: t.videoUrl))
+        }
+        if out.count == 1 { out[0].name = "预告" }
+        return out
     }
 
     /// Media-info rows (v2.12): same spec as DetailView's card —
@@ -3624,6 +3787,33 @@ struct FWDDetailView: View {
                 }
                 if let resolvingNote {
                     Text(resolvingNote).font(.footnote).foregroundStyle(.orange)
+                }
+                // v2.39 (R1): trailer entry — the detail's
+                // previewUrl / trailers fields (guide 播放章,
+                // decoded since v2.27 but never playable).
+                // One URL plays at once; several offer a pick.
+                if !trailerOptions.isEmpty {
+                    Button {
+                        Haptics.tap()
+                        if trailerOptions.count == 1 {
+                            playTrailer(url: trailerOptions[0].url)
+                        } else {
+                            showTrailerPicker = true
+                        }
+                    } label: {
+                        Label("预告", systemImage: "play.rectangle.on.rectangle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Theme.glass, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .confirmationDialog("选择预告", isPresented: $showTrailerPicker) {
+                        ForEach(trailerOptions, id: \.url) { opt in
+                            Button(opt.name) { playTrailer(url: opt.url) }
+                        }
+                        Button("取消", role: .cancel) {}
+                    }
                 }
                 if episodes.isEmpty {
                     if !full.videoUrl.isEmpty || meta.resourceFunction != nil || !full.link.isEmpty {
@@ -3802,7 +3992,10 @@ struct FWDDetailView: View {
         defer { loadingDetail = false }
         do {
             let result = try await FWDRuntime(widgetID: record.id)
-                .callString(function: "loadDetail", argument: item.link, source: source)
+                .callString(function: "loadDetail", argument: item.link, source: source,
+                            context: FWDRuntime.callContext(
+                                moduleTitle: meta.localized(meta.title.isEmpty ? record.id : meta.title),
+                                action: "详情「\(full.title)」"))
             if let dict = result as? [String: Any] {
                 full = full.mergedDetail(FWDItem(dict))
                 detailError = nil
@@ -3911,6 +4104,18 @@ struct FWDDetailView: View {
             out.append(track)
         }
         return out
+    }
+
+    /// v2.39 (R1): play a trailer URL straight through the
+    /// player — no module resolution, no danmu, no subtitles.
+    /// The item's own customHeaders ride along (guide: headers
+    /// are carried when playing), same as a direct videoUrl.
+    private func playTrailer(url: String) {
+        playSelection = FWDPlaySelection(
+            episodes: [PlayerView.EpisodeRef(name: "预告", url: url)],
+            index: 0, initial: (url, full.customHeaders),
+            resolver: nil, danmakuLoader: nil,
+            playerType: full.playerType)
     }
 
     private func playSingle() async {

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.38 · 快进减速·逐格反馈·预览图"
+    static let buildLabel = "v2.39 · 预告片·全局参数·超时点名"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.39", title: "预告片·全局参数·超时点名", lines: [
+            "预告片播放入口（Rex 官方规范差距清单点名未做项）：详情数据带 previewUrl / trailers 时，详情页出现「预告」按钮，点按直接走播放器播预告（多个预告先选一个）；不走模块解析，不带弹幕与字幕，条目自带的播放请求头会随预告一起发",
+            "模块全局参数设置入口：模块页右上角新增「全局参数」（仅模块声明了 globalParams 时出现，如弹幕模块的 server），逐项改已保存值、枚举型给下拉选，保存后下次调用生效并重载当前栏目；留空恢复模块默认值",
+            "模块调用超时提示细化：栏目、搜索、详情、自检四条可见链路的超时错误现带模块名与栏目名（「模块『X』· 栏目『Y』调用超时（60 秒）…」），此前只写函数名；弹幕/资源/字幕三条吞错误链路无可见报错，不改",
+            "loadDetail 返回字段核查：按 guide 返回数据表逐项对过，FWDItem 已解码全部 4 类字段，唯一缺口是详情合并时漏了 cover（coverUrl），现已补上；其余字段（图片/信息/播放/剧集与关联/音乐）均已实现，无改动",
+        ]),
         Entry(version: "v2.38", title: "快进减速·逐格反馈·预览图", lines: [
             "横滑快进减速（用户反馈）：全屏横滑此前滑满一屏就跨完整片长，一部剧一滑到底；现一屏最多走全片 30%、且封顶 10 分钟，4 分钟内的短视频保持整片映射不变",
             "逐格触感反馈（用户反馈）：拖动快进时目标时间每跨一格就轻震一下（格长按片长自动取 2–10 秒，长片不连震），松手落点再补一下确认震动；底部进度条拖动同规格，同样逐格震",
