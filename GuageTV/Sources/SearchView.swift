@@ -379,7 +379,7 @@ struct SearchView: View {
             }
             if !results.isEmpty && filteredResults.isEmpty {
                 EmptyStateView(icon: "line.3.horizontal.decrease.circle",
-                               title: "筛选后没有结果",
+                               title: "没有搜到结果",
                                message: "换个年份或类型试试",
                                actionTitle: "清除筛选",
                                action: { selectedYear = nil; selectedType = nil },

@@ -93,12 +93,9 @@ struct DiscoverView: View {
                         SkeletonHero().transition(.opacity)
                         SkeletonPosterGrid().padding(.horizontal, 18).transition(.opacity)
                     } else if allListsEmpty {
-                        EmptyStateView(
-                            icon: "wifi.exclamationmark",
-                            title: "TMDB 没拉到数据",
+                        EmptyStateCopy.loadFailed(
                             message: "检查密钥与网络后重试",
-                            actionTitle: "重新加载",
-                            action: { Task { await load() } })
+                            retry: { Task { await load() } })
                             .padding(.horizontal, 18)
                             .padding(.top, 90)
                     } else {
@@ -489,6 +486,7 @@ struct DiscoverView: View {
                             .glassCircle()
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                 }
                 .padding(.horizontal, 18)
 
@@ -519,7 +517,7 @@ struct DiscoverView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
                         Text("这一行没拉到数据")
-                        Text("重试").font(.subheadline.weight(.semibold))
+                        Text("重新加载").font(.subheadline.weight(.semibold))
                     }
                     .font(.subheadline)
                     .foregroundStyle(Theme.text)
@@ -573,6 +571,7 @@ struct DiscoverView: View {
                             .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                     }
                 }
                 .padding(.horizontal, 18)

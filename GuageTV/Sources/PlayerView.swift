@@ -1012,6 +1012,9 @@ struct PlayerView: View {
                     Text("点播与直播共用同一入口，点按即切换。")
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(AmbientBackground(imageURL: nil))
             .navigationTitle("画质")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1835,6 +1838,9 @@ struct PlayerView: View {
                     Toggle("切集按钮", isOn: $showEpisodeSwitch)
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(AmbientBackground(imageURL: nil))
             .navigationTitle("播放设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

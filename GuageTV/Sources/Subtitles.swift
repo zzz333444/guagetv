@@ -205,6 +205,9 @@ struct SubSearchView: View {
                     }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(AmbientBackground(imageURL: nil))
             .navigationTitle("在线字幕")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

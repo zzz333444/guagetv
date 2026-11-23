@@ -319,9 +319,11 @@ struct SMBSharesView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         .animation(Theme.animStandard, value: loading)
+        .background(AmbientBackground(imageURL: nil))
         .navigationTitle(server.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -394,6 +396,7 @@ struct SMBBrowserView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .overlay {
                     if preparing {
                         Text("连接 SMB 准备播放…")
@@ -405,6 +408,7 @@ struct SMBBrowserView: View {
             }
         }
         .animation(Theme.animStandard, value: loading)
+        .background(AmbientBackground(imageURL: nil))
         .navigationTitle(path.isEmpty ? share : (path.split(separator: "/").last.map(String.init) ?? share))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in

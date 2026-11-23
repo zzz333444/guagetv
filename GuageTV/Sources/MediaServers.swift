@@ -489,9 +489,11 @@ struct WebDAVBrowserView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         .animation(Theme.animStandard, value: loading)
+        .background(AmbientBackground(imageURL: nil))
         .navigationTitle(path.isEmpty ? server.name : (path.split(separator: "/").last.map(String.init) ?? server.name))
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in
@@ -563,6 +565,8 @@ struct LocalFilesView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(AmbientBackground(imageURL: nil))
         .navigationTitle("本地视频")
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $playSelection) { sel in

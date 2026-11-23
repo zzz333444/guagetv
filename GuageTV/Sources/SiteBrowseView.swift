@@ -303,7 +303,7 @@ struct SiteBrowseView: View {
             VStack(spacing: 12) {
                 Text(errorText).font(.subheadline).foregroundStyle(Theme.textDim)
                     .multilineTextAlignment(.center).padding(.horizontal, 32)
-                Button("重试") { Task { await loadHome() } }
+                Button("重新加载") { Task { await loadHome() } }
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 18).padding(.vertical, 8)
                     .background(.white, in: Capsule()).foregroundStyle(.black)

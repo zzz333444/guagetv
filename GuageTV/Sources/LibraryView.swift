@@ -790,7 +790,7 @@ struct PyGroupView: View {
                 }
                 if entries.isEmpty {
                     EmptyStateView(icon: "folder",
-                                   title: "这个分组是空的",
+                                   title: "这个分组还没有线路",
                                    message: "长按资源库的线路卡片可以把它移进来",
                                    compact: true)
                 }

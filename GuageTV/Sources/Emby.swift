@@ -447,11 +447,8 @@ struct EmbyHomeView: View {
                 }
                 .transition(.opacity)
             } else if let errorText {
-                EmptyStateView(icon: "wifi.exclamationmark",
-                               title: "Emby 没连上",
-                               message: errorText,
-                               actionTitle: "重新加载",
-                               action: { Task { await load() } })
+                EmptyStateCopy.loadFailed(message: errorText,
+                                          retry: { Task { await load() } })
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -901,7 +898,7 @@ struct EmbyLibraryView: View {
                         }
                         if items.isEmpty {
                             EmptyStateView(icon: "folder",
-                                           title: "这个媒体库是空的",
+                                           title: "这个媒体库还没有内容",
                                            message: "服务器上这个库里还没有内容",
                                            compact: true)
                         } else {

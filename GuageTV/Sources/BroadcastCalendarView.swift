@@ -139,7 +139,7 @@ struct BroadcastCalendarView: View {
                             .font(.caption).foregroundStyle(Theme.textDim)
                             .lineLimit(2)
                         Spacer()
-                        Button("重试") {
+                        Button("重新加载") {
                             Haptics.tap()
                             Task { await load(bypassCache: true) }
                         }

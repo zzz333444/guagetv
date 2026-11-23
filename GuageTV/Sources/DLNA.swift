@@ -225,6 +225,7 @@ struct DLNACastView: View {
                         }
                     }
                     .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
             .animation(Theme.animStandard, value: searching)

@@ -2468,6 +2468,9 @@ struct ModulesView: View {
                         .background(Theme.glass, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                // v2.48: NavigationLink itself fires no haptic —
+                // tap the card, feel the tap (v2.21 Library rule).
+                .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                 // v2.02: official-module directory. Entries not
                 // yet imported show as cards with metadata first
                 // and a one-tap download; imported ones disappear
@@ -2573,6 +2576,7 @@ struct ModulesView: View {
                         .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                     .contextMenu {
                         // v2.29 (guide 内容类型章): a module that
                         // declares no valid contentType leaves the
@@ -3652,6 +3656,9 @@ struct FWDGlobalParamsView: View {
                     Text("保存后下次调用生效；留空用模块默认值。")
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(AmbientBackground(imageURL: nil))
             .navigationTitle("全局参数")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -3897,7 +3904,7 @@ struct FWDDetailView: View {
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.accent)
-                        Button("重试") {
+                        Button("重新加载") {
                             Haptics.tap()
                             Task { await enrich() }
                         }
@@ -4070,6 +4077,7 @@ struct FWDDetailView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
                             }
                         }
                     }
@@ -4122,6 +4130,9 @@ struct FWDDetailView: View {
                             }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(AmbientBackground(imageURL: nil))
                     .navigationTitle("播放线路")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {

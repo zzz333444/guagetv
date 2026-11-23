@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.47 · 搜索深挖·同名合并"
+    static let buildLabel = "v2.48 · 玻璃规格复查·动效与空状态统一"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.48", title: "玻璃规格复查·动效与空状态统一", lines: [
+            "玻璃规格复查二轮：全仓 List 逐个核对——全局参数、播放线路、在线字幕、画质、播放设置五个 sheet 的 List 原先是系统灰底，现统一走环境光背景＋玻璃；WebDAV 浏览、本地视频、SMB 共享与目录、DLNA 四处列表补内容背景隐藏；备份页、模块设置区、自动备份区复查无实色块（白底胶囊主按钮与选中白底是既定的主操作语言，保留）",
+            "动效一致性复核：全仓无裸动画字面量（发现页 hero 自动轮播 0.45 秒慢切是既定例外）；展开切换与加载交叉淡入全部走 Theme 四个动画常量，手感与此前一致",
+            "按压反馈统一：NavigationLink 卡片本身不震——模块推荐行、播出日历、模块卡、相关推荐卡、发现页「全部」箭头补上与资源库卡片相同的点按震动",
+            "空状态文案统一：加载失败统一叫「没拉到数据」、重试统一叫「重新加载」（发现页、Emby、详情报错横条、日历、CMS/Jar 浏览页共 8 处）；空分组改叫「这个分组还没有线路」，媒体库空态改叫「这个媒体库还没有内容」",
+        ]),
         Entry(version: "v2.47", title: "搜索深挖·同名合并", lines: [
             "同名合并按片名＋年份：同名同年份的多站结果折叠成一张卡（角标仍是「N 条线」，点开看各站线路），不同年份的同名片不再错并成一张；没有年份的结果按片名合在一起；「同名聚合」开关保留，关掉即展开看全部",
             "结果卡补年份·类型副行：海报下的第二行现在是「年份 · 类型」（有才显示，类型口径与搜索筛选 chips 一致——站点结果取 type_name/vod_class；模块结果取分类名，没有分类时取 movie/tv 这类媒体类型并转中文）",
