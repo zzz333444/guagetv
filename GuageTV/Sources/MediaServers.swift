@@ -317,6 +317,60 @@ enum WebDAVClient {
         return ["Authorization": "Basic \(Data(raw.utf8).base64EncodedString())"]
     }
 
+    /// PUT a file. Throws an NSError whose code is the HTTP
+    /// status on a non-2xx response, so callers can retry a 409
+    /// (missing parent collection) after MKCOL.
+    static func upload(server: MediaServerSettingsView.DAVServer,
+                       url: URL, data: Data) async throws {
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.httpBody = data
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        for (key, value) in authHeader(server: server) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw messageError("WebDAV 无响应")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw NSError(domain: "WebDAV", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "WebDAV 返回 HTTP \(http.statusCode)"])
+        }
+    }
+
+    /// MKCOL a folder. 201 (created) and 405 (already exists)
+    /// both count as success.
+    static func makeCollection(server: MediaServerSettingsView.DAVServer,
+                               url: URL) async throws {
+        var request = URLRequest(url: url)
+        request.httpMethod = "MKCOL"
+        for (key, value) in authHeader(server: server) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse,
+           !(200...299).contains(http.statusCode) && http.statusCode != 405 {
+            throw NSError(domain: "WebDAV", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "WebDAV 返回 HTTP \(http.statusCode)"])
+        }
+    }
+
+    /// DELETE a file. Throws on a non-2xx response.
+    static func delete(server: MediaServerSettingsView.DAVServer,
+                       url: URL) async throws {
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        for (key, value) in authHeader(server: server) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw NSError(domain: "WebDAV", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "WebDAV 返回 HTTP \(http.statusCode)"])
+        }
+    }
+
     private static func messageError(_ text: String) -> NSError {
         NSError(domain: "WebDAV", code: 1, userInfo: [NSLocalizedDescriptionKey: text])
     }

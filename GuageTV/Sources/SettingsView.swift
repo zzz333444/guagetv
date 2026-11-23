@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.40 · 动态封面·缓存时长·自检排序"
+    static let buildLabel = "v2.41 · WebDAV 自动备份·加密"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.41", title: "WebDAV 自动备份·加密", lines: [
+            "自动备份到 WebDAV：备份页新增「自动备份到 WebDAV」开关＋频率（每天/每周）＋保留份数（默认 3 份，超量删最旧），目标用 App 内已配好的 WebDAV 服务器（多台时可挑一台）；未配服务器或未设口令时开关置灰并说明原因",
+            "加密红线：自动备份先经 CryptoKit AES-GCM 加密再上传（口令派生密钥＋随机盐，盐随文件走、口令本身不进文件），口令只存本机钥匙串；没设口令自动备份打不开，绝不悄悄传明文备份",
+            "手动备份同样可选加密：导出页新增「加密导出」开关（默认开，需先设备份口令），加密文件与明文文件同为 .json 信封；恢复加密备份时先弹口令页，口令不对直接报错、不覆盖本机数据；备份口令可更换、可清除（清除即关自动备份）",
+            "上次自动备份可见：备份页显示上次自动备份时间与结果（成功文件名／失败中文原因），诊断日志同步记一条；App 在后台会被系统挂起，到时检查在打开备份页时做、另有「立即备份一次」按钮；自动备份的开关／频率／保留份数随备份的设置快照一起走，换机恢复后仍在",
+        ]),
         Entry(version: "v2.40", title: "动态封面·缓存时长·自检排序", lines: [
             "动态封面只标注不播：带 albumMotionArtwork 的条目，栏目网格卡与相关推荐卡右上角挂「动态」角标，详情页 hero 右上角挂「动态封面」角标（媒体信息行仍注「动态封面：视频」）；视频封面本身不内联播放",
             "栏目缓存时长做成设置：模块页新增「栏目缓存」选项（10 分钟 / 30 分钟 / 2 小时 / 24 小时，默认 30 分钟）；模块声明了 cacheDuration 时仍以模块为准，否则按这里的时长缓存栏目第 1 页",
