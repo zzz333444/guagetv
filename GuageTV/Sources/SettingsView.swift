@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.39 · 预告片·全局参数·超时点名"
+    static let buildLabel = "v2.40 · 动态封面·缓存时长·自检排序"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.40", title: "动态封面·缓存时长·自检排序", lines: [
+            "动态封面只标注不播：带 albumMotionArtwork 的条目，栏目网格卡与相关推荐卡右上角挂「动态」角标，详情页 hero 右上角挂「动态封面」角标（媒体信息行仍注「动态封面：视频」）；视频封面本身不内联播放",
+            "栏目缓存时长做成设置：模块页新增「栏目缓存」选项（10 分钟 / 30 分钟 / 2 小时 / 24 小时，默认 30 分钟）；模块声明了 cacheDuration 时仍以模块为准，否则按这里的时长缓存栏目第 1 页",
+            "模块图标与封面走 PosterImage 统一 240px 档：栏目网格与相关推荐卡此前用默认 480px 解码，现与模块图标一致改 240px；详情 hero 仍走 900px",
+            "自检结果页加「上次自检时间」：自检跑完面板首行现写「上次自检：MM-dd HH:mm · N 个模块」；每模块的逐栏结果按耗时从慢到快排，最慢的栏目排在最上面，存下来的逐栏明细同顺序",
+        ]),
         Entry(version: "v2.39", title: "预告片·全局参数·超时点名", lines: [
             "预告片播放入口（Rex 官方规范差距清单点名未做项）：详情数据带 previewUrl / trailers 时，详情页出现「预告」按钮，点按直接走播放器播预告（多个预告先选一个）；不走模块解析，不带弹幕与字幕，条目自带的播放请求头会随预告一起发",
             "模块全局参数设置入口：模块页右上角新增「全局参数」（仅模块声明了 globalParams 时出现，如弹幕模块的 server），逐项改已保存值、枚举型给下拉选，保存后下次调用生效并重载当前栏目；留空恢复模块默认值",

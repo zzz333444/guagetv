@@ -440,6 +440,11 @@ struct FWDItem: Identifiable {
     var posterURL: String {
         [poster, detailPoster, backdrop, cover].first { !$0.isEmpty } ?? ""
     }
+
+    /// Dynamic / video cover (guide 音乐章 `albumMotionArtwork`):
+    /// the App never plays it inline — list cards and the detail
+    /// hero only badge it (v2.40), the media-info row notes it.
+    var hasDynamicCover: Bool { !albumMotionArtwork.isEmpty }
     var backdropURL: String {
         [backdropPaths.first ?? "", backdrop, cover, poster].first { !$0.isEmpty } ?? ""
     }
@@ -949,6 +954,29 @@ enum FWDColumnCache {
     private static let maxBytes: Int64 = 5 * 1024 * 1024
     private static let maxAge: TimeInterval = 86400
     static let defaultTTL: TimeInterval = 1800
+
+    /// v2.40: user-chosen column-cache TTL (module settings
+    /// area, ModulesView). Options 10 min / 30 min / 2 h / 24 h;
+    /// unset (or 0) means the 30-minute default. A module's own
+    /// declared cacheDuration still wins over this setting
+    /// (guide compliance); the setting replaces only the
+    /// hard-coded 30-minute fallback.
+    static let userTTLKey = "fwd.columnCacheTTL.v1"
+    static let cacheTTLOptions: [(seconds: Int, label: String)] = [
+        (600, "10 分钟"), (1800, "30 分钟"), (7200, "2 小时"), (86400, "24 小时"),
+    ]
+    static var userTTL: TimeInterval {
+        let v = UserDefaults.standard.integer(forKey: userTTLKey)
+        return TimeInterval(v > 0 ? v : Int(defaultTTL))
+    }
+    static func cacheTTLLabel(_ seconds: Int) -> String {
+        cacheTTLOptions.first { $0.seconds == seconds }?.label ?? "30 分钟"
+    }
+    static func effectiveTTL(moduleDeclared: Int, metaDeclared: Int) -> TimeInterval {
+        if moduleDeclared > 0 { return TimeInterval(moduleDeclared) }
+        if metaDeclared > 0 { return TimeInterval(metaDeclared) }
+        return userTTL
+    }
 
     /// Entries touched this session (key → savedAt + rows), so
     /// a re-entered column never touches disk at all. All
@@ -2316,6 +2344,11 @@ struct ModulesView: View {
     @State private var checking = false
     @State private var checkLines: [String] = []
     @State private var checkVersion = 0
+    /// v2.40: user-chosen column-cache TTL (10 min / 30 min /
+    /// 2 h / 24 h), persisted; default 30 min. Read by
+    /// FWDColumnCache.userTTL; a module's own declared
+    /// cacheDuration still wins over this setting.
+    @AppStorage("fwd.columnCacheTTL.v1") private var cacheTTLSeconds: Int = 1800
     @State private var downloadingCatalogID: String?
 
     /// Catalog entries not yet imported (matched by module id).
@@ -2388,6 +2421,40 @@ struct ModulesView: View {
                     .buttonStyle(.plain)
                     .disabled(checking)
                 }
+                // v2.40: column-cache TTL setting — the 30-minute
+                // default is now user-chosen (10 min / 30 min /
+                // 2 h / 24 h). A module that declares its own
+                // cacheDuration still uses its own value.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 10) {
+                        Label("栏目缓存", systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Spacer()
+                        Menu {
+                            ForEach(FWDColumnCache.cacheTTLOptions, id: \.seconds) { opt in
+                                Button(opt.label) {
+                                    Haptics.selection()
+                                    cacheTTLSeconds = opt.seconds
+                                }
+                            }
+                        } label: {
+                            Text(FWDColumnCache.cacheTTLLabel(cacheTTLSeconds))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Theme.glass, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text("模块声明了缓存时长时以模块为准；否则按这里的时长缓存栏目第 1 页。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textDim)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                 // v2.09: 播出日历入口 —— bangumi 每日放送的周视图
                 // （今天 + 周一…周日）；模块没导入时日历页只给
                 // 导入指引，不编造数据。
@@ -2665,6 +2732,10 @@ struct ModulesView: View {
             var cols: [FWDStore.ColumnCheck] = []
             var totalItems = 0
             var totalMs = 0
+            // v2.40: per-column lines are collected first, then
+            // appended slowest-first — the slowest column is the
+            // one worth seeing at the top.
+            var colLines: [(ms: Int, line: String)] = []
             for module in record.meta.listModules {
                 let start = Date()
                 do {
@@ -2681,18 +2752,23 @@ struct ModulesView: View {
                     totalMs += ms
                     cols.append(FWDStore.ColumnCheck(title: module.title, ok: n > 0,
                                                      count: n, error: "", ms: ms))
-                    checkLines.append(n > 0
+                    colLines.append((ms: ms, line: n > 0
                         ? "✓ \(title)「\(module.title)」：\(n) 条 · \(Self.checkDurationText(ms))"
-                        : "△ \(title)「\(module.title)」：返回 0 条 · \(Self.checkDurationText(ms))")
+                        : "△ \(title)「\(module.title)」：返回 0 条 · \(Self.checkDurationText(ms))"))
                 } catch {
                     let ms = Int(Date().timeIntervalSince(start) * 1000)
                     totalMs += ms
                     cols.append(FWDStore.ColumnCheck(title: module.title, ok: false,
                                                      count: 0,
                                                      error: error.localizedDescription, ms: ms))
-                    checkLines.append("✗ \(title)「\(module.title)」：\(error.localizedDescription) · \(Self.checkDurationText(ms))")
+                    colLines.append((ms: ms, line: "✗ \(title)「\(module.title)」：\(error.localizedDescription) · \(Self.checkDurationText(ms))"))
                 }
             }
+            for (_, line) in colLines.sorted(by: { $0.ms > $1.ms }) {
+                checkLines.append(line)
+            }
+            // Stored per-column detail follows the same order.
+            cols.sort { $0.ms > $1.ms }
             if cols.isEmpty {
                 checkLines.append("△ \(title)：没有可自检的栏目")
                 continue
@@ -2720,6 +2796,12 @@ struct ModulesView: View {
             FWDStore.saveCheckResult(
                 FWDStore.CheckResult(time: Date(), ok: ok, summary: summary, columns: cols),
                 for: record.id)
+        }
+        // v2.40: the results panel leads with when this run
+        // happened (per-module card lines already carried their
+        // own stamp; the panel itself never did).
+        if !records.isEmpty {
+            checkLines.insert("上次自检：\(Self.checkDateFormatter.string(from: Date())) · \(records.count) 个模块", at: 0)
         }
         checkVersion += 1
     }
@@ -3256,11 +3338,24 @@ struct FWDWidgetView: View {
                     open(item)
                 } label: {
                     VStack(alignment: .leading, spacing: 5) {
-                        PosterImage(urlString: item.posterURL)
-                            .aspectRatio(2/3, contentMode: .fill)
-                            .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
-                            .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
+                        ZStack(alignment: .topTrailing) {
+                            PosterImage(urlString: item.posterURL, pixelSize: 240)
+                                .aspectRatio(2/3, contentMode: .fill)
+                                .frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                                .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
+                            // v2.40: dynamic-cover badge — the guide's
+                            // video cover is labelled, never played.
+                            if item.hasDynamicCover {
+                                Text("动态")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Theme.accent)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Theme.glass, in: Capsule())
+                                    .padding(6)
+                            }
+                        }
                         Text(item.title)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(Theme.text)
@@ -3372,10 +3467,10 @@ struct FWDWidgetView: View {
         // v2.26: TTL honours the ENTRY's declared cacheDuration
         // (Rex guide); the legacy top-level value is only a
         // fallback for index files written before v2.26.
-        let ttl = module.cacheDuration > 0
-            ? TimeInterval(module.cacheDuration)
-            : (meta.cacheDuration > 0
-               ? TimeInterval(meta.cacheDuration) : FWDColumnCache.defaultTTL)
+        // v2.40: otherwise the user-chosen TTL from the module
+        // settings area (default 30 min), not a hard-coded value.
+        let ttl = FWDColumnCache.effectiveTTL(moduleDeclared: module.cacheDuration,
+                                              metaDeclared: meta.cacheDuration)
         let cacheKey = FWDColumnCache.key(moduleID: record.id,
                                           columnID: module.id, params: params)
         if reset, page == 1, !bypassCache,
@@ -3712,11 +3807,25 @@ struct FWDDetailView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                PosterImage(urlString: full.backdropURL, pixelSize: 900)
-                    .aspectRatio(16/9, contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.innerCardRadius))
+                ZStack(alignment: .topTrailing) {
+                    PosterImage(urlString: full.backdropURL, pixelSize: 900)
+                        .aspectRatio(16/9, contentMode: .fill)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.innerCardRadius))
+                    // v2.40: dynamic-cover badge on the hero — the
+                    // video cover itself is never played inline;
+                    // the media-info card below still notes it.
+                    if full.hasDynamicCover {
+                        Text("动态封面")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Theme.glass, in: Capsule())
+                            .padding(10)
+                    }
+                }
                 Text(full.title)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
@@ -3874,12 +3983,25 @@ struct FWDDetailView: View {
                                     FWDDetailView(record: record, item: rel)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 5) {
-                                        PosterImage(urlString: rel.posterURL)
-                                            .aspectRatio(2/3, contentMode: .fill)
-                                            .frame(width: 92, height: 138)
-                                            .clipped()
-                                            .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
-                                            .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
+                                        ZStack(alignment: .topTrailing) {
+                                            PosterImage(urlString: rel.posterURL, pixelSize: 240)
+                                                .aspectRatio(2/3, contentMode: .fill)
+                                                .frame(width: 92, height: 138)
+                                                .clipped()
+                                                .clipShape(RoundedRectangle(cornerRadius: Theme.smallRadius))
+                                                .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Theme.glass))
+                                            // v2.40: dynamic-cover badge (same
+                                            // rule as the column grid above).
+                                            if rel.hasDynamicCover {
+                                                Text("动态")
+                                                    .font(.caption2.weight(.semibold))
+                                                    .foregroundStyle(Theme.accent)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Theme.glass, in: Capsule())
+                                                    .padding(5)
+                                            }
+                                        }
                                         Text(rel.title)
                                             .font(.caption.weight(.medium))
                                             .foregroundStyle(Theme.text)
