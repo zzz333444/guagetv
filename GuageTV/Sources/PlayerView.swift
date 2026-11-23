@@ -143,6 +143,10 @@ struct PlayerView: View {
     @State private var previewImage: UIImage?
     @State private var previewTask: Task<Void, Never>?
     @State private var lastPreviewTarget: Double = -10
+    /// v2.38: scrub haptic ticks — the last step bucket the target
+    /// crossed, plus the mpv live-follow throttle stamp.
+    @State private var lastScrubTickBucket: Int?
+    @State private var lastFollowAt = Date.distantPast
     @State private var showRemaining = false
     @State private var didResume = false
     @State private var hudGeneration = 0
@@ -691,6 +695,7 @@ struct PlayerView: View {
                 dragMode = .scrub
                 dragStartTime = currentTime
                 scrubTarget = currentTime
+                lastScrubTickBucket = nil
             } else if swipeEpisodesPortrait, size.height > size.width, episodes.count > 1 {
                 // Portrait (short-drama) mode: a vertical swipe
                 // switches episodes instead of riding brightness /
@@ -713,9 +718,15 @@ struct PlayerView: View {
         switch dragMode {
         case .scrub:
             guard duration > 0 else { return }
-            let delta = Double(dx) / Double(size.width) * duration
+            // v2.38: a full-width swipe used to cross the whole
+            // film — the user asked for a slower scrub. One full
+            // swipe now covers at most 30% of the runtime, capped
+            // at 10 minutes; short videos keep the full mapping.
+            let span = duration <= 240 ? duration : min(duration * 0.3, 600)
+            let delta = Double(dx) / Double(size.width) * span
             scrubTarget = min(max(dragStartTime + delta, 0), duration)
-            requestPreview(at: scrubTarget)
+            scrubTickIfNeeded()
+            scrubMoved(to: scrubTarget)
         case .brightness:
             // v2.05: 180pt of vertical travel covers the full range
             // (was 220) — brightness/volume track the finger faster.
@@ -734,7 +745,7 @@ struct PlayerView: View {
     }
 
     private func endDrag(_ value: DragGesture.Value) {
-        if dragMode == .scrub, duration > 0 { seek(to: scrubTarget) }
+        if dragMode == .scrub, duration > 0 { Haptics.tap(); seek(to: scrubTarget) }
         if dragMode == .episodeSwipe {
             let dy = value.translation.height
             if dy < -70 { nextEpisode() } else if dy > 70 { prevEpisode() }
@@ -749,21 +760,31 @@ struct PlayerView: View {
         }
     }
 
-    /// Scrub feedback, modelled on the reference the user sent:
-    /// a floating pill at the top centre — target / total on the
-    /// first line, the signed offset from where the drag started
-    /// on the second. No thumbnail, no icon.
+    /// Scrub feedback: a floating card at the top centre — the
+    /// target frame on top when the native engine can render one
+    /// (v2.38: the user asked to see where the scrub lands), then
+    /// target / total and the signed offset from the drag start.
+    /// mpv follows the drag with live keyframe seeks instead, so
+    /// its card stays text-only and the picture itself previews.
     private var scrubPill: some View {
-        VStack(spacing: 2) {
-            Text("\(timeLabel(scrubTarget)) / \(timeLabel(duration))")
-                .font(.system(size: 15, weight: .semibold).monospacedDigit())
-            Text(deltaLabel)
-                .font(.system(size: 13, weight: .medium).monospacedDigit())
-                .foregroundStyle(Theme.text.opacity(0.75))
+        VStack(spacing: 5) {
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: 168, height: 94)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            VStack(spacing: 2) {
+                Text("\(timeLabel(scrubTarget)) / \(timeLabel(duration))")
+                    .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                Text(deltaLabel)
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Theme.text.opacity(0.75))
+            }
         }
         .foregroundStyle(Theme.text)
-        .padding(.horizontal, 18).padding(.vertical, 8)
-        .background(Color(white: 0.16).opacity(0.88), in: Capsule())
+        .padding(.horizontal, 18).padding(.vertical, 10)
+        .background(Color(white: 0.16).opacity(0.88), in: RoundedRectangle(cornerRadius: 18))
         .padding(.top, 12)
     }
 
@@ -1119,7 +1140,7 @@ struct PlayerView: View {
                     .foregroundStyle(.white)
                 SeekBar(value: currentTime, duration: duration,
                         preview: previewImage,
-                        onDrag: { requestPreview(at: $0) }) { seconds in
+                        onDrag: { scrubMoved(to: $0) }) { seconds in
                     seek(to: seconds)
                     clearPreview()
                 }
@@ -2171,10 +2192,37 @@ struct PlayerView: View {
         pokeChrome()
     }
 
+    /// v2.38: a light selection tick every time the scrub target
+    /// crosses a step boundary — the user asked for feedback
+    /// "every little bit" while fast-forwarding. The step scales
+    /// with runtime (2–10s) so a long film doesn't buzz non-stop.
+    private func scrubTickIfNeeded() {
+        let step = min(max(duration / 150, 2), 10)
+        let bucket = Int(scrubTarget / step)
+        if bucket != lastScrubTickBucket {
+            lastScrubTickBucket = bucket
+            Haptics.selection()
+        }
+    }
+
+    /// One scrub move, two preview strategies (v2.38): the native
+    /// engine renders the target frame into the scrub card; mpv
+    /// can't cheaply render arbitrary frames, so it follows the
+    /// finger with throttled keyframe seeks and the picture itself
+    /// is the preview. The release seek stays frame-exact.
+    private func scrubMoved(to seconds: Double) {
+        if isMPV {
+            let now = Date()
+            guard now.timeIntervalSince(lastFollowAt) > 0.2 else { return }
+            lastFollowAt = now
+            mpv.seekKeyframe(to: seconds)
+        } else {
+            requestPreview(at: seconds)
+        }
+    }
+
     /// Seek-preview frames come from the native engine's generator
-    /// (m3u8/mp4 — the bulk of playback). mpv would need a second
-    /// decoder instance to grab arbitrary frames, so its scrub HUD
-    /// stays time-only.
+    /// (m3u8/mp4 — the bulk of playback).
     private func requestPreview(at seconds: Double) {
         guard !isMPV else { return }
         guard abs(seconds - lastPreviewTarget) > 0.8 else { return }
@@ -2820,6 +2868,7 @@ private struct SeekBar: View {
     var onDrag: ((Double) -> Void)?
     var onCommit: (Double) -> Void
     @State private var dragFraction: Double?
+    @State private var lastTickBucket: Int?
 
     private var fraction: Double {
         if let dragFraction { return dragFraction }
@@ -2846,11 +2895,23 @@ private struct SeekBar: View {
                     .onChanged { drag in
                         let f = min(max(drag.location.x / geo.size.width, 0), 1)
                         dragFraction = f
-                        if duration > 0 { onDrag?(f * duration) }
+                        if duration > 0 {
+                            let seconds = f * duration
+                            onDrag?(seconds)
+                            // v2.38: same step ticks as the
+                            // full-screen scrub.
+                            let step = min(max(duration / 150, 2), 10)
+                            let bucket = Int(seconds / step)
+                            if bucket != lastTickBucket {
+                                lastTickBucket = bucket
+                                Haptics.selection()
+                            }
+                        }
                     }
                     .onEnded { drag in
                         let f = min(max(drag.location.x / geo.size.width, 0), 1)
                         dragFraction = nil
+                        lastTickBucket = nil
                         if duration > 0 { onCommit(f * duration) }
                     }
             )

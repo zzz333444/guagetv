@@ -429,6 +429,13 @@ final class MPVController: ObservableObject {
         command(["seek", String(seconds), "absolute"])
     }
 
+    /// v2.38: scrub-follow seeks — keyframe-snapped so a drag can
+    /// ride them at 5 Hz; the release seek uses seek(to:) and
+    /// stays frame-exact.
+    func seekKeyframe(to seconds: Double) {
+        command(["seek", String(seconds), "absolute+keyframes"])
+    }
+
     func seekRelative(_ delta: Double) {
         command(["seek", String(delta), "relative"])
     }
