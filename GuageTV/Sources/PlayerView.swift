@@ -308,6 +308,15 @@ struct PlayerView: View {
     @AppStorage("player.showStats") private var showStats = false
     @AppStorage("gesture.boostRate") private var boostRateSetting = 2.0
     @AppStorage("player.swipeEpisodesPortrait") private var swipeEpisodesPortrait = true
+    /// v2.42: horizontal-scrub tuning — read live via @AppStorage
+    /// so a change in the in-player settings sheet applies to the
+    /// current session without reopening the player.
+    @AppStorage("player.scrubFraction") private var scrubFraction = 0.3
+    @AppStorage("player.scrubCapSeconds") private var scrubCapSeconds = 600.0
+    @AppStorage("player.scrubGridScale") private var scrubGridScale = 1.0
+    @AppStorage("player.scrubHaptics") private var scrubHapticsEnabled = true
+    @AppStorage("player.scrubPreviewNative") private var scrubPreviewNativeEnabled = true
+    @AppStorage("player.scrubPreviewMPV") private var scrubPreviewMPVEnabled = true
     @AppStorage("danmaku.enabled") private var danmakuEnabled = false
     @AppStorage("danmaku.apiTemplate") private var danmakuAPITemplate = ""
     @StateObject private var danmakuStore = DanmakuStore()
@@ -722,7 +731,10 @@ struct PlayerView: View {
             // film — the user asked for a slower scrub. One full
             // swipe now covers at most 30% of the runtime, capped
             // at 10 minutes; short videos keep the full mapping.
-            let span = duration <= 240 ? duration : min(duration * 0.3, 600)
+            // v2.42: both numbers are user-settable (Settings →
+            // 播放 → 横滑快进， or the in-player settings sheet);
+            // 整片档 (fraction 1.0) restores the old full mapping.
+            let span = scrubSpan(for: duration)
             let delta = Double(dx) / Double(size.width) * span
             scrubTarget = min(max(dragStartTime + delta, 0), duration)
             scrubTickIfNeeded()
@@ -1566,6 +1578,32 @@ struct PlayerView: View {
                             .foregroundStyle(Theme.text)
                     }
                 }
+                Section("横滑快进") {
+                    Picker("一屏范围", selection: $scrubFraction) {
+                        Text("20%").tag(0.2)
+                        Text("30%").tag(0.3)
+                        Text("50%").tag(0.5)
+                        Text("整片").tag(1.0)
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("封顶秒数", selection: $scrubCapSeconds) {
+                        Text("300 秒").tag(300.0)
+                        Text("600 秒").tag(600.0)
+                        Text("900 秒").tag(900.0)
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("逐格粗细", selection: $scrubGridScale) {
+                        Text("细").tag(0.5)
+                        Text("标准").tag(1.0)
+                        Text("粗").tag(2.0)
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("拖动逐格震动", isOn: $scrubHapticsEnabled)
+                    Toggle("原生预览图", isOn: $scrubPreviewNativeEnabled)
+                    Toggle("mpv 关键帧跟手", isOn: $scrubPreviewMPVEnabled)
+                    Text("改完立即对当前播放生效；4 分钟内的短片一律整片映射，不受档位与封顶影响。关掉逐格震动后拖动无震、松手确认震保留。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
+                }
                 Section("跳过片头片尾") {
                     Stepper(value: $skipIntroSeconds, in: 0...600, step: 5) {
                         Text("片头跳过 \(skipIntroSeconds) 秒").foregroundStyle(Theme.text)
@@ -2192,12 +2230,25 @@ struct PlayerView: View {
         pokeChrome()
     }
 
+    /// v2.42: how far one full-width horizontal swipe travels.
+    /// Short videos (≤ 4 min) always keep the full mapping; the
+    /// 整片档 also restores it. Otherwise the fraction of the
+    /// runtime applies, capped at the user's cap seconds.
+    private func scrubSpan(for duration: Double) -> Double {
+        guard duration > 240 else { return duration }
+        if scrubFraction >= 1 { return duration }
+        return min(duration * scrubFraction, scrubCapSeconds)
+    }
+
     /// v2.38: a light selection tick every time the scrub target
     /// crosses a step boundary — the user asked for feedback
     /// "every little bit" while fast-forwarding. The step scales
     /// with runtime (2–10s) so a long film doesn't buzz non-stop.
     private func scrubTickIfNeeded() {
-        let step = min(max(duration / 150, 2), 10)
+        // v2.42: off means no drag ticks at all; the release
+        // confirmation tick in endDrag still fires.
+        guard scrubHapticsEnabled else { return }
+        let step = min(max(duration / 150, 2), 10) * scrubGridScale
         let bucket = Int(scrubTarget / step)
         if bucket != lastScrubTickBucket {
             lastScrubTickBucket = bucket
@@ -2212,11 +2263,16 @@ struct PlayerView: View {
     /// is the preview. The release seek stays frame-exact.
     private func scrubMoved(to seconds: Double) {
         if isMPV {
+            // v2.42: weak devices can switch the live follow off;
+            // the scrub card then only shows time, no picture.
+            guard scrubPreviewMPVEnabled else { return }
             let now = Date()
             guard now.timeIntervalSince(lastFollowAt) > 0.2 else { return }
             lastFollowAt = now
             mpv.seekKeyframe(to: seconds)
         } else {
+            // v2.42: native preview card off → no frame fetch.
+            guard scrubPreviewNativeEnabled else { return }
             requestPreview(at: seconds)
         }
     }
@@ -2899,8 +2955,14 @@ private struct SeekBar: View {
                             let seconds = f * duration
                             onDrag?(seconds)
                             // v2.38: same step ticks as the
-                            // full-screen scrub.
-                            let step = min(max(duration / 150, 2), 10)
+                            // full-screen scrub. v2.42: honours the
+                            // same 横滑快进 switches (off = silent,
+                            // grid scale 细/标准/粗).
+                            let defaults = UserDefaults.standard
+                            let ticksOn = defaults.object(forKey: "player.scrubHaptics") as? Bool ?? true
+                            guard ticksOn else { return }
+                            let gridScale = defaults.object(forKey: "player.scrubGridScale") as? Double ?? 1.0
+                            let step = min(max(duration / 150, 2), 10) * gridScale
                             let bucket = Int(seconds / step)
                             if bucket != lastTickBucket {
                                 lastTickBucket = bucket

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.41 · WebDAV 自动备份·加密"
+    static let buildLabel = "v2.42 · 快进三改可调"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.42", title: "快进三改可调", lines: [
+            "横滑快进范围可调：设置 → 播放 → 横滑快进（播放器内设置页也有同一区），一屏走全片 20% / 30% / 50% / 整片四档（默认 30%），封顶 300 / 600 / 900 秒（默认 600）；4 分钟内的短片一律整片映射，不受档位与封顶影响",
+            "逐格反馈可调：格长倍率 细 / 标准 / 粗（格长按片长 2–10 秒再乘倍率），另有「拖动逐格震动」开关；关掉后拖动无震、松手确认震保留；底部进度条拖动同规格",
+            "预览图可关：原生引擎浮卡出图与 mpv 关键帧跟手各一个开关，弱机可关跟手、只看时间；关掉后拖动只显示时间与偏移量",
+            "设置即时生效：六项都读 UserDefaults 现值，播放中改完立即对当前播放会话生效，不用重开播放器",
+        ]),
         Entry(version: "v2.41", title: "WebDAV 自动备份·加密", lines: [
             "自动备份到 WebDAV：备份页新增「自动备份到 WebDAV」开关＋频率（每天/每周）＋保留份数（默认 3 份，超量删最旧），目标用 App 内已配好的 WebDAV 服务器（多台时可挑一台）；未配服务器或未设口令时开关置灰并说明原因",
             "加密红线：自动备份先经 CryptoKit AES-GCM 加密再上传（口令派生密钥＋随机盐，盐随文件走、口令本身不进文件），口令只存本机钥匙串；没设口令自动备份打不开，绝不悄悄传明文备份",
@@ -1637,6 +1643,12 @@ struct PlaySettingsView: View {
     @AppStorage("hlsAdblock.lastRemovedSeconds") private var lastRemovedSeconds = 0.0
     @AppStorage("hlsAdblock.lastFilteredAt") private var lastFilteredAt = 0.0
     @AppStorage("gesture.boostRate") private var boostRate = 2.0
+    @AppStorage("player.scrubFraction") private var scrubFraction = 0.3
+    @AppStorage("player.scrubCapSeconds") private var scrubCapSeconds = 600.0
+    @AppStorage("player.scrubGridScale") private var scrubGridScale = 1.0
+    @AppStorage("player.scrubHaptics") private var scrubHaptics = true
+    @AppStorage("player.scrubPreviewNative") private var scrubPreviewNative = true
+    @AppStorage("player.scrubPreviewMPV") private var scrubPreviewMPV = true
     @AppStorage("danmaku.enabled") private var danmakuEnabled = false
     @AppStorage("danmaku.apiTemplate") private var danmakuAPI = ""
     @AppStorage("danmaku.blockWords") private var danmakuBlockWords = ""
@@ -1738,6 +1750,41 @@ struct PlaySettingsView: View {
                         Text("3x").tag(3.0)
                     }
                     .pickerStyle(.segmented)
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("横滑快进").font(.headline).foregroundStyle(Theme.text)
+                    Text("一屏范围").font(.subheadline).foregroundStyle(Theme.text)
+                    Picker("一屏范围", selection: $scrubFraction) {
+                        Text("20%").tag(0.2)
+                        Text("30%").tag(0.3)
+                        Text("50%").tag(0.5)
+                        Text("整片").tag(1.0)
+                    }
+                    .pickerStyle(.segmented)
+                    Text("封顶秒数").font(.subheadline).foregroundStyle(Theme.text)
+                    Picker("封顶秒数", selection: $scrubCapSeconds) {
+                        Text("300 秒").tag(300.0)
+                        Text("600 秒").tag(600.0)
+                        Text("900 秒").tag(900.0)
+                    }
+                    .pickerStyle(.segmented)
+                    Text("逐格粗细").font(.subheadline).foregroundStyle(Theme.text)
+                    Picker("逐格粗细", selection: $scrubGridScale) {
+                        Text("细").tag(0.5)
+                        Text("标准").tag(1.0)
+                        Text("粗").tag(2.0)
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("拖动逐格震动", isOn: $scrubHaptics)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("原生预览图", isOn: $scrubPreviewNative)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Toggle("mpv 关键帧跟手", isOn: $scrubPreviewMPV)
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Text("横滑一屏走多远：默认 30% 且封顶 600 秒；选「整片」回到旧版一滑到底。4 分钟内的短片一律整片映射。关掉逐格震动后拖动无震、松手确认震保留；弱机可关预览图或跟手。播放中改完立即生效，不用重开播放器。")
+                        .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
             GlassCard {
