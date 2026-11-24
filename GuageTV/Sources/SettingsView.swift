@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.55 · Emby 深挖·海报缓存与下载提示"
+    static let buildLabel = "v2.56 · 直播深挖·回看范围与节目单节拍"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.56", title: "直播深挖·回看范围与节目单节拍", lines: [
+            "节目单 sheet 分钟节拍补齐：v2.23 的整分钟对齐只覆盖了频道列表，节目单 sheet 里的「正在播 / 回看 / 超出回看范围」用 Date() 现算、打开后会冻结（节目播完仍显示「正在播」无回看钮、跨过 catchup-days 起点仍留着「回看」钮）；现 sheet 的 List 也包进与频道列表同源的 TimelineView（下一个整分钟起、每 60 秒一拍），状态随分钟翻页",
+            "无占位符模板不再亮回看入口：回看模板里没有任何起止时间占位符时 buildURL 本就返回 nil，但频道行仍挂「可回看」角标、播放器仍出「-30 分钟」钮，点按只会 toast 失败；现 CatchupTemplate 新增 hasPlaceholder（与 expand 处理的四种占位符一一对应：${(b)…}/${(e)…}、{utc}/{lutc}），effectiveCatchup 在此即判为无回看，角标与时移钮都不再出现",
+            "时移补回看范围校验：节目单路径 v2.43 已验 catchup-days、时移路径此前无此校验；现播放器接过生效天数（catchupDays），days == 0 时不显示「-30 分钟」钮，进时移前再按 earliestDate 验一次、30 分钟前已出范围时给中文原因不切台；线路级 catchup 无天数字段、仍不限期",
+            "进度条与回看角标布局复查（无改动）：频道行 VStack 里角标在上行 HStack、进度条在下行，两者天然不重叠；375pt 窄屏四件套齐全（角标＋节目单＋收藏星＋播放钮）时名称列约剩 61pt、靠 lineLimit(1) 截断，属既定行为；另记已知缺口：播放列表级 #EXTM3U catchup-days 默认值未解析、频道级 catchupType 只解析未使用（append/shift 在当前模板展开口径下行为一致），本轮未做",
+        ]),
         Entry(version: "v2.55", title: "Emby 深挖·海报缓存与下载提示", lines: [
             "离线海报缓存：Emby 海报文件名现带服务器短标签（emby-<12 位哈希>-<内容哈希>.img），删除服务器时只清该台海报、不再留孤儿文件；缓存页新增「其中 Emby 海报」一行（大小＋单独清理）；换服务器隔离复查通过——缓存键 emby|服务器ID|条目ID 在浏览页五处与资源库一处均已使用，内存与磁盘两级都不串台；150 MB 上限与每 20 写一次最旧优先清理复查无改动（单批超量有限，属既有口径）",
             "剧集下载完成提示：Emby 剧集页的下载提示不再停在「已加入下载」——单集下完/失败即时改提示，整季下完汇总「整季下载完成：X 集已下好，Y 集失败」；已下好的集再点下载直接报「已经下载好了」；站内仍不发系统通知（沿用 v2.35 不主动提醒口径，单集完成通知仍只在已授权时发）",

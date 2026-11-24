@@ -16,6 +16,10 @@ struct LiveView: View {
     /// 本身不能再当模板底）。随 playChannel 一起设置。
     @State private var playCatchupTemplate: String?
     @State private var playCatchupBaseURL: String?
+    /// v2.56: 本次播放的生效回看天数（频道级 catchup-days；线路级
+    /// 无天数字段时为 nil = 不限期）。days == 0 时播放器不显示
+    /// 时移钮（30 分钟前已出回看期）。
+    @State private var playCatchupDays: Int?
     @State private var epgByKey: [String: [EPGProgramme]] = [:]
     @State private var templateCache: [String: [EPGProgramme]] = [:]
     @State private var sheetProgrammes: ProgrammeSheetItem?
@@ -121,11 +125,16 @@ struct LiveView: View {
 
     /// v2.43: 频道生效的回看模板——频道级 catchup-source 优先，
     /// 没有时回落到线路级 catchup。返回模板与频道声明的回看天数。
+    /// v2.56: 无占位符的模板拼不出回看地址（buildURL 必返 nil），
+    /// 在此即判为无回看——频道行不再亮「可回看」角标、播放器
+    /// 也不出时移钮，点按后才 toast 的旧行为不再出现。
     private func effectiveCatchup(for channel: LiveListParser.Channel) -> (template: String, days: Int?)? {
-        if !channel.catchupSource.isEmpty {
+        if !channel.catchupSource.isEmpty,
+           TVBoxConfig.CatchupTemplate.hasPlaceholder(channel.catchupSource) {
             return (channel.catchupSource, channel.catchupDays)
         }
-        if let source = live.catchup?.source, !source.isEmpty {
+        if let source = live.catchup?.source, !source.isEmpty,
+           TVBoxConfig.CatchupTemplate.hasPlaceholder(source) {
             return (source, nil)
         }
         return nil
@@ -136,7 +145,8 @@ struct LiveView: View {
         if let channel = allChannels.first(where: { $0.url == url }) {
             return effectiveCatchup(for: channel)
         }
-        if let source = live.catchup?.source, !source.isEmpty {
+        if let source = live.catchup?.source, !source.isEmpty,
+           TVBoxConfig.CatchupTemplate.hasPlaceholder(source) {
             return (source, nil)
         }
         return nil
@@ -201,7 +211,8 @@ struct LiveView: View {
             PlayerView(episodes: [PlayerView.EpisodeRef(name: channel.name, url: channel.url)],
                        startIndex: 0, header: playHeader, title: channel.name, isLive: true,
                        catchupTemplate: playCatchupTemplate,
-                       catchupBaseURL: playCatchupBaseURL ?? channel.url)
+                       catchupBaseURL: playCatchupBaseURL ?? channel.url,
+                       catchupDays: playCatchupDays)
         }
         .sheet(item: $sheetProgrammes) { entry in
             programmeSheet(entry)
@@ -373,6 +384,7 @@ struct LiveView: View {
         .onTapGesture {
             Haptics.medium()
             playCatchupTemplate = effectiveCatchup(for: channel)?.template
+            playCatchupDays = effectiveCatchup(for: channel)?.days
             playCatchupBaseURL = channel.url
             playChannel = channel
         }
@@ -439,20 +451,27 @@ struct LiveView: View {
 
     private func programmeSheet(_ entry: ProgrammeSheetItem) -> some View {
         NavigationStack {
-            List {
-                ForEach(dayGroups(entry.list), id: \.day) { group in
-                    Section {
-                        ForEach(group.items) { programme in
-                            programmeRow(programme, channelURL: entry.channelURL,
-                                         channelName: entry.channel)
+            // v2.56: 节目单 sheet 也要跟整分钟节拍重绘。v2.23 的对齐
+            // 只覆盖了频道列表——sheet 里的「正在播 / 回看 / 超出
+            // 回看范围」用 Date() 现算，打开后会冻结：节目播完仍
+            // 显示「正在播」无回看钮、跨过 catchup-days 起点仍留
+            // 着「回看」钮，直到重进 sheet 才刷新。
+            TimelineView(.periodic(from: epgTickStart, by: 60)) { _ in
+                List {
+                    ForEach(dayGroups(entry.list), id: \.day) { group in
+                        Section {
+                            ForEach(group.items) { programme in
+                                programmeRow(programme, channelURL: entry.channelURL,
+                                             channelName: entry.channel)
+                            }
+                        } header: {
+                            Text(dayLabel(group.day)).foregroundStyle(Theme.section)
                         }
-                    } header: {
-                        Text(dayLabel(group.day)).foregroundStyle(Theme.section)
                     }
                 }
+                .scrollContentBackground(.hidden)
+                .background(Theme.bg)
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg)
             .navigationTitle("\(entry.channel) · 节目单")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -489,6 +508,7 @@ struct LiveView: View {
                     Haptics.medium()
                     sheetProgrammes = nil
                     playCatchupTemplate = effectiveCatchup(forChannelURL: channelURL)?.template
+                    playCatchupDays = effectiveCatchup(forChannelURL: channelURL)?.days
                     playCatchupBaseURL = channelURL
                     let replay = LiveListParser.Channel(
                         name: "\(channelName) · \(programme.title)", url: url, group: "")

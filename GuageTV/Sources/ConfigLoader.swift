@@ -184,6 +184,17 @@ struct TVBoxConfig: Decodable {
             return out
         }
 
+        /// v2.56: 模板是否含任一起止时间占位符（expand 能展开的
+        /// 四种：${(b)…}/${(e)…}、{utc}/{lutc}）。无占位符的模板
+        /// 拼不出回看地址（buildURL 返回 nil），调用方不应再亮
+        /// 「可回看」角标或时移入口——展开本身仍是唯一真凭据。
+        static func hasPlaceholder(_ template: String) -> Bool {
+            if template.contains("{utc}") || template.contains("{lutc}") { return true }
+            guard let re = try? NSRegularExpression(pattern: #"\$\{(b|e)[^}]*\}"#) else { return false }
+            return re.firstMatch(in: template,
+                                 range: NSRange(template.startIndex..., in: template)) != nil
+        }
+
         /// catchup-days 对应的最早可回看起点；未声明天数时
         /// 不限（返回 nil），沿用线路级 catchup 的旧行为。
         static func earliestDate(days: Int?, now: Date) -> Date? {

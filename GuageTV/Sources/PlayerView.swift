@@ -90,6 +90,10 @@ struct PlayerView: View {
     /// 底部出现「-30 分钟」回退钮；无模板时不显示。
     let catchupTemplate: String?
     let catchupBaseURL: String?
+    /// v2.56: 生效的回看天数（频道级 catchup-days；线路级无此字段
+    /// 时为 nil = 不限期）。days == 0 时「-30 分钟」时移钮不显示，
+    /// 30 分钟前已出回看期。
+    let catchupDays: Int?
     /// 时移中正在播的回看地址（nil = 实时直播流）；时移起点
     /// 时刻只用于 toast 文案。
     @State private var timeshiftURL: String?
@@ -190,13 +194,14 @@ struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(urlString: String, header: [String: String] = [:], title: String = "", isLive: Bool = false,
-         catchupTemplate: String? = nil, catchupBaseURL: String? = nil) {
+         catchupTemplate: String? = nil, catchupBaseURL: String? = nil, catchupDays: Int? = nil) {
         _episodes = State(initialValue: [EpisodeRef(name: "", url: urlString)])
         self.baseHeader = header
         self.title = title
         self.isLive = isLive
         self.catchupTemplate = catchupTemplate
         self.catchupBaseURL = catchupBaseURL
+        self.catchupDays = catchupDays
         self.lineNames = []
         self.lineEpisodes = []
         self.episodeResolver = nil
@@ -227,7 +232,7 @@ struct PlayerView: View {
          initialSubtitles: [FWDSubtitle] = [],
          subtitleLoader: ((Int) async -> [FWDSubtitle])? = nil,
          autoNextOverride: Bool? = nil,
-         catchupTemplate: String? = nil, catchupBaseURL: String? = nil) {
+         catchupTemplate: String? = nil, catchupBaseURL: String? = nil, catchupDays: Int? = nil) {
         let start = min(max(startIndex, 0), max(episodes.count - 1, 0))
         _episodes = State(initialValue: episodes)
         self.baseHeader = header
@@ -248,6 +253,7 @@ struct PlayerView: View {
         self.autoNextOverride = autoNextOverride
         self.catchupTemplate = catchupTemplate
         self.catchupBaseURL = catchupBaseURL
+        self.catchupDays = catchupDays
         self.initialLine = lineIndex
         self.initialIndex = start
         _activeLine = State(initialValue: lineIndex)
@@ -1234,9 +1240,10 @@ struct PlayerView: View {
                 }
                 Spacer(minLength: 4)
                 // v2.43 直播时移：有回看模板的直播频道才出现。
+                // v2.56: 回看天数为 0 时 30 分钟前已出回看期，不出钮。
                 // 时移中「回直播」与「-30 分钟」并列：前者回
                 // 实时流，后者按新的「现在」重算 30 分钟前。
-                if isLive, let catchupTemplate, !catchupTemplate.isEmpty {
+                if isLive, let catchupTemplate, !catchupTemplate.isEmpty, catchupDays != 0 {
                     Button { Haptics.selection(); enterTimeshift(); pokeChrome() } label: {
                         Text("-30 分钟")
                             .font(.system(size: compact ? 14 : 15, weight: .semibold))
@@ -1975,6 +1982,15 @@ struct PlayerView: View {
         }
         let end = Date()
         let start = end.addingTimeInterval(-30 * 60)
+        // v2.56: 时移路径也验回看范围（节目单路径 v2.43 已验，
+        // 时移此前无此校验）：30 分钟前已出 catchup-days 起点
+        // 时不切台，给中文原因。
+        if let days = catchupDays,
+           let earliest = TVBoxConfig.CatchupTemplate.earliestDate(days: days, now: end),
+           start < earliest {
+            showToast("30 分钟前已超出该频道回看范围（仅保留 \(days) 天）")
+            return
+        }
         guard let url = TVBoxConfig.CatchupTemplate.buildURL(
             template: template, channelURL: catchupBaseURL ?? current.url,
             start: start, end: end) else {
