@@ -120,12 +120,38 @@ enum JarProxyClient {
     private static func isColdStartFailure(_ error: Error) -> Bool {
         if let failure = error as? Failure {
             return failure.message.contains("timeout")
+                || failure.message.contains("超时")
                 || failure.message.contains("无法识别的内容")
         }
         if let urlError = error as? URLError {
             return isRetryable(urlError)
         }
         return false
+    }
+
+    /// Chinese wording for a transport failure (v2.49): the raw
+    /// URLError text reaches the screen in English ("The request
+    /// timed out.") — map the code to a cause the user can act on,
+    /// naming the timeout budget when the call hit one.
+    static func describe(_ error: Error, timeoutSeconds: Int? = nil) -> String {
+        guard let urlError = error as? URLError else {
+            return error.localizedDescription
+        }
+        let budget = timeoutSeconds.map { "（\($0) 秒）" } ?? ""
+        switch urlError.code {
+        case .timedOut:
+            return "请求超时\(budget)：Jar 代理没有及时返回，可能是实例在冷启动或蜘蛛初始化太慢，稍后再试"
+        case .networkConnectionLost:
+            return "连接中断：与 Jar 代理的连接断开了，可能是实例重启，稍后再试"
+        case .cannotConnectToHost:
+            return "连不上 Jar 代理：请检查代理地址与网络"
+        case .cannotFindHost, .dnsLookupFailed:
+            return "找不到 Jar 代理主机：请检查代理地址"
+        case .notConnectedToInternet:
+            return "没有网络连接"
+        default:
+            return "Jar 代理调用失败：\(urlError.localizedDescription)"
+        }
     }
 
     private static func isRetryable(_ error: URLError) -> Bool {
@@ -212,7 +238,12 @@ enum JarProxyClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "X-JarProxy-Token") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let data: Data
+        do {
+            (data, _) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw Failure(message: Self.describe(error, timeoutSeconds: 95))
+        }
         guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw Failure(message: "Jar 代理返回了无法识别的内容")
         }
@@ -243,7 +274,7 @@ enum JarProxyClient {
             let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (object?["ok"] as? Bool) == true ? "连接成功，代理在线" : "代理有响应，但状态不对"
         } catch {
-            return "连不上：\(error.localizedDescription)"
+            return "连不上：\(Self.describe(error, timeoutSeconds: 60))"
         }
     }
 }

@@ -23,8 +23,9 @@ enum BackupCrypto {
 
     static func encrypt(_ plain: Data, password: String) throws -> Data {
         var saltBytes = [UInt8](repeating: 0, count: 16)
-        let status = saltBytes.withUnsafeMutableBytes {
-            SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!)
+        let status = saltBytes.withUnsafeMutableBytes { ptr in
+            guard let base = ptr.baseAddress else { return errSecParam }
+            return SecRandomCopyBytes(kSecRandomDefault, 16, base)
         }
         guard status == errSecSuccess else {
             throw NSError(domain: "BackupCrypto", code: 1,

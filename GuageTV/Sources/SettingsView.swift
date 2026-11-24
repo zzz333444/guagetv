@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.48 · 玻璃规格复查·动效与空状态统一"
+    static let buildLabel = "v2.49 · 稳定扫荡·Jar 超时中文"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.49", title: "稳定扫荡·Jar 超时中文", lines: [
+            "全仓强制解包复查：唯一真强制解包是 BackupCrypto 生成随机盐时的 $0.baseAddress!，现改 guard（拿不到地址即报错、不再赌它一定合法）；其余 try!/as!/显式 ! 均为零（仅剩 WKWebView 协议签名的隐式解包与 required init 的 fatalError 桩，协议与初始化约定改不了）",
+            "主线程阻塞审计：启动路径（配置解析、历史解码、蜘蛛目录清理）与列表滚动路径（海报解码、栏目缓存）均已在后台；三处信号量等待（HLS 代理取流、JS 引擎、SMB 分块读）与本地代理 2 秒握手均不在主线程；其余同步读文件都是单次用户操作的小文件，或命中解析缓存不再重复解析",
+            "Jar 超时中文：JarProxyClient 新增中文 describe——/run 95 秒超时与健康检查 60 秒超时不再显示英文原文，超时给「请求超时（95 秒）：可能是实例在冷启动或蜘蛛初始化太慢，稍后再试」；连不上/找不到主机/断连/无网络各有中文原因；冷启动重试仍按「超时」识别，patient 重试不受影响",
+            "模块与搜索超时口径复查无改动：模块 60 秒调用预算带模块名栏目名、子请求 20 秒中文、错误分网络/脚本/超时/模块错误四类；搜索短错全中文（请求超时/网络不通/域名解析失败/服务器返回错误状态），12 秒超时与连续失败熔断提示均为中文",
+        ]),
         Entry(version: "v2.48", title: "玻璃规格复查·动效与空状态统一", lines: [
             "玻璃规格复查二轮：全仓 List 逐个核对——全局参数、播放线路、在线字幕、画质、播放设置五个 sheet 的 List 原先是系统灰底，现统一走环境光背景＋玻璃；WebDAV 浏览、本地视频、SMB 共享与目录、DLNA 四处列表补内容背景隐藏；备份页、模块设置区、自动备份区复查无实色块（白底胶囊主按钮与选中白底是既定的主操作语言，保留）",
             "动效一致性复核：全仓无裸动画字面量（发现页 hero 自动轮播 0.45 秒慢切是既定例外）；展开切换与加载交叉淡入全部走 Theme 四个动画常量，手感与此前一致",
