@@ -248,6 +248,8 @@ enum Diagnostics {
 enum StartupTiming {
     private static var t0: CFAbsoluteTime?
     private static var firstFrameMarked = false
+    /// v2.57: 发现内容首出只记一次（与首帧守卫同款）。
+    private static var firstContentMarked = false
 
     static func start() {
         if t0 == nil { t0 = CFAbsoluteTimeGetCurrent() }
@@ -267,5 +269,17 @@ enum StartupTiming {
         guard !firstFrameMarked else { return }
         firstFrameMarked = true
         mark("首帧已出")
+    }
+
+    /// v2.57: 发现页内容首次上屏（缓存画出或首个 trending
+    /// 列表落定）。v2.46 的三处打点只剩两处——「模块索引」
+    /// 那一处随 v2.50 模块推荐行移除而消失（发现页不再读
+    /// index.json，FWDStore.records() 只在模块页 onAppear
+    /// 调用、不在启动路径上）；补这一处恢复三段对照：壳出
+    /// （首帧）与内容出之间的差值就是首屏可交互的真实耗时。
+    static func markFirstContentOnce() {
+        guard !firstContentMarked else { return }
+        firstContentMarked = true
+        mark("发现内容已出")
     }
 }

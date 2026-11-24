@@ -88,6 +88,18 @@ struct ContentView: View {
             // Runs after the first frame, so the shell is already
             // interactive while the 700-site config parses.
             if config == nil {
+                // v2.57: py 预热不再等配置解析完——解释器冷启与
+                // 700+ 站 JSON 解码并行：先对活动配置文件做一次
+                // 原始字节扫描（".py"，与 Site.kind 判定同口径，
+                // 不解码），命中即在 utility 优先级上预热；解析
+                // 完成后的精确判定仍保留作兜底（扫描漏判或无本地
+                // 文件时）。prewarm() 自身有只触发一次的守卫，
+                // 两次触发不会重复 boot。
+                Task.detached(priority: .utility) {
+                    if ConfigLibrary.activeConfigMentionsPy() {
+                        PythonRuntime.shared.prewarm()
+                    }
+                }
                 let parseStart = Date()
                 let cfg = await Task.detached(priority: .userInitiated) {
                     ConfigLibrary.loadActive()
@@ -99,7 +111,8 @@ struct ContentView: View {
                     // v2.46: py 预热——配置里有 py 站才预热（无 py
                     // 站的用户不花这份启动成本）；预热在运行时
                     // 自己的串行队列上后台跑，不阻塞首屏，首个
-                    // py 站打开时不再等解释器冷启。
+                    // py 站打开时不再等解释器冷启。v2.57 起这段
+                    // 只是兜底：扫描命中时预热早已在解析期间触发。
                     if cfg.sites.contains(where: { $0.kind == .spiderPY }) {
                         PythonRuntime.shared.prewarm()
                     }

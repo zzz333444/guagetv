@@ -141,6 +141,8 @@ struct DiscoverView: View {
         shows = cache.shows
         top = cache.top
         syncHeroPosition()
+        // v2.57: 缓存画出 = 发现内容首次上屏，记冷启动打点。
+        StartupTiming.markFirstContentOnce()
     }
 
     /// v2.50: trending 落定后把分页位置钉在合法页上（见 hero）——
@@ -225,6 +227,9 @@ struct DiscoverView: View {
         case 0:
             trending = titles
             syncHeroPosition()
+            // v2.57: 无缓存时首个 trending 列表落定 = 发现内容
+            // 首次上屏，记冷启动打点（守卫只记一次）。
+            StartupTiming.markFirstContentOnce()
         case 1: week = titles
         case 2: nowPlaying = titles
         case 3: movies = titles

@@ -425,6 +425,23 @@ enum ConfigLibrary {
         UserDefaults.standard.string(forKey: activeKey)
     }
 
+    /// Cheap pre-parse probe (v2.57): does the active config file
+    /// mention ".py"? Site.kind calls an api spiderPY only when
+    /// type == 3 and the api contains ".py" (case-insensitive), so
+    /// a raw-bytes scan matches that rule without paying for a
+    /// full JSON decode of 700+ sites. Used to start the Python
+    /// prewarm in parallel with the config parse instead of after
+    /// it; the exact post-parse check in ContentView remains the
+    /// authority, and a false positive just boots the interpreter
+    /// early on a background queue. No local file (first launch)
+    /// returns false and the post-parse check covers it.
+    static func activeConfigMentionsPy() -> Bool {
+        guard let id = activeID(), let file = file(for: id),
+              let data = try? Data(contentsOf: file) else { return false }
+        let text = String(decoding: data, as: UTF8.self)
+        return text.range(of: ".py", options: .caseInsensitive) != nil
+    }
+
     static func displayName(for sourceURL: String) -> String {
         if let url = URL(string: sourceURL) {
             let last = url.lastPathComponent

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.56 · 直播深挖·回看范围与节目单节拍"
+    static let buildLabel = "v2.57 · 性能深挖·启动打点与图片解码"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.57", title: "性能深挖·启动打点与图片解码", lines: [
+            "冷启动打点二段复盘：v2.46 的三处打点只剩两处——「模块索引」那一处随 v2.50 模块推荐行移除而消失（发现页不再读 index.json，模块索引只在模块页打开时加载、不在启动路径上）；现补第三处「发现内容已出」打点（缓存画出或首个 trending 列表落定时记一次），首帧/线路解析/发现内容三段对照恢复，壳出与内容出的差值即首屏可交互的真实耗时；其余启动路径逐项核查无新增主线程阻塞点（App init 只记时刻与自愈标记、配置解析 v2.03 已在后台、记录/设置两页 isActive 门控、资源库刷新只读 UserDefaults 索引）",
+            "图片解码并行化：海报解码此前全在 PosterStore actor 的串行执行器上排队——滚动一屏海报时每张解码（约 5–30 毫秒）都要等前面全部解完才轮到；现解码一步改走 detached utility 任务、多核并行，在途去重表与文件读写仍留在 actor 内；兜底 UIImage(data:) 是懒解码（ImageIO 拒收的数据首次绘制时才在主线程解码），现后台画进位图上下文强制解完、长边仍按 maxPixelSize 封顶，动画图与解码失败时原图返回不丢海报",
+            "内存档位复核（无改动）：6 GiB 以上 160 MB、4 GiB 以上 120 MB、其余 48 MB——iPhone 15/16 Pro（8GB）160 MB、iPhone 12–15（4–6GB）120 MB、2–3GB 老机 48 MB，单张 480px 解码约 1.3 MB，档位对应约 35–120 张常驻；cost 按 bytesPerRow×height 实测；告警减半兜底（v2.46）仍在",
+            "py 预热提前：预热此前等完整配置解析（700+ 站 JSON 解码）完成后才触发；现解析任务启动的同时另起 utility 任务对活动配置文件做原始字节扫描（\".py\"，与 Site.kind 判定同口径、不解码），命中即并行预热，解释器冷启与配置解析重叠；解析完成后的精确判定保留作兜底，prewarm 只触发一次的守卫不变；无 py 站的用户仍不花这份成本",
+        ]),
         Entry(version: "v2.56", title: "直播深挖·回看范围与节目单节拍", lines: [
             "节目单 sheet 分钟节拍补齐：v2.23 的整分钟对齐只覆盖了频道列表，节目单 sheet 里的「正在播 / 回看 / 超出回看范围」用 Date() 现算、打开后会冻结（节目播完仍显示「正在播」无回看钮、跨过 catchup-days 起点仍留着「回看」钮）；现 sheet 的 List 也包进与频道列表同源的 TimelineView（下一个整分钟起、每 60 秒一拍），状态随分钟翻页",
             "无占位符模板不再亮回看入口：回看模板里没有任何起止时间占位符时 buildURL 本就返回 nil，但频道行仍挂「可回看」角标、播放器仍出「-30 分钟」钮，点按只会 toast 失败；现 CatchupTemplate 新增 hasPlaceholder（与 expand 处理的四种占位符一一对应：${(b)…}/${(e)…}、{utc}/{lutc}），effectiveCatchup 在此即判为无回看，角标与时移钮都不再出现",

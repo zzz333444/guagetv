@@ -238,13 +238,27 @@ private actor PosterStore {
 
     private func fetch(key: String, url: URL, maxPixelSize: Int) async -> UIImage? {
         let file = Self.fileURL(for: key, maxPixelSize: maxPixelSize)
-        if let data = await Self.readData(file), let img = Self.decode(data, maxPixelSize: maxPixelSize) {
+        if let data = await Self.readData(file),
+           let img = await Self.decodeOffActor(data, maxPixelSize: maxPixelSize) {
             return img
         }
         guard let data = try? await NetFetch.imageData(from: url),
-              let img = Self.decode(data, maxPixelSize: maxPixelSize) else { return nil }
+              let img = await Self.decodeOffActor(data, maxPixelSize: maxPixelSize) else { return nil }
         await persist(data, to: file)
         return img
+    }
+
+    /// Decode off the actor executor (v2.57): fetch() runs on
+    /// PosterStore's serial executor, so decoding here serialized
+    /// every poster in a scrolling grid behind one another — a
+    /// full screen of cells queued each decode (~5–30 ms each)
+    /// before the last one could paint. A detached utility task
+    /// lets decodes run in parallel across cores; the in-flight
+    /// table and file IO stay actor-protected.
+    private static func decodeOffActor(_ data: Data, maxPixelSize: Int) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            Self.decode(data, maxPixelSize: maxPixelSize)
+        }.value
     }
 
     /// Write the fetched bytes, and every `sweepEvery` writes run one
@@ -380,6 +394,38 @@ private actor PosterStore {
            let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
             return UIImage(cgImage: cg)
         }
-        return UIImage(data: data)
+        // Fallback (v2.57): UIImage(data:) decodes lazily — the
+        // bitmap would be produced on first draw, on the main
+        // thread, mid-scroll. Force the decode here, on this
+        // background thread, into a capped bitmap; if that fails
+        // (animated image, no CGImage) return the lazy image
+        // rather than dropping the poster entirely.
+        guard let img = UIImage(data: data) else { return nil }
+        if img.images != nil { return img }
+        return forceDecoded(img, maxPixelSize: maxPixelSize) ?? img
+    }
+
+    /// Draw the image into a bitmap context now, so the decode
+    /// happens on this (background) thread instead of on first
+    /// draw. Long side capped at maxPixelSize, same ceiling as
+    /// the thumbnail path; returns nil when no bitmap can be made.
+    private static func forceDecoded(_ img: UIImage, maxPixelSize: Int) -> UIImage? {
+        guard let cg = img.cgImage, cg.width > 0, cg.height > 0 else { return nil }
+        let scale = min(1.0, CGFloat(maxPixelSize) / CGFloat(max(cg.width, cg.height)))
+        let w = max(1, Int(CGFloat(cg.width) * scale))
+        let h = max(1, Int(CGFloat(cg.height) * scale))
+        let space = cg.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: space,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        // The decode happens in this draw, still on this
+        // background thread; makeImage then hands back the
+        // already-decoded bitmap.
+        ctx.interpolationQuality = .high
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let decoded = ctx.makeImage() else { return nil }
+        return UIImage(cgImage: decoded)
     }
 }
