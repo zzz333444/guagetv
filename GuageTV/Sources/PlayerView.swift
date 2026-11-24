@@ -371,7 +371,14 @@ struct PlayerView: View {
     @State private var didSkipIntro = false
     private var currentTime: Double { isMPV ? mpv.currentTime : native.currentTime }
     private var duration: Double { isMPV ? mpv.duration : native.duration }
-    private var seekStep: Double { Double(UserDefaults.standard.object(forKey: "seekStep") as? Int ?? 15) }
+    /// v2.53: Settings stores seekStep as a Double (AppStorage
+    /// 10.0/15.0/30.0); the old `as? Int` cast never matched an
+    /// NSNumber holding a Double, so the step was stuck at 15s
+    /// whatever the user picked. Read via NSNumber so both
+    /// stored shapes work.
+    private var seekStep: Double {
+        (UserDefaults.standard.object(forKey: "seekStep") as? NSNumber)?.doubleValue ?? 15
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -2056,6 +2063,14 @@ struct PlayerView: View {
                     if failoverInFlight {
                         Diagnostics.recordFailover(reason: classifyFailure(lastFailureMessage ?? reason), success: false)
                         failoverInFlight = false
+                        // v2.53: the new line failed to resolve
+                        // (Jar cold-start timeouts land here most)
+                        // — keep walking the remaining lines
+                        // instead of dying on the toast;
+                        // failoverToNextLine returns false once
+                        // every line has been tried.
+                        resolvingEpisode = false
+                        if failoverToNextLine() { return }
                     }
                     resolvingEpisode = false
                     showToast(reason)
@@ -2275,10 +2290,18 @@ struct PlayerView: View {
     /// v2.31: bucket a failure message for the failover ledger —
     /// the watchdog's "加载超时" stays its own bucket so a
     /// stall-driven failover is never misread as a decode error.
+    /// v2.53: mpv file-error and AVPlayer localizedDescription
+    /// arrive in English, so match English keywords too — before
+    /// this every engine-side failure landed in "引擎报错" no
+    /// matter the cause.
     private func classifyFailure(_ message: String) -> String {
-        if message.contains("超时") { return "加载超时" }
-        if message.contains("网络") || message.contains("连接") || message.contains("断开") { return "网络" }
-        if message.contains("解码") || message.contains("格式") || message.contains("不支持") { return "解码" }
+        let lower = message.lowercased()
+        if message.contains("超时") || lower.contains("timed out") || lower.contains("timeout") { return "加载超时" }
+        if message.contains("网络") || message.contains("连接") || message.contains("断开")
+            || lower.contains("connection") || lower.contains("network") || lower.contains("refused")
+            || lower.contains("unreachable") || lower.contains("reset by peer") { return "网络" }
+        if message.contains("解码") || message.contains("格式") || message.contains("不支持")
+            || lower.contains("decode") || lower.contains("unsupported") || lower.contains("invalid data") { return "解码" }
         return "引擎报错"
     }
 

@@ -147,6 +147,12 @@ enum JarProxyClient {
             return "连不上 Jar 代理：请检查代理地址与网络"
         case .cannotFindHost, .dnsLookupFailed:
             return "找不到 Jar 代理主机：请检查代理地址"
+        case .secureConnectionFailed, .serverCertificateUntrusted,
+             .serverCertificateHasBadDate, .serverCertificateNotYetValid,
+             .serverCertificateHasUnknownRoot, .clientCertificateRejected:
+            // v2.53: previously fell through to the default branch
+            // and showed the raw English certificate error.
+            return "证书验证失败：Jar 代理地址的 HTTPS 证书不受信任，请检查地址或证书"
         case .notConnectedToInternet:
             return "没有网络连接"
         default:

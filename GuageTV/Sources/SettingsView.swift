@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.52 · 模块深挖·缓存与资源链路"
+    static let buildLabel = "v2.53 · 播放器深挖·快进与换线修复"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.53", title: "播放器深挖·快进与换线修复", lines: [
+            "起播三段打点复盘（无改动）：解析/首帧/HLS 三段打点链路齐全——DetailView 与 PlayerView 的 resolve、首帧、LocalProxyServer 的播放列表/分片均有记录，设置 → 关于诊断卡一行汇总（各段平均耗时、缓存命中、最慢一段）与换线统计可读；已知口径：首帧平均混了直播与点播、mpv 与原生（recordFirstFrame 的引擎/直播参数现被丢弃），后续如需分桶再拆统计结构",
+            "双击快进步长实修：设置页存的是 Double（10.0/15.0/30.0），PlayerView 却用 as? Int 读——NSNumber 存 Double 时转 Int 失败，步长恒为 15 秒、改 10/30 秒无效；现改走 NSNumber.doubleValue，双击、快进/快退按钮、播放设置三处入口同修",
+            "横滑快进复查通过：设置页与播放器内设置 sheet 共用 player.scrub* 六个 AppStorage 键，PlayerView 直读绑定、播放中改档立即生效；双击是固定秒数、横滑是片长比例，单位不同是设计使然不统一；另修设置页一句过时说明——双击手势层盖在双引擎之上，原生引擎同样可用，并非只走 mpv",
+            "自动换线接力实修：换线后新线路解析失败（Jar 冷启动超时最常见）旧代码只弹 toast 就停了，不再试剩余线路；现失败时继续走下一条未试线路，全部试完才报最后一条的失败原因，换线账本每条线路各记一次尝试/成功",
+            "换线账本分类补英文：mpv file-error 与 AVPlayer 报错原文是英文，classifyFailure 只认中文关键词、此前一律落「引擎报错」；现补 timed out/timeout、connection/network/refused/unreachable/reset by peer、decode/unsupported/invalid data 三组英文匹配；Jar describe 另补证书类错误中文（此前走默认分支露英文原文）",
+        ]),
         Entry(version: "v2.52", title: "模块深挖·缓存与资源链路", lines: [
             "栏目缓存×全局参数复查：缓存键=模块ID|栏目ID|合并后参数JSON，改全局参数必换键、旧缓存永不命中；编辑器保存后立即 bypassCache 重载当前栏目；旧键残留文件靠 30 文件/5MB 上限与 24 小时清理兜底；TMDB 密钥换 key 不改数据、无 key 时栏目失败不缓存，故无需随 key 清缓存",
             "预告去重：trailerOptions 按 URL 去重——previewUrl 与 trailers[0] 常为同一条，旧代码会让预告选择器出现两个同名项，且 ForEach 以 URL 作 id 会撞键",
@@ -2013,14 +2020,14 @@ struct ControlSettingsView: View {
         SettingsPage(title: "操控") {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("双击快进/快退（mpv 引擎）").font(.headline).foregroundStyle(Theme.text)
+                    Text("双击快进/快退").font(.headline).foregroundStyle(Theme.text)
                     Picker("步长", selection: $step) {
                         Text("10 秒").tag(10.0)
                         Text("15 秒").tag(15.0)
                         Text("30 秒").tag(30.0)
                     }
                     .pickerStyle(.segmented)
-                    Text("播放页单击画面 = 播放/暂停；双击左半屏快退、右半屏快进。原生引擎用系统手势。")
+                    Text("播放页单击画面 = 播放/暂停；双击左半屏快退、右半屏快进，双引擎通用。")
                         .font(.footnote).foregroundStyle(Theme.textDim)
                 }
             }
