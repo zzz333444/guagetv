@@ -126,6 +126,19 @@ final class PosterCache {
     /// Drop decoded posters from memory (disk level untouched).
     func clearMemory() { memory.removeAllObjects() }
 
+    /// v2.55: purge one server's cached posters (or all Emby
+    /// posters when serverID is nil); disk level only — the
+    /// in-memory cache is keyed per server already and dies
+    /// with the process.
+    func clearEmbyPosters(serverID: String? = nil) async {
+        await store.clearEmbyPosters(serverID: serverID)
+    }
+
+    /// v2.55: bytes held by Emby posters on disk.
+    func embyPosterBytes() async -> Int64 {
+        await store.embyPosterBytes()
+    }
+
     /// v2.30: the effective memory tier, for the cache page and
     /// diagnostics — the v2.16 tiering is only real if the number
     /// on screen matches the limit the cache actually enforces.
@@ -291,7 +304,66 @@ private actor PosterStore {
         // (Old size-less files are simply orphaned and evicted.)
         let digest = SHA256.hash(data: Data("\(key)|\(maxPixelSize)".utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
+        // v2.55: Emby posters carry a short server tag in the
+        // filename ("emby-<12 hex>-<hash>.img") so one server's
+        // cached art can be purged when that server is removed
+        // (and so the cache page can measure the Emby share).
+        // The tag is the first 12 hex of SHA256(serverID); the
+        // server id is the part of the key between "emby|" and
+        // the last "|" (the id itself contains "|" — url|userID).
+        // Non-Emby keys keep the plain hash name; pre-v2.55
+        // files stay valid and age out through the normal sweep.
+        if key.hasPrefix("emby|") {
+            let rest = key.dropFirst("emby|".count)
+            if let lastPipe = rest.lastIndex(of: "|") {
+                let tag = Self.embyTag(for: String(rest[..<lastPipe]))
+                return diskDir.appendingPathComponent("emby-\(tag)-\(hex).img")
+            }
+        }
         return diskDir.appendingPathComponent(hex + ".img")
+    }
+
+    /// First 12 hex of SHA256(serverID) — the filename tag for
+    /// one server's Emby posters (v2.55).
+    static func embyTag(for serverID: String) -> String {
+        String(SHA256.hash(data: Data(serverID.utf8))
+            .map { String(format: "%02x", $0) }.joined().prefix(12))
+    }
+
+    /// Delete one server's cached posters (v2.55, called when
+    /// the server is removed) — or all Emby posters when
+    /// serverID is nil. Files are matched by the filename tag,
+    /// so pre-v2.55 hash-only files are untouched (they age out
+    /// via the normal LRU sweep).
+    func clearEmbyPosters(serverID: String?) async {
+        let prefix = serverID.map { "emby-\(Self.embyTag(for: $0))-" } ?? "emby-"
+        await Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            guard let urls = try? fm.contentsOfDirectory(
+                at: Self.diskDir, includingPropertiesForKeys: nil)
+            else { return }
+            for url in urls where url.lastPathComponent.hasPrefix(prefix) {
+                try? fm.removeItem(at: url)
+            }
+        }.value
+    }
+
+    /// Bytes held by Emby posters on disk (v2.55, cache page).
+    func embyPosterBytes() async -> Int64 {
+        await Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            guard let urls = try? fm.contentsOfDirectory(
+                at: Self.diskDir,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]) else { return 0 }
+            var total: Int64 = 0
+            for url in urls where url.lastPathComponent.hasPrefix("emby-") {
+                if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    total += Int64(size)
+                }
+            }
+            return total
+        }.value
     }
 
     /// Downsampled decode: ImageIO builds a ≤ maxPixelSize thumbnail

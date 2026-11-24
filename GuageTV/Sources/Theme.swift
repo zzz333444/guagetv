@@ -82,12 +82,17 @@ struct AmbientBackground: View {
     /// How strongly the artwork tints the page; the detail page
     /// pushes it higher so the cover melts into the whole screen.
     var intensity: Double = 0.45
+    /// v2.55: stable cache key for the artwork (Emby image URLs
+    /// carry a rotating api_key — without it the ambient glow
+    /// orphans on every token rotation, the same bug v2.44
+    /// fixed for the grids). Nil = key on the URL, as before.
+    var cacheKey: String? = nil
 
     var body: some View {
         ZStack {
             Theme.bg
             if let imageURL {
-                AmbientPosterImage(urlString: imageURL)
+                AmbientPosterImage(urlString: imageURL, cacheKey: cacheKey)
                     .blur(radius: 60)
                     .opacity(intensity)
                     .saturation(1.2)
@@ -105,6 +110,7 @@ struct AmbientBackground: View {
 /// Shares the poster disk cache, so the detail cover is fetched once.
 private struct AmbientPosterImage: View {
     let urlString: String
+    var cacheKey: String? = nil
     @State private var image: UIImage?
 
     var body: some View {
@@ -116,7 +122,7 @@ private struct AmbientPosterImage: View {
             }
         }
         .task(id: urlString) {
-            image = await PosterCache.shared.load(urlString, maxPixelSize: 240)
+            image = await PosterCache.shared.load(urlString, maxPixelSize: 240, cacheKey: cacheKey)
         }
     }
 }

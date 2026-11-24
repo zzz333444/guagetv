@@ -20,6 +20,12 @@ final class DownloadManager: NSObject, ObservableObject {
         var vodName: String
         var episodeName: String
         var pic: String
+        /// v2.55: stable cache key for the poster (Emby image
+        /// URLs carry a rotating api_key — keying the download
+        /// page's poster on the URL orphaned it on every token
+        /// rotation, the same bug v2.44 fixed for browse pages).
+        /// Nil = fall back to the URL, as before.
+        var picCacheKey: String? = nil
         var remoteURL: String
         var header: [String: String]
         var isHLS: Bool
@@ -279,18 +285,26 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // MARK: public API
 
+    /// v2.55: returns the queued item (or the existing live one
+    /// when the same URL is already in the list) so callers can
+    /// track its finish; nil only when the URL is unusable.
+    @discardableResult
     func enqueue(vodName: String, episodeName: String, pic: String,
-                 url remote: String, header: [String: String]) {
-        guard !remote.isEmpty, URL(string: remote) != nil else { return }
-        if items.contains(where: { $0.remoteURL == remote && $0.state != "failed" }) { return }
+                 picCacheKey: String? = nil,
+                 url remote: String, header: [String: String]) -> Item? {
+        guard !remote.isEmpty, URL(string: remote) != nil else { return nil }
+        if let existing = items.first(where: { $0.remoteURL == remote && $0.state != "failed" }) {
+            return existing
+        }
         let item = Item(id: UUID().uuidString, vodName: vodName, episodeName: episodeName,
-                        pic: pic, remoteURL: remote, header: header,
+                        pic: pic, picCacheKey: picCacheKey, remoteURL: remote, header: header,
                         isHLS: remote.lowercased().contains(".m3u8"))
         items.insert(item, at: 0)
         save()
         // 又有新集入队：该剧不再算整剧下完。
         clearCompletedSeriesIfNeeded(vodName)
         if item.isHLS { startHLS(item) } else { startFile(item) }
+        return item
     }
 
     func remove(_ item: Item) {

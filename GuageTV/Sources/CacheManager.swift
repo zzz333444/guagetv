@@ -80,6 +80,19 @@ enum CacheManager {
         await MainActor.run { PosterCache.shared.clearMemory() }
     }
 
+    /// v2.55: Emby posters on disk (a subset of posterBytes —
+    /// shown separately on the cache page, NOT added to the
+    /// total twice).
+    static func embyPosterSize() async -> Int64 {
+        await PosterCache.shared.embyPosterBytes()
+    }
+
+    /// v2.55: clear Emby posters only (one server, or all when
+    /// serverID is nil). Other posters and downloads untouched.
+    static func clearEmbyPosterCache(serverID: String? = nil) async {
+        await PosterCache.shared.clearEmbyPosters(serverID: serverID)
+    }
+
     /// Disk-cache governance (v2.30): the three bounded disk
     /// caches and their caps — poster images 150 MB
     /// (PosterStore evicts oldest-first), module column results
@@ -92,17 +105,22 @@ enum CacheManager {
         var posterBytes: Int64 = 0
         var moduleColumnBytes: Int64 = 0
         var discoverBytes: Int64 = 0
+        /// v2.55: Emby posters on disk — a subset of posterBytes,
+        /// shown on its own row, never added to `total` twice.
+        var embyPosterBytes: Int64 = 0
         var total: Int64 { posterBytes + moduleColumnBytes + discoverBytes }
     }
 
     static func diskCacheBreakdown() async -> DiskCacheBreakdown {
         async let posters = posterCacheSize()
         async let columns = FWDColumnCache.size()
+        async let emby = embyPosterSize()
         let discover = TMDBClient.discoverCacheFileSize()
         return DiskCacheBreakdown(
             posterBytes: await posters,
             moduleColumnBytes: await columns,
-            discoverBytes: discover)
+            discoverBytes: discover,
+            embyPosterBytes: await emby)
     }
 
     /// Clear the three governed disk caches + the in-memory
@@ -221,6 +239,27 @@ struct CacheSettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("模块与发现缓存").font(.headline).foregroundStyle(Theme.text)
                         diskRow(title: "海报磁盘缓存", bytes: breakdown?.posterBytes, cap: "上限 150 MB，自动清理最旧的")
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 10) {
+                                    Text("其中 Emby 海报").foregroundStyle(Theme.text)
+                                    Spacer()
+                                    Text(loaded ? CacheManager.format(breakdown?.embyPosterBytes ?? 0) : "计算中…")
+                                        .foregroundStyle(Theme.textDim)
+                                        .monospacedDigit()
+                                }
+                                Text("已按服务器隔离；删除服务器时自动清理该台海报")
+                                    .font(.caption).foregroundStyle(Theme.textDim)
+                            }
+                            Button("清理") {
+                                Task { Haptics.tap(); await clearEmbyPosters(); Haptics.success() }
+                            }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Theme.glass, in: Capsule())
+                            .foregroundStyle(Theme.text)
+                            .disabled(busy || !loaded || (breakdown?.embyPosterBytes ?? 0) == 0)
+                        }
                         diskRow(title: "模块栏目缓存", bytes: breakdown?.moduleColumnBytes, cap: "上限 5 MB / 30 条，超期自动清理")
                         diskRow(title: "发现页缓存", bytes: breakdown?.discoverBytes, cap: "单个文件，随刷新整体重写")
                         Divider().background(Theme.glassStroke)
@@ -315,6 +354,15 @@ struct CacheSettingsView: View {
     private func clearDiskCaches() async {
         busy = true
         await CacheManager.clearDiskCaches()
+        await refresh()
+        busy = false
+    }
+
+    /// v2.55: clear Emby posters only (all servers); other
+    /// posters and downloaded videos are untouched.
+    private func clearEmbyPosters() async {
+        busy = true
+        await CacheManager.clearEmbyPosterCache()
         await refresh()
         busy = false
     }

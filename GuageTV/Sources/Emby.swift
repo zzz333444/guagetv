@@ -112,6 +112,10 @@ enum EmbyClient {
             UserDefaults.standard.set(list.first?.id ?? "", forKey: activeKey)
         }
         syncLegacy()
+        // v2.55: drop the removed server's cached posters — its
+        // art must not linger (or resurface under a re-added
+        // server with the same item ids).
+        Task { await PosterCache.shared.clearEmbyPosters(serverID: id) }
     }
 
     struct Item: Identifiable {
@@ -998,6 +1002,16 @@ struct EmbySeriesView: View {
     /// v2.44: one-line download feedback under the season chips
     /// ("已加入下载：第 3 集" / "这一集取不到地址，下载不了").
     @State private var downloadNote: String?
+    /// v2.55: in-flight Emby downloads tracked by item id so
+    /// the note above can report the actual finish ("第 3 集
+    /// 已下载完成") instead of going stale at "已加入下载"
+    /// while the user stays on this page. Paused items stay
+    /// pending — a retry can still finish them.
+    @ObservedObject private var downloads = DownloadManager.shared
+    @State private var pendingDownloads: [String: String] = [:]
+    @State private var pendingSeason = false
+    @State private var batchDone = 0
+    @State private var batchFailed = 0
     /// v2.12: full item (People/Genres/OfficialRating) for the
     /// media-info card + cast row; nil until the fetch lands or
     /// when it fails — the page works off `series` either way.
@@ -1087,7 +1101,7 @@ struct EmbySeriesView: View {
                                             .foregroundStyle(Theme.accent)
                                     }
                                     .padding(12)
-                                    .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
+                                    .glassSurface(RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous), shadow: false)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1142,7 +1156,7 @@ struct EmbySeriesView: View {
                                     }
                                 }
                                 .padding(12)
-                                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
+                                .glassSurface(RoundedRectangle(cornerRadius: Theme.posterRadius, style: .continuous), shadow: false)
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
@@ -1164,9 +1178,19 @@ struct EmbySeriesView: View {
             }
         }
         .animation(Theme.animStandard, value: loading)
-        .background(AmbientBackground(imageURL: nil))
+        // v2.55: ambient glow from the series poster (intensity
+        // 0.65, same as the site detail page) instead of a flat
+        // background; the cache key is the stable one, so token
+        // rotation does not orphan the glow.
+        .background(AmbientBackground(
+            imageURL: EmbyClient.imageURL(itemID: series.id),
+            intensity: 0.65,
+            cacheKey: EmbyClient.imageCacheKey(itemID: series.id)))
         .navigationTitle(series.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: downloads.items.map { $0.id + "|" + $0.state }) { _ in
+            updateDownloadNotes()
+        }
         .fullScreenCover(item: $playSelection) { sel in
             PlayerView(episodes: sel.episodes, startIndex: sel.index,
                        header: [:], title: series.name,
@@ -1251,6 +1275,7 @@ struct EmbySeriesView: View {
 
     private func downloadEpisode(_ ep: EmbyClient.Item) async {
         let name = episodeDisplayName(ep)
+        if pendingDownloads.isEmpty { batchDone = 0; batchFailed = 0; pendingSeason = false }
         downloadNote = "正在取 \(name) 的下载地址…"
         guard let url = try? await EmbyClient.streamURL(itemID: ep.id) else {
             downloadNote = "\(name) 取不到播放地址，下载不了"
@@ -1260,10 +1285,22 @@ struct EmbySeriesView: View {
             downloadNote = "\(name) 的地址下载不了"
             return
         }
-        DownloadManager.shared.enqueue(
+        guard let item = DownloadManager.shared.enqueue(
             vodName: series.name, episodeName: name,
             pic: EmbyClient.imageURL(itemID: series.id),
-            url: url, header: [:])
+            picCacheKey: EmbyClient.imageCacheKey(itemID: series.id),
+            url: url, header: [:]) else {
+            downloadNote = "\(name) 的地址下载不了"
+            return
+        }
+        // Already finished → say so instead of "已加入下载";
+        // still downloading / paused → track it so the note
+        // updates when it actually lands (v2.55).
+        if item.state == "done" {
+            downloadNote = "\(name) 已经下载好了"
+            return
+        }
+        pendingDownloads[item.id] = name
         downloadNote = "已加入下载：\(name)"
     }
 
@@ -1272,6 +1309,8 @@ struct EmbySeriesView: View {
     /// the ones that won't resolve or probe, report the count.
     private func downloadSeason() async {
         guard !episodes.isEmpty else { return }
+        if pendingDownloads.isEmpty { batchDone = 0; batchFailed = 0 }
+        pendingSeason = true
         downloadNote = "正在取整季下载地址…"
         var added = 0
         var skipped = 0
@@ -1293,15 +1332,73 @@ struct EmbySeriesView: View {
             for (id, url) in outcomes {
                 guard let ep = episodes.first(where: { $0.id == id }),
                       let url else { skipped += 1; continue }
-                DownloadManager.shared.enqueue(
+                guard let item = DownloadManager.shared.enqueue(
                     vodName: series.name, episodeName: episodeDisplayName(ep),
                     pic: EmbyClient.imageURL(itemID: series.id),
-                    url: url, header: [:])
+                    picCacheKey: EmbyClient.imageCacheKey(itemID: series.id),
+                    url: url, header: [:]) else { skipped += 1; continue }
+                // Already done counts toward the batch total and
+                // the finish summary; anything still in flight is
+                // tracked so the note updates when it lands.
+                if item.state == "done" { batchDone += 1 }
+                else { pendingDownloads[item.id] = episodeDisplayName(ep) }
                 added += 1
             }
         }
         downloadNote = "整季下载已加入 \(added) 集"
             + (skipped > 0 ? "，\(skipped) 集下不了跳过" : "")
+        // Nothing left in flight and every queued episode was
+        // already done: report finished at once instead of
+        // waiting on a state change that will never come.
+        if pendingDownloads.isEmpty && added > 0 && batchDone == added {
+            downloadNote = "整季已全部下载完成"
+            batchDone = 0; batchFailed = 0; pendingSeason = false
+        }
+    }
+
+    /// v2.55: fold finished/failed tracked downloads out of
+    /// the pending set and report them in the note. Single
+    /// episodes report at once; a season batch reports a
+    /// summary when its last item resolves. Paused items stay
+    /// pending — a retry can still finish them. An item that
+    /// vanished from the list (deleted on the downloads page)
+    /// leaves the set without counting either way.
+    private func updateDownloadNotes() {
+        guard !pendingDownloads.isEmpty else { return }
+        var finishedName: String?
+        // Snapshot first: removing keys while iterating the
+        // live dictionary traps at runtime.
+        for (id, name) in Array(pendingDownloads) {
+            guard let item = downloads.items.first(where: { $0.id == id }) else {
+                pendingDownloads.removeValue(forKey: id)
+                continue
+            }
+            switch item.state {
+            case "done":
+                pendingDownloads.removeValue(forKey: id)
+                batchDone += 1
+                finishedName = name
+            case "failed":
+                pendingDownloads.removeValue(forKey: id)
+                batchFailed += 1
+            default:
+                break
+            }
+        }
+        guard pendingDownloads.isEmpty else { return }
+        defer { batchDone = 0; batchFailed = 0 }
+        if pendingSeason {
+            pendingSeason = false
+            guard batchDone + batchFailed > 0 else { return }
+            downloadNote = "整季下载完成：\(batchDone) 集已下好"
+                + (batchFailed > 0 ? "，\(batchFailed) 集失败" : "")
+        } else if batchDone > 0 && batchFailed == 0 {
+            downloadNote = batchDone == 1
+                ? "\(finishedName ?? "") 已下载完成"
+                : "已下载完成 \(batchDone) 集"
+        } else if batchFailed > 0 {
+            downloadNote = "下载失败 \(batchFailed) 集，可去下载页重试"
+        }
     }
 }
 
