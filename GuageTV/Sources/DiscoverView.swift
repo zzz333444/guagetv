@@ -37,9 +37,6 @@ struct DiscoverView: View {
     /// v2.45: paging-scroll position for the hero carousel
     /// (replaces the page TabView — see hero).
     @State private var heroScrollID: Int?
-    /// v2.45: installed modules that carry a recommended
-    /// column, resolved once per load from the on-disk index.
-    @State private var recommendedModules: [(record: FWDRecord, entry: FWDModuleEntry)] = []
 
     private var heroItems: [TMDBClient.TMDBTitle] { Array(trending.prefix(8)) }
     private var heroArt: String? {
@@ -56,29 +53,11 @@ struct DiscoverView: View {
             && movies.isEmpty && shows.isEmpty && top.isEmpty
     }
 
-    /// v2.45: a module "recommended column" is a list entry
-    /// whose title reads 推荐 / 热门 / 精选, or whose id says
-    /// recommend / trending / popular / hot. The first such
-    /// entry per module wins; modules without one are skipped.
-    private static func recommendedEntries() -> [(record: FWDRecord, entry: FWDModuleEntry)] {
-        FWDStore.records().compactMap { record in
-            guard let entry = record.meta.listModules.first(where: { entry in
-                let title = entry.title.lowercased()
-                let id = entry.id.lowercased()
-                return title.contains("推荐") || title.contains("热门") || title.contains("精选")
-                    || id.contains("recommend") || id.contains("trending")
-                    || id.contains("popular") || id.contains("hot")
-            }) else { return nil }
-            return (record, entry)
-        }
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 26) {
                     if !TMDBClient.isOn {
-                        if !recommendedModules.isEmpty { moduleRecommendRow }
                         EmptyStateView(
                             icon: "sparkles.tv",
                             title: "发现页由 TMDB 驱动",
@@ -100,7 +79,6 @@ struct DiscoverView: View {
                             .padding(.top, 90)
                     } else {
                         if !trending.isEmpty { hero }
-                        if !recommendedModules.isEmpty { moduleRecommendRow }
                         posterRow("本周热门", week, rowIndex: 0)
                         posterRow("正在热映", nowPlaying, rowIndex: 1)
                         posterRow("热门电影", movies, rowIndex: 2)
@@ -140,14 +118,6 @@ struct DiscoverView: View {
     /// a cold disk read. It now runs detached; the paint still
     /// lands on the main actor.
     private func load() async {
-        // v2.46: 模块索引（读 index.json + 解码）此前在主 actor
-        // 上同步跑——.task 是主线程隔离的，冷启动首帧前多一次
-        // 磁盘读。现改走 detached utility 任务，绘图仍回主线程。
-        let indexStart = Date()
-        recommendedModules = await Task.detached(priority: .utility) {
-            Self.recommendedEntries()
-        }.value
-        Diagnostics.log("冷启动", "模块索引完成 · \(recommendedModules.count) 个推荐栏目 · 用时 \(Int(Date().timeIntervalSince(indexStart) * 1000))ms · 启动后 \(StartupTiming.msSinceStart())ms")
         guard TMDBClient.isOn else { loading = false; return }
         let cache = await Task.detached(priority: .userInitiated) {
             TMDBClient.loadDiscoverCache()
@@ -170,6 +140,14 @@ struct DiscoverView: View {
         movies = cache.movies
         shows = cache.shows
         top = cache.top
+        syncHeroPosition()
+    }
+
+    /// v2.50: trending 落定后把分页位置钉在合法页上（见 hero）——
+    /// 首到即指到第一页，刷新后越界的 heroIndex 夹回 0。
+    private func syncHeroPosition() {
+        if heroScrollID == nil { heroScrollID = trending.first?.id }
+        if heroIndex >= trending.count { heroIndex = 0 }
     }
 
     /// v2.15 incremental refresh: the old version awaited all six
@@ -244,7 +222,9 @@ struct DiscoverView: View {
     /// of waiting for the other five (see refresh()).
     private func applyList(_ key: Int, _ titles: [TMDBClient.TMDBTitle]) {
         switch key {
-        case 0: trending = titles
+        case 0:
+            trending = titles
+            syncHeroPosition()
         case 1: week = titles
         case 2: nowPlaying = titles
         case 3: movies = titles
@@ -326,47 +306,66 @@ struct DiscoverView: View {
     /// drive heroIndex; heroIndex drives the scroll position
     /// back the other way (each direction guarded so the two
     /// bindings never ping-pong).
+    /// v2.50: paging-misalignment root fix (user screenshot:
+    /// neighbour page's art + half a synopsis peeking in from
+    /// the left, whole page shifted right). The v2.45 pages
+    /// sized themselves with `.containerRelativeFrame(.horizontal)`
+    /// — inside a nested ScrollView under ignoresSafeArea(top)
+    /// that measurement can come back including the safe area
+    /// on the first frame, so each page was wider than the
+    /// visible area and every paging stop landed shifted right;
+    /// with scrollPosition starting nil there was no alignment
+    /// anchor at all. Pages now take an explicit width from a
+    /// GeometryReader at the hero level (the real laid-out
+    /// width), carry an explicit .id, scroll with anchor
+    /// .leading, and syncHeroPosition() pins the position to
+    /// the first page the moment trending lands — so a paging
+    /// stop can only be an exact multiple of the page width.
     private var hero: some View {
-        ZStack(alignment: .bottom) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(heroItems) { item in
-                        heroPage(item)
-                            .containerRelativeFrame(.horizontal)
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(heroItems) { item in
+                            heroPage(item)
+                                .frame(width: geo.size.width)
+                                .id(item.id)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $heroScrollID, anchor: .leading)
+                .frame(height: 540)
+                .onChange(of: heroScrollID) { _, newID in
+                    guard let newID,
+                          let idx = heroItems.firstIndex(where: { $0.id == newID }),
+                          idx != heroIndex else { return }
+                    heroIndex = idx
+                    lastHeroTouch = Date()
+                    prefetchNextHeroArt()
+                }
+                .onChange(of: heroIndex) { _, _ in
+                    guard heroItems.indices.contains(heroIndex) else { return }
+                    let id = heroItems[heroIndex].id
+                    guard heroScrollID != id else { return }
+                    heroScrollID = id
+                }
+
+                // Dot indicators (Rex: small dots under the synopsis;
+                // v2.20: the active page stretches into a pill, the
+                // rest stay dots — a row of equal circles gave no
+                // sense of position at a glance).
+                HStack(spacing: 6) {
+                    ForEach(heroItems.indices, id: \.self) { i in
+                        Capsule()
+                            .fill(i == heroIndex ? Color.white : Color.white.opacity(0.35))
+                            .frame(width: i == heroIndex ? 18 : 7, height: 7)
                     }
                 }
-                .scrollTargetLayout()
+                .padding(.bottom, 14)
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $heroScrollID)
             .frame(height: 540)
-            .onChange(of: heroScrollID) { _, newID in
-                guard let newID,
-                      let idx = heroItems.firstIndex(where: { $0.id == newID }),
-                      idx != heroIndex else { return }
-                heroIndex = idx
-                lastHeroTouch = Date()
-                prefetchNextHeroArt()
-            }
-            .onChange(of: heroIndex) { _, _ in
-                guard heroItems.indices.contains(heroIndex) else { return }
-                let id = heroItems[heroIndex].id
-                guard heroScrollID != id else { return }
-                heroScrollID = id
-            }
-
-            // Dot indicators (Rex: small dots under the synopsis;
-            // v2.20: the active page stretches into a pill, the
-            // rest stay dots — a row of equal circles gave no
-            // sense of position at a glance).
-            HStack(spacing: 6) {
-                ForEach(heroItems.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(i == heroIndex ? Color.white : Color.white.opacity(0.35))
-                        .frame(width: i == heroIndex ? 18 : 7, height: 7)
-                }
-            }
-            .padding(.bottom, 14)
         }
         .frame(height: 540)
     }
@@ -419,24 +418,10 @@ struct DiscoverView: View {
                         .foregroundStyle(.white.opacity(0.88))
                         .lineLimit(2)
                 }
-                // v2.32: Rex hero carries a white play capsule —
-                // the old hero only opened the sheet on tap, so
-                // the fastest path to watching was hidden behind
-                // a long-press menu. Same white capsule the
-                // TMDB detail sheet uses, straight to cross-line
-                // search for this title.
-                Button {
-                    openSearch(for: item.title)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill").font(.caption)
-                        Text("播放").font(.subheadline.weight(.bold))
-                    }
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 18).padding(.vertical, 9)
-                    .background(.white, in: Capsule())
-                }
-                .buttonStyle(.plain)
+                // v2.50: the white play capsule (v2.32) is gone —
+                // the user asked the cover to only present. Tap
+                // still opens the TMDB detail sheet; the context
+                // menu still offers cross-line search.
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 34)
@@ -526,54 +511,6 @@ struct DiscoverView: View {
                     .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 18)
-            }
-        }
-    }
-
-    /// v2.45: "模块推荐" — one glass card per installed module
-    /// that declares a recommended column (see
-    /// recommendedEntries). Tapping opens that module's column
-    /// page directly; modules without such a column contribute
-    /// nothing, and with no module at all the row hides.
-    private var moduleRecommendRow: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("模块推荐").font(.title3.bold()).foregroundStyle(Theme.text)
-                Spacer()
-            }
-            .padding(.horizontal, 18)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(recommendedModules, id: \.record.id) { pair in
-                        NavigationLink {
-                            FWDWidgetView(record: pair.record, initialEntryID: pair.entry.id)
-                        } label: {
-                            HStack(spacing: 10) {
-                                if !pair.record.meta.icon.isEmpty {
-                                    PosterImage(urlString: pair.record.meta.icon, pixelSize: 240)
-                                        .frame(width: 34, height: 34)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                } else {
-                                    Image(systemName: "puzzlepiece.extension")
-                                        .foregroundStyle(Theme.accent)
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(pair.record.meta.localized(pair.entry.title))
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(Theme.text).lineLimit(1)
-                                    Text(pair.record.meta.localized(
-                                        pair.record.meta.title.isEmpty ? pair.record.id : pair.record.meta.title))
-                                        .font(.caption2).foregroundStyle(Theme.textDim).lineLimit(1)
-                                }
-                            }
-                            .padding(10)
-                            .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.posterRadius))
-                        }
-                        .buttonStyle(.plain)
-                        .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
-                    }
-                }
                 .padding(.horizontal, 18)
             }
         }

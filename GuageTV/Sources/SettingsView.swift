@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.49 · 稳定扫荡·Jar 超时中文"
+    static let buildLabel = "v2.50 · 发现页三修"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.50", title: "发现页三修", lines: [
+            "发现页「模块推荐」行整个去掉：v2.45 加的行连同发现页里的模块索引加载一起移除，发现页只剩 TMDB 六行；模块入口仍在资源库「模块」页，模块本身不受影响",
+            "hero 横滑分页错位修复（用户真机反馈：左缘露出相邻页剧照与半截简介、整页右偏）：根因是 v2.45 分页 ScrollView 用 containerRelativeFrame 量页宽，在嵌套 ScrollView＋顶部 ignoresSafeArea 下首帧会量到含安全区的宽度、页比可视区宽，分页落点整体右偏，且 scrollPosition 初始 nil 时没有任何对齐锚点；现改 GeometryReader 在 hero 一级量真实布局宽、每页显式定宽＋.id＋anchor: .leading，trending 首到即把位置钉到第一页，分页落点只可能是页宽的整数倍",
+            "hero 封面「播放」白胶囊去掉：封面只展示；点封面进 TMDB 详情、长按菜单跨线搜索的入口不变",
+        ]),
         Entry(version: "v2.49", title: "稳定扫荡·Jar 超时中文", lines: [
             "全仓强制解包复查：唯一真强制解包是 BackupCrypto 生成随机盐时的 $0.baseAddress!，现改 guard（拿不到地址即报错、不再赌它一定合法）；其余 try!/as!/显式 ! 均为零（仅剩 WKWebView 协议签名的隐式解包与 required init 的 fatalError 桩，协议与初始化约定改不了）",
             "主线程阻塞审计：启动路径（配置解析、历史解码、蜘蛛目录清理）与列表滚动路径（海报解码、栏目缓存）均已在后台；三处信号量等待（HLS 代理取流、JS 引擎、SMB 分块读）与本地代理 2 秒握手均不在主线程；其余同步读文件都是单次用户操作的小文件，或命中解析缓存不再重复解析",
