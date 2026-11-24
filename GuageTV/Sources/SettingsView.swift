@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.50 · 发现页三修"
+    static let buildLabel = "v2.51 · 更新日志补齐·版本口径复查"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.51", title: "更新日志补齐·版本口径复查", lines: [
+            "更新日志补齐核查：v2.39–v2.50 十二条逐条对过第九夜计划文件记录，内容对齐、严格降序、无重复；全仓共 71 条（v1.78 起，v1.88/v1.89 未发版故无条目）",
+            "版本口径全查：buildLabel、project.yml（2.51/251）、更新日志首条三处一致；设置页「更新日志」行与关于页「版本」行均从 buildLabel 自动取，不会再落后；全仓其余 v2.49/v2.50 字面量只剩版本注释与条目本身；README 里残留的旧版标题已清理",
+            "机动池复查结论（无改动）：WebDAV 自动备份缺配置时的中文提示齐全——无服务器/无口令各有置灰原因与去处指引，选中服务器被删回落第一台；模块超时点名覆盖栏目/搜索/详情/自检四条可见链路，弹幕/资源/字幕三条按 v2.39 既定口径静默吞错",
+        ]),
         Entry(version: "v2.50", title: "发现页三修", lines: [
             "发现页「模块推荐」行整个去掉：v2.45 加的行连同发现页里的模块索引加载一起移除，发现页只剩 TMDB 六行；模块入口仍在资源库「模块」页，模块本身不受影响",
             "hero 横滑分页错位修复（用户真机反馈：左缘露出相邻页剧照与半截简介、整页右偏）：根因是 v2.45 分页 ScrollView 用 containerRelativeFrame 量页宽，在嵌套 ScrollView＋顶部 ignoresSafeArea 下首帧会量到含安全区的宽度、页比可视区宽，分页落点整体右偏，且 scrollPosition 初始 nil 时没有任何对齐锚点；现改 GeometryReader 在 hero 一级量真实布局宽、每页显式定宽＋.id＋anchor: .leading，trending 首到即把位置钉到第一页，分页落点只可能是页宽的整数倍",
