@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.51 · 更新日志补齐·版本口径复查"
+    static let buildLabel = "v2.52 · 模块深挖·缓存与资源链路"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.52", title: "模块深挖·缓存与资源链路", lines: [
+            "栏目缓存×全局参数复查：缓存键=模块ID|栏目ID|合并后参数JSON，改全局参数必换键、旧缓存永不命中；编辑器保存后立即 bypassCache 重载当前栏目；旧键残留文件靠 30 文件/5MB 上限与 24 小时清理兜底；TMDB 密钥换 key 不改数据、无 key 时栏目失败不缓存，故无需随 key 清缓存",
+            "预告去重：trailerOptions 按 URL 去重——previewUrl 与 trailers[0] 常为同一条，旧代码会让预告选择器出现两个同名项，且 ForEach 以 URL 作 id 会撞键",
+            "资源链路边界：loadResource 返回空数组时不再直接返回空，改为继续走 loadDetail 兜底，与调用抛错时的回退路径一致；返回非数组结果时原有回退不变",
+            "官方示例自检（Node 全真 harness，shim 从当前 Modules.swift 现抽、三模块源码现拉）：bangumi 5/5、music-demo 7/7 栏目不抛错，复测 dailySchedule 9 条、trending 22 条；rex-tmdb 7 栏因本机无 key 报中文未配置密钥、片单 0 条系 TMDB 官网 CF 挑战（已知）；整轮跑时多栏 0 条系本机出口间歇性 stalls，直连复测均秒回，非模块/壳代码问题",
+        ]),
         Entry(version: "v2.51", title: "更新日志补齐·版本口径复查", lines: [
             "更新日志补齐核查：v2.39–v2.50 十二条逐条对过第九夜计划文件记录，内容对齐、严格降序、无重复；全仓共 71 条（v1.78 起，v1.88/v1.89 未发版故无条目）",
             "版本口径全查：buildLabel、project.yml（2.51/251）、更新日志首条三处一致；设置页「更新日志」行与关于页「版本」行均从 buildLabel 自动取，不会再落后；全仓其余 v2.49/v2.50 字面量只剩版本注释与条目本身；README 里残留的旧版标题已清理",

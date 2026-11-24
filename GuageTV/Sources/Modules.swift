@@ -3768,13 +3768,20 @@ struct FWDDetailView: View {
     /// v2.39 (R1): playable preview/trailer URLs from the
     /// detail — previewUrl first, then each trailers entry.
     /// A lone URL is just "预告"; several get numbered.
+    /// v2.52: deduped by URL — modules commonly echo the
+    /// same trailer in previewUrl and trailers[0], and the
+    /// picker below keys its ForEach by URL, so a duplicate
+    /// would show twice and break SwiftUI's id uniqueness.
     private var trailerOptions: [(name: String, url: String)] {
         var out: [(name: String, url: String)] = []
-        if !full.previewUrl.isEmpty { out.append((name: "预告", url: full.previewUrl)) }
-        for (i, t) in full.trailers.enumerated() {
-            out.append((name: "预告 \(i + 1)", url: t.videoUrl))
+        var seen = Set<String>()
+        func append(_ url: String) {
+            guard !url.isEmpty, seen.insert(url).inserted else { return }
+            out.append((name: "预告", url: url))
         }
-        if out.count == 1 { out[0].name = "预告" }
+        append(full.previewUrl)
+        for t in full.trailers { append(t.videoUrl) }
+        for i in out.indices { if out.count > 1 { out[i].name = "预告 \(i + 1)" } }
         return out
     }
 
@@ -4220,7 +4227,7 @@ struct FWDDetailView: View {
                                          episodeFallback: episodeIndex + 1), meta: meta)
             if let result = try? await runtime.call(function: fn, params: params, source: source),
                let resources = result as? [[String: Any]] {
-                return resources.enumerated().compactMap { i, dict in
+                let lines = resources.enumerated().compactMap { i, dict in
                     var res = FWDResource(dict, index: i)
                     guard !res.url.isEmpty else { return nil }
                     for (k, v) in ep.customHeaders where res.customHeaders[k] == nil {
@@ -4229,6 +4236,12 @@ struct FWDDetailView: View {
                     res.customHeaders.removeValue(forKey: "X-Forward-Skip-Redirect-Probe")
                     return res
                 }
+                // v2.52: only a non-empty line list ends the
+                // chain here. An empty array used to return []
+                // outright, skipping the loadDetail fallback
+                // below — while a thrown call fell through to
+                // it. Both "no lines" outcomes now try detail.
+                if !lines.isEmpty { return lines }
             }
         }
         if !ep.link.isEmpty, meta.hasDetail {
