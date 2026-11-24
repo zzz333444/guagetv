@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.53 · 播放器深挖·快进与换线修复"
+    static let buildLabel = "v2.54 · 搜索深挖·年份与超时汇总"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.54", title: "搜索深挖·年份与超时汇总", lines: [
+            "同名合并年份边界实修：合并键原先直接用原始 vod_year——「2024」「2024年」「2024-01-01」三种写法并存时同一部片会被拆成两张卡；现年份统一取首个 19xx/20xx 四位数，合并键、年份筛选、年份 chips、海报卡副行四处同口径；模块条目本就取 releaseDate 前四位，不受影响；同名不同年份仍各成一张卡、同名同年不同类型（电影/电视剧）仍合一张——类型字段各站写法不统一，进键会误拆",
+            "模块组折叠状态修复：每来一个模块结果就整组重算 collapsedModules，手动收起第一组后下一个模块一到又被重新展开；现只把新到的第二组及以后折叠，手动收/展不再被后续流式结果冲掉；第一组默认展开、其余默认收起不变",
+            "超时中文汇总补齐：此前只有 CMS 阶段会点名失败站点，py/JS/Jar/模块超时或失败只进「有响应」计数、站名全丢；现四池与 CMS 共用同一份 errorSamples（各 3 条上限、按各池时限点名：py/JS/模块 15 秒、Jar 25 秒），零结果时进无结果页的失败说明、有结果时追加进底部汇总；熔断跳过的站不采样，只记实际试过的站",
+            "排序/折叠一致性复查（无改动）：模块组按导入顺序排、置于海报网上方，两浏览器一致、单站模式下隐藏；站点组靠左侧栏筛选、无结果站与无结果模块各自默认折叠成一行计数；站点结果无逐组折叠是既有设计（栏筛选即折叠入口），模块组可逐组折叠是 v2.34 既有设计，两者机制不同但各有入口",
+        ]),
         Entry(version: "v2.53", title: "播放器深挖·快进与换线修复", lines: [
             "起播三段打点复盘（无改动）：解析/首帧/HLS 三段打点链路齐全——DetailView 与 PlayerView 的 resolve、首帧、LocalProxyServer 的播放列表/分片均有记录，设置 → 关于诊断卡一行汇总（各段平均耗时、缓存命中、最慢一段）与换线统计可读；已知口径：首帧平均混了直播与点播、mpv 与原生（recordFirstFrame 的引擎/直播参数现被丢弃），后续如需分桶再拆统计结构",
             "双击快进步长实修：设置页存的是 Double（10.0/15.0/30.0），PlayerView 却用 as? Int 读——NSNumber 存 Double 时转 Int 失败，步长恒为 15 秒、改 10/30 秒无效；现改走 NSNumber.doubleValue，双击、快进/快退按钮、播放设置三处入口同修",

@@ -455,16 +455,18 @@ struct SearchView: View {
         guard selectedYear != nil || selectedType != nil else { return results }
         return results.compactMap { group in
             let items = group.items.filter { item in
-                (selectedYear == nil || item.year == selectedYear)
+                (selectedYear == nil || Self.normalizedYear(item.year) == selectedYear)
                 && (selectedType == nil || item.typeName == selectedType)
             }
             return items.isEmpty ? nil : (site: group.site, items: items)
         }
     }
 
-    /// Distinct years present in this result set, newest first.
+    /// Distinct years present in this result set, newest first
+    /// (v2.54: normalised — the chips must offer the same year
+    /// the merge key and the card subline use).
     private var availableYears: [String] {
-        Array(Set(results.flatMap(\.items).map(\.year).filter { !$0.isEmpty }))
+        Array(Set(results.flatMap(\.items).map { Self.normalizedYear($0.year) }.filter { !$0.isEmpty }))
             .sorted { (Int($0) ?? 0, $0) > (Int($1) ?? 0, $1) }
     }
 
@@ -531,20 +533,39 @@ struct SearchView: View {
     /// one card. Same name + same year merges; a different year
     /// stays its own card; year-less hits group together under
     /// the bare title (their year is unknown, not a mismatch).
+    /// v2.54: the year in the key is normalised (see
+    /// normalizedYear) — vod_year arrives raw from the source
+    /// ("2024", "2024年", "2024-01-01" all occur), and the
+    /// unnormalised key split one film into two cards when two
+    /// sites spelled its year differently.
     private var titleGroups: [TitleGroup] {
         var order: [String] = []
         var map: [String: TitleGroup] = [:]
         for group in filteredResults {
             for item in group.items {
-                let key = Self.normalizedTitle(item.name) + "|" + item.year
+                let key = Self.normalizedTitle(item.name) + "|" + Self.normalizedYear(item.year)
                 if map[key] == nil {
-                    map[key] = TitleGroup(key: key, title: item.name, year: item.year, entries: [])
+                    map[key] = TitleGroup(key: key, title: item.name, year: Self.normalizedYear(item.year), entries: [])
                     order.append(key)
                 }
                 map[key]?.entries.append((group.site, item))
             }
         }
         return order.compactMap { map[$0] }
+    }
+
+    /// The first 19xx/20xx run inside a raw year string is the
+    /// year ("2024年" → "2024", "2024-01-01" → "2024"); a
+    /// string with no such run is year-less (""). Module items
+    /// already arrive as a four-digit year (releaseDate
+    /// .prefix(4)), so this is idempotent for them — sites and
+    /// modules now group, filter and display on the same year.
+    static func normalizedYear(_ raw: String) -> String {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = s.range(of: "(19|20)\\d{2}", options: .regularExpression) {
+            return String(s[range])
+        }
+        return ""
     }
 
     static func normalizedTitle(_ name: String) -> String {
@@ -1267,6 +1288,14 @@ struct SearchView: View {
                 else { empty.append(site); emptySites = empty }
             } else {
                 pyMisses += 1
+                // v2.54: a py miss used to vanish into the bare
+                // responded count — the CMS phase is the only one
+                // that named its failures. Same cap (3) and the
+                // same samples list, so the zero-result note and
+                // the final note can name the dead sites.
+                if errorSamples.count < 3 {
+                    errorSamples.append("\(site.name)：15 秒超时或失败")
+                }
             }
             tick()
         }
@@ -1290,6 +1319,9 @@ struct SearchView: View {
                 else { empty.append(site); emptySites = empty }
             } else {
                 jsMisses += 1
+                if errorSamples.count < 3 {
+                    errorSamples.append("\(site.name)：15 秒超时或失败")
+                }
             }
             tick()
         }
@@ -1320,6 +1352,9 @@ struct SearchView: View {
                 else { empty.append(site); emptySites = empty }
             } else {
                 jarMisses += 1
+                if errorSamples.count < 3 {
+                    errorSamples.append("\(site.name)：25 秒超时或失败")
+                }
             }
             tick()
         }
@@ -1352,14 +1387,21 @@ struct SearchView: View {
                     modOut.append((record, items))
                     moduleResults = modOut
                     // First group starts expanded, the rest
-                    // collapsed (spec: 默认展开第一组).
-                    collapsedModules = Set(modOut.dropFirst().map { $0.record.id })
+                    // collapsed (spec: 默认展开第一组). v2.54:
+                    // only the new group is folded in — the old
+                    // code recomputed the whole set on every
+                    // answer, wiping a manual collapse as soon
+                    // as the next module streamed in.
+                    if modOut.count > 1 { collapsedModules.insert(record.id) }
                 } else {
                     modEmpty.append(record)
                     moduleEmpty = modEmpty
                 }
             } else {
                 moduleMisses += 1
+                if errorSamples.count < 3 {
+                    errorSamples.append("\(record.meta.localized(record.meta.title.isEmpty ? record.id : record.meta.title))：15 秒超时或失败")
+                }
             }
             tick()
         }
@@ -1387,6 +1429,14 @@ struct SearchView: View {
         }
         if !modEmpty.isEmpty {
             finalNote += " · \(modEmpty.count) 个模块无结果"
+        }
+        // v2.54: name the timed-out/failed sources in the final
+        // note too, not just the zero-result note — with hits
+        // on screen the failures used to be only a bare count.
+        // Skipped-by-breaker sites are never sampled: only
+        // sources actually attempted reach errorSamples.
+        if !errorSamples.isEmpty && !(out.isEmpty && modOut.isEmpty) {
+            finalNote += " · 超时/失败：" + errorSamples.joined(separator: "、")
         }
         searchDoneCount = done
         searched = true
@@ -1533,7 +1583,9 @@ private struct SearchPosterCell: View {
             // v2.47: the subline is "year · type" (each only when
             // the source sent it — the same typeName the v2.09
             // filter chips read, so the card and the chips agree).
-            let subline = [item.year, item.typeName].filter { !$0.isEmpty }.joined(separator: " · ")
+            // v2.54: the year is normalised, so a "2024-01-01"
+            // card reads "2024" like its chip and its group.
+            let subline = [SearchView.normalizedYear(item.year), item.typeName].filter { !$0.isEmpty }.joined(separator: " · ")
             if !subline.isEmpty {
                 Text(subline).font(.caption).foregroundStyle(Theme.textDim).lineLimit(1)
             }
