@@ -4227,7 +4227,17 @@ struct FWDDetailView: View {
                                          episodeFallback: episodeIndex + 1), meta: meta)
             if let result = try? await runtime.call(function: fn, params: params, source: source),
                let resources = result as? [[String: Any]] {
-                let lines = resources.enumerated().compactMap { i, dict in
+                // v2.52: only a non-empty line list ends the
+                // chain here. An empty array used to return []
+                // outright, skipping the loadDetail fallback
+                // below — while a thrown call fell through to
+                // it. Both "no lines" outcomes now try detail.
+                // NOTE: the [FWDResource] annotation is load-
+                // bearing — without the old `return` giving
+                // compactMap its contextual type, the compiler
+                // cannot infer ElementOfResult from this
+                // multi-statement closure (CI #375).
+                let lines: [FWDResource] = resources.enumerated().compactMap { i, dict in
                     var res = FWDResource(dict, index: i)
                     guard !res.url.isEmpty else { return nil }
                     for (k, v) in ep.customHeaders where res.customHeaders[k] == nil {
@@ -4236,11 +4246,6 @@ struct FWDDetailView: View {
                     res.customHeaders.removeValue(forKey: "X-Forward-Skip-Redirect-Probe")
                     return res
                 }
-                // v2.52: only a non-empty line list ends the
-                // chain here. An empty array used to return []
-                // outright, skipping the loadDetail fallback
-                // below — while a thrown call fell through to
-                // it. Both "no lines" outcomes now try detail.
                 if !lines.isEmpty { return lines }
             }
         }
