@@ -1508,7 +1508,7 @@ struct PlayerView: View {
         if !tracks.isEmpty {
             Section(title) {
                 if allowOff {
-                    Button { select(-1) } label: {
+                    Button { Haptics.selection(); select(-1) } label: {
                         HStack {
                             Text("关闭").foregroundStyle(Theme.text)
                             Spacer()
@@ -1519,7 +1519,7 @@ struct PlayerView: View {
                     }
                 }
                 ForEach(tracks) { track in
-                    Button { select(track.id) } label: {
+                    Button { Haptics.selection(); select(track.id) } label: {
                         HStack {
                             Text(track.label).foregroundStyle(Theme.text).lineLimit(1)
                             Spacer()

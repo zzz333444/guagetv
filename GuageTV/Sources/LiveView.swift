@@ -354,6 +354,7 @@ struct LiveView: View {
                 }
                 if !programmes.isEmpty {
                     Button {
+                        Haptics.tap()
                         sheetProgrammes = ProgrammeSheetItem(channel: channel.name,
                                                              channelURL: channel.url,
                                                              list: programmes)

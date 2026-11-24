@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.57 · 性能深挖·启动打点与图片解码"
+    static let buildLabel = "v2.58 · UI 核查·触感补齐与空态统一"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.58", title: "UI 核查·触感补齐与空态统一", lines: [
+            "玻璃规格全仓复查（无改动）：全部 List 均已去系统底色（plain + scrollContentBackground(.hidden) + 行底透明）、全部 19 处 sheet 内容均带环境光底（AmbientBackground 或 Theme.bg），无 systemBackground 残留；全仓实色块只剩既定语义——选中态白胶囊、橙色计数徽标（v1.33 口径）、灰色空组徽标、播放器罩层与语义状态点，无裸实色卡片",
+            "触感补齐 6 处：直播频道行里的「节目单」钮（行本身已有 medium，钮漏了）、搜索海报卡点按、搜索「模块无结果 / 无结果」两处折叠头、播放设置里音轨与字幕选择行（同 sheet 的倍速行已有 selection，本轮对齐）、模块详情页「播放」主钮与选集瓷砖（对齐详情页选集的 tap 口径）、模块多线路选择行",
+            "空态文案统一两处：在线字幕搜索无结果由「没搜到，换个关键词试试」改叫「没有搜到结果，换个关键词试试」，与搜索/模块/Emby 的无结果口径一致；DLNA 没找到设备由裸 Text 改走共享空态（「没有搜到结果」+ 原因进正文 + 「重新加载」重试，点按重跑一次设备发现，此前关掉 sheet 重进才能再搜）",
+            "其余复查无改动：动效常量仍走 Theme 四档（quick/standard/fade/chrome，hero 自动轮播 0.45 秒例外）；「还没有…」（本地本就为空）与「没拉到数据 / 重新加载」（远程拉取失败）两套口径未串味——详情页「该线路暂无选集」是行内状态说明、日历「这天没有放送」是按天维度状态、Emby「服务器上还没有内容」与「这个媒体库还没有内容」是不同层级空态，均保留；工具栏与 alert 里的确认/取消钮不补触感（系统 chrome 自带反馈）",
+        ]),
         Entry(version: "v2.57", title: "性能深挖·启动打点与图片解码", lines: [
             "冷启动打点二段复盘：v2.46 的三处打点只剩两处——「模块索引」那一处随 v2.50 模块推荐行移除而消失（发现页不再读 index.json，模块索引只在模块页打开时加载、不在启动路径上）；现补第三处「发现内容已出」打点（缓存画出或首个 trending 列表落定时记一次），首帧/线路解析/发现内容三段对照恢复，壳出与内容出的差值即首屏可交互的真实耗时；其余启动路径逐项核查无新增主线程阻塞点（App init 只记时刻与自愈标记、配置解析 v2.03 已在后台、记录/设置两页 isActive 门控、资源库刷新只读 UserDefaults 索引）",
             "图片解码并行化：海报解码此前全在 PosterStore actor 的串行执行器上排队——滚动一屏海报时每张解码（约 5–30 毫秒）都要等前面全部解完才轮到；现解码一步改走 detached utility 任务、多核并行，在途去重表与文件读写仍留在 actor 内；兜底 UIImage(data:) 是懒解码（ImageIO 拒收的数据首次绘制时才在主线程解码），现后台画进位图上下文强制解完、长边仍按 maxPixelSize 封顶，动画图与解码失败时原图返回不丢海报",

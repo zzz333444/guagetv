@@ -3968,6 +3968,7 @@ struct FWDDetailView: View {
                 if episodes.isEmpty {
                     if !full.videoUrl.isEmpty || meta.resourceFunction != nil || !full.link.isEmpty {
                         Button {
+                            Haptics.medium()
                             Task { await playSingle() }
                         } label: {
                             Label("播放", systemImage: "play.fill")
@@ -4004,6 +4005,7 @@ struct FWDDetailView: View {
                                         GridItem(.flexible(), spacing: 10)], spacing: 10) {
                         ForEach(Array(episodes.enumerated()), id: \.element.id) { pair in
                             Button {
+                                Haptics.tap()
                                 Task { await playEpisode(at: pair.offset) }
                             } label: {
                                 // v2.27 (R2 加料): episode sub-line
@@ -4118,6 +4120,7 @@ struct FWDDetailView: View {
                         Section("选择播放线路（模块返回了 \(choices.count) 条）") {
                             ForEach(Array(choices.enumerated()), id: \.offset) { pair in
                                 Button {
+                                    Haptics.selection()
                                     let picked = pair.element
                                     let idx = resourcePendingIndex
                                     let single = resourcePendingSingle

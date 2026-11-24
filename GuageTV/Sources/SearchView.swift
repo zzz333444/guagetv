@@ -583,6 +583,7 @@ struct SearchView: View {
                 LazyVGrid(columns: gridColumns, spacing: 14) {
                     ForEach(titleGroups) { group in
                         Button {
+                            Haptics.tap()
                             selectedTitleGroup = group
                         } label: {
                             SearchPosterCell(
@@ -751,6 +752,7 @@ struct SearchView: View {
                 // folded by default, tap to see their names.
                 if !moduleEmpty.isEmpty {
                     Button {
+                        Haptics.selection()
                         withAnimation(Theme.animQuick) { showModuleEmpty.toggle() }
                     } label: {
                         HStack(spacing: 5) {
@@ -813,6 +815,7 @@ struct SearchView: View {
                     Divider().background(Theme.textDim.opacity(0.3))
                         .padding(.vertical, 4)
                     Button {
+                        Haptics.selection()
                         withAnimation(Theme.animQuick) { showEmptySites.toggle() }
                     } label: {
                         HStack(spacing: 5) {

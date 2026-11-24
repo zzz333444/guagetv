@@ -249,7 +249,7 @@ struct SubSearchView: View {
                     language: (attrs["language"] as? String) ?? "",
                     downloads: (attrs["download_count"] as? NSNumber)?.intValue ?? 0)
             }
-            if results.isEmpty { message = "没搜到，换个关键词试试" }
+            if results.isEmpty { message = "没有搜到结果，换个关键词试试" }
         } catch {
             message = "搜索失败：\(error.localizedDescription)"
         }

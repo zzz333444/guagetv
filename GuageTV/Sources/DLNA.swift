@@ -206,8 +206,9 @@ struct DLNACastView: View {
                     .padding(.top, 12)
                     .transition(.opacity)
                 } else if devices.isEmpty {
-                    Text("没找到 DLNA 设备。确认电视开着、和手机连同一个 Wi-Fi，且电视的投屏/DLNA 功能已开。")
-                        .font(.subheadline).foregroundStyle(Theme.textDim)
+                    EmptyStateCopy.noResults(
+                        message: "确认电视开着、和手机连同一个 Wi-Fi，且电视的投屏/DLNA 功能已开。",
+                        retry: { Task { await runDiscover() } })
                         .padding(24)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -238,10 +239,13 @@ struct DLNACastView: View {
                 }
             }
         }
-        .task {
-            devices = await DLNACaster.discover()
-            searching = false
-        }
+        .task { await runDiscover() }
+    }
+
+    private func runDiscover() async {
+        searching = true
+        devices = await DLNACaster.discover()
+        searching = false
     }
 
     private func cast(to device: DLNACaster.Device) {
