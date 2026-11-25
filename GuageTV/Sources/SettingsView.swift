@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.59 · 稳定扫荡·备份恢复三修"
+    static let buildLabel = "v2.60 · 收官·全量复查与更新日志"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.60", title: "收官·全量复查与更新日志", lines: [
+            "更新日志补齐第十次通宵全部 11 轮（v2.50–v2.60）：发现页三修、更新日志与版本口径复查、模块深挖、播放器深挖、搜索深挖、Emby 深挖、直播深挖、性能深挖、UI 核查、稳定扫荡、收官，全仓共 81 条、严格降序、无重复，当前版本置顶高亮",
+            "Rex 差距清单二版定稿（已对齐/平台限制/仍欠，结论记计划文件）：自一版后新对齐——预告片播放入口（v2.39）、全局参数设置入口（v2.39）、模块超时点名四条可见链路（v2.39/v2.54）、栏目缓存（v2.06）、模块 HTTP 真实状态码与响应头（v2.00）、超时分层与错误分类（v2.01）、官方模块目录预置（v2.02）、fetch 兼容加固（v2.07）、tmdb 错误中文直抛与转发兜底（v2.06/v1.76）、模块卡作者·版本·栏目数与自检留卡（v1.94）；平台限制仍在——动态封面只解码不播、userId/configId 无应用级标识可注、栏目缓存默认 TTL 30 分钟（有意偏差）、Widget.i18n 顶层代码取不到词典、rex-tmdb 官方 validate 静态校验跑不起来、TMDB 片单栏目 0 条（官网 Cloudflare 挑战）、danmu 示例无 episodeNumber 只能按首集匹配、音乐模块无原生音乐播放器页；仍欠——Emby 电影无详情页、播放列表级 catchup-days 默认值未解析、首帧打点未按直播/点播与引擎分桶、同名同年电影与电视剧仍合一张卡",
+            "全量复查：版本号三处一致（project.yml 2.60 / 260、buildLabel、更新日志首条）；本夜 11 轮进度记录齐全；本轮不再加新功能，只做收官修正",
+            "最终包全项验包：Info.plist 版本与最低 iOS 18.0、buildLabel 新旧计数、主程序 LC_LOAD_DYLIB 的 13 个 @rpath framework 与 Payload/*.app/Frameworks/ 清单逐个对照（含 AMSMB2）",
+        ]),
         Entry(version: "v2.59", title: "稳定扫荡·备份恢复三修", lines: [
             "历史备份丢热力台账（实锤已修）：HistoryStore 在 v2.15 已合并为 history-store.json（记录＋每日观看台账）并删了旧的 history.json／daily-watch.json，但备份仍只读旧 history.json——v2.15 之后每次备份都悄悄丢了热力格数据，恢复写回的旧文件在已有合并文件的手机上还会被直接忽略；现备份优先读合并文件（无则回退旧文件），恢复按内容形状分流写回对应文件并清掉对端旧文件",
             "WebDAV 自动备份能恢复了：自动备份上传的文件是 .guagebak 后缀，恢复用的文件选择器只认 .json，从网盘下回来的自动备份在 App 里根本选不上、只能改名再导；现 .guagebak 声明为 JSON 子类型，选择器直接可点（文件本身就是 AES-GCM 加密 JSON 信封，解密流程不变）",
