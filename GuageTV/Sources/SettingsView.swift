@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.58 · UI 核查·触感补齐与空态统一"
+    static let buildLabel = "v2.59 · 稳定扫荡·备份恢复三修"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,13 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.59", title: "稳定扫荡·备份恢复三修", lines: [
+            "历史备份丢热力台账（实锤已修）：HistoryStore 在 v2.15 已合并为 history-store.json（记录＋每日观看台账）并删了旧的 history.json／daily-watch.json，但备份仍只读旧 history.json——v2.15 之后每次备份都悄悄丢了热力格数据，恢复写回的旧文件在已有合并文件的手机上还会被直接忽略；现备份优先读合并文件（无则回退旧文件），恢复按内容形状分流写回对应文件并清掉对端旧文件",
+            "WebDAV 自动备份能恢复了：自动备份上传的文件是 .guagebak 后缀，恢复用的文件选择器只认 .json，从网盘下回来的自动备份在 App 里根本选不上、只能改名再导；现 .guagebak 声明为 JSON 子类型，选择器直接可点（文件本身就是 AES-GCM 加密 JSON 信封，解密流程不变）",
+            "恢复模块后栏目缓存失效：栏目缓存的键只有模块 id＋栏目＋参数、不含模块内容，恢复回来的模块会继续吃旧模块的缓存（用户 TTL 最长 24 小时，重启也清不掉、缓存住在 Caches 里）；恢复时模块集合是整批覆盖，现同步清掉全部栏目缓存",
+            "诊断「当前 N 条」计数刷新：进关于页时重读一次，之前是初始化时读的旧数、最近记录列表会变、数字不动",
+            "全仓再扫结论（无改动）：try!／as!／显式强制解包仍为零（仅剩 WKWebView 协议签名的 WKNavigation! 与 required init 的 fatalError 桩）；四处信号量等待均不在主线程（JS 专用串行队列、HLS 代理后台队列、SMB 代理线程、2 秒封顶的本地代理启动）；模块 settle 泵里的 Thread.sleep(0.002) 只在 JS 线程、RunLoop 未转动时才睡；超时口径齐全——NetFetch 20／12／25 秒、Jar 15／95／60 秒、模块 tmdb 12 秒、JS 同步取数按模块 timeout，其余异步请求走 URLSession 默认 60 秒请求超时，无无限等待；诊断可见性齐全（最近 8 条折叠记录＋分类／次数／时间、起播打点汇总、导出／清除）",
+        ]),
         Entry(version: "v2.58", title: "UI 核查·触感补齐与空态统一", lines: [
             "玻璃规格全仓复查（无改动）：全部 List 均已去系统底色（plain + scrollContentBackground(.hidden) + 行底透明）、全部 19 处 sheet 内容均带环境光底（AmbientBackground 或 Theme.bg），无 systemBackground 残留；全仓实色块只剩既定语义——选中态白胶囊、橙色计数徽标（v1.33 口径）、灰色空组徽标、播放器罩层与语义状态点，无裸实色卡片",
             "触感补齐 6 处：直播频道行里的「节目单」钮（行本身已有 medium，钮漏了）、搜索海报卡点按、搜索「模块无结果 / 无结果」两处折叠头、播放设置里音轨与字幕选择行（同 sheet 的倍速行已有 selection，本轮对齐）、模块详情页「播放」主钮与选集瓷砖（对齐详情页选集的 tap 口径）、模块多线路选择行",
@@ -1676,6 +1683,7 @@ struct AboutView: View {
                     }
                 }
             }
+            .onAppear { diagCount = Diagnostics.entries().count }
             Text("个人自用壳：内容来自你自己导入的线路与文件，呱壳不提供任何影视内容。")
                 .font(.footnote).foregroundStyle(Theme.textDim)
         }

@@ -4,6 +4,17 @@ import Security
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// v2.59: AutoBackup uploads end in .guagebak, but the restore
+/// picker only accepted .json — a WebDAV auto-backup downloaded
+/// to Files could not be picked for restore unless renamed.
+/// A .guagebak file IS JSON (an AES-GCM envelope), so declare
+/// it as a JSON subtype for the picker.
+extension UTType {
+    static var guagebak: UTType {
+        UTType(filenameExtension: "guagebak", conformingTo: .json) ?? .json
+    }
+}
+
 /// AES-GCM envelope for backups (v2.41). The plaintext backup
 /// JSON is sealed with a key derived from the user's backup
 /// password (SHA-256 of salt + password; the random salt rides
@@ -183,7 +194,20 @@ enum BackupStore {
             }
         }
         if !fwdFiles.isEmpty { root["fwdModules"] = fwdFiles }
-        if let history = try? Data(contentsOf: supportDir().appendingPathComponent("history.json")) {
+        // v2.59: HistoryStore migrated to a single combined file
+        // (history-store.json: entries + the daily watch ledger)
+        // in v2.15 and deleted the legacy pair on migration — the
+        // old code still read history.json, so every backup since
+        // v2.15 silently dropped the heat-grid ledger, and a
+        // restore onto a phone that already has a combined file
+        // was ignored outright (init prefers the combined file).
+        // Read the combined file first; fall back to the legacy
+        // file only for pre-v2.15 installs that never migrated.
+        let historyURL = supportDir().appendingPathComponent("history-store.json")
+        let legacyHistoryURL = supportDir().appendingPathComponent("history.json")
+        if let history = try? Data(contentsOf: historyURL) {
+            root["historyFile"] = history.base64EncodedString()
+        } else if let history = try? Data(contentsOf: legacyHistoryURL) {
             root["historyFile"] = history.base64EncodedString()
         }
         // Settings snapshot (plist-safe values only).
@@ -284,12 +308,36 @@ enum BackupStore {
                     if name.hasSuffix(".js") { restoredModules += 1 }
                 }
             }
+            // v2.59: the column cache keys on moduleID only, not
+            // on module content — a restored module would keep
+            // serving the old module's cached columns (up to the
+            // user's TTL, 24h max) even after a restart, since the
+            // cache lives in Caches. Restore overwrites the whole
+            // module set, so drop the whole column cache with it.
+            FWDColumnCache.clearAll()
             parts.append("\(restoredModules) 个模块")
         }
         if let b64 = root["historyFile"] as? String,
            let history = Data(base64Encoded: b64) {
-            try? history.write(to: supportDir().appendingPathComponent("history.json"),
-                               options: .atomic)
+            // v2.59: route by payload shape — a combined store (a
+            // JSON object with "entries") goes to
+            // history-store.json, a legacy entry array goes to
+            // history.json. Write to the wrong file and the
+            // restore is silently ignored: HistoryStore.init
+            // prefers the combined file when it exists. Remove
+            // the counterpart so no stale file lingers.
+            let combinedURL = supportDir().appendingPathComponent("history-store.json")
+            let legacyURL = supportDir().appendingPathComponent("history.json")
+            let legacyDailyURL = supportDir().appendingPathComponent("daily-watch.json")
+            let isCombined = (try? JSONSerialization.jsonObject(with: history) as? [String: Any])?["entries"] != nil
+            if isCombined {
+                try? history.write(to: combinedURL, options: .atomic)
+                try? FileManager.default.removeItem(at: legacyURL)
+                try? FileManager.default.removeItem(at: legacyDailyURL)
+            } else {
+                try? history.write(to: legacyURL, options: .atomic)
+                try? FileManager.default.removeItem(at: combinedURL)
+            }
             parts.append("观看历史")
         }
         return "已恢复：" + parts.joined(separator: "、") + "。建议重启一次 App 让所有页面刷新。"
@@ -765,7 +813,7 @@ struct BackupView: View {
             }
         }
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.json],
+                      allowedContentTypes: [.json, .guagebak],
                       allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
             let scoped = url.startAccessingSecurityScopedResource()
