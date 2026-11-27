@@ -701,7 +701,7 @@ struct SearchView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .background(Theme.bg)
+                .background(AmbientBackground(imageURL: nil))
                 .navigationTitle(group.year.isEmpty ? group.title : "\(group.title)（\(group.year)）")
                 .navigationBarTitleDisplayMode(.inline)
             }

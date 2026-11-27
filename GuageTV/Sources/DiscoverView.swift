@@ -740,7 +740,7 @@ private struct TMDBDetailSheet: View {
             .opacity(appeared ? 1 : 0)
             .onAppear { withAnimation(Theme.animStandard) { appeared = true } }
         }
-        .background(Theme.bg)
+        .background(AmbientBackground(imageURL: nil))
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }

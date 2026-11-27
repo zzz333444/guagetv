@@ -676,10 +676,10 @@ struct PlayerView: View {
         HStack(spacing: 0) {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { seekBy(-seekStep); showSeekToast(delta: -seekStep) }
+                .onTapGesture(count: 2) { Haptics.tap(); seekBy(-seekStep); showSeekToast(delta: -seekStep) }
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { seekBy(seekStep); showSeekToast(delta: seekStep) }
+                .onTapGesture(count: 2) { Haptics.tap(); seekBy(seekStep); showSeekToast(delta: seekStep) }
         }
         .onTapGesture {
             Haptics.tap()
@@ -1871,7 +1871,11 @@ struct PlayerView: View {
 
     private var currentRate: Double { isMPV ? mpv.speed : Double(native.rate) }
 
-    private func togglePlay() { Haptics.tap(); isMPV ? mpv.togglePlay() : native.toggle() }
+    /// v2.69: no haptic in here — both play/pause buttons fire
+    /// medium() at the call site, and the auto-pause callers
+    /// must stay silent; the old embedded tap() buzzed twice
+    /// on every tap and once on every automatic pause.
+    private func togglePlay() { isMPV ? mpv.togglePlay() : native.toggle() }
 
     /// v2.66: 睡眠定时停播后释放后台音频会话——只暂停不释放时，
     /// 控制中心仍挂着本 App 的播放卡、其他 App 的音频也被一直
@@ -1907,7 +1911,11 @@ struct PlayerView: View {
     private func seek(to seconds: Double, tolerant: Bool = false) {
         if isMPV { mpv.seek(to: seconds) } else { native.seek(to: seconds, tolerant: tolerant) }
     }
-    private func seekBy(_ delta: Double) { Haptics.tap(); isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
+    /// v2.69: same as togglePlay — haptic lives at the gesture
+    /// (double-tap zones and the settings-sheet buttons each
+    /// fire their own tap()); the old embedded tap() doubled
+    /// with the sheet buttons.
+    private func seekBy(_ delta: Double) { isMPV ? mpv.seekRelative(delta) : native.seekRelative(delta) }
     /// P1 (v1.62): playback speed survives episode changes and
     /// player reopens — the chosen rate is stored in UserDefaults
     /// under this key. Both engines restore it when a fresh core /

@@ -1582,7 +1582,7 @@ struct EmbyMovieView: View {
     private var actionRow: some View {
         HStack(spacing: 12) {
             Button {
-                Haptics.tap()
+                Haptics.medium()
                 Task { await play() }
             } label: {
                 VStack(spacing: 1) {
@@ -1621,7 +1621,7 @@ struct EmbyMovieView: View {
                     icon: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle",
                     label: isDownloaded ? "已下载" : "下载",
                     active: isDownloaded) {
-                        Haptics.tap()
+                        Haptics.medium()
                         Task { await downloadMovie() }
                     }
                     .disabled(isDownloaded)

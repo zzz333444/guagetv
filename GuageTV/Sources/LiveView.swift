@@ -483,7 +483,7 @@ struct LiveView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(Theme.bg)
+                .background(AmbientBackground(imageURL: nil))
             }
             .navigationTitle("\(entry.channel) · 节目单")
             .navigationBarTitleDisplayMode(.inline)

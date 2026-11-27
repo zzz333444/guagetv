@@ -320,7 +320,7 @@ struct DetailView: View {
     private var actionRow: some View {
         HStack(spacing: 12) {
             Button {
-                Haptics.tap()
+                Haptics.medium()
                 primaryPlay()
             } label: {
                 VStack(spacing: 1) {

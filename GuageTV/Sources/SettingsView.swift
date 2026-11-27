@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.68 · 性能深挖"
+    static let buildLabel = "v2.69 · UI·Rex 细节核查"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.69", title: "UI·Rex 细节核查", lines: [
+            "触感双震修好（真缺口）：播放/暂停按钮先震 medium、togglePlay() 里又埋了一个 tap()，点一次震两次；自动暂停（播完/中断）无手势也跟着震一下。现 togglePlay() 不再自带触感，两个按钮的 medium() 保留，自动暂停静默。seekBy() 同病：设置页快进/快退钮自带 tap() 又撞上函数内的 tap()，现触感改由手势处各发一次（双击区与设置页按钮），函数内不再埋",
+            "主动作触感对齐（真缺口）：详情页主播放钮与 Emby 电影详情页的播放/下载钮一直用轻震 tap()，而 Haptics 文档规定主动作（播放/下载/确认）用 medium——Emby 剧集页、直播回看、历史播放、模块播放早已是 medium。现三处改 medium；收藏切换仍是 tap（与详情页收藏切换一致），点按/选择/主动作三档现全仓一致",
+            "四处 sheet 底改环境光（真缺口）：TMDB 详情 sheet、DLNA 投屏 sheet、直播节目单 sheet、同名分组 sheet 的根背景一直是平铺 Theme.bg，与播放器两 sheet、模块全局参数、分组编辑器用的 AmbientBackground 不一致。现四处改 AmbientBackground(imageURL: nil)，与同类 sheet 同口径；白胶囊主按钮、搜索计数徽标（橙/灰语义色）、播放器 scrub 浮层、已看勾白圆均属语义色/既定样式，不动",
+            "其余复查无改动：全仓 13 个 List 逐个核对，scrollContentBackground(.hidden) 与行底色清除齐全；动效常量仍走 Theme 四档（quick/standard/fade/chrome，hero 自动轮播 0.45 秒例外），全仓无其余写死时长；「还没有…」（本地本就为空）与「没拉到数据 / 重新加载」（远程拉取失败）两套口径未串味，Emby 电影详情页的 MediaInfoCard 与演职员行空时不渲染、无空态缺口",
+        ]),
         Entry(version: "v2.68", title: "性能深挖", lines: [
             "冷启动三打点补齐两处静默缺段（真缺口）：无配置时「线路解析」段整段缺席——首启（未导入任何线路）用户的日志里只有首帧，查该段时像解析卡住了；现 cfg 为 nil 时记一行「线路解析失败 · 无可用配置 · 启动后 Xms」。TMDB 未开时「发现内容」段永不触发；现 load() 的 TMDB 未开分支记一行「发现内容未启用（TMDB 未开）」，说明该段不适用而非加载失败。三段（首帧／线路解析／发现内容）现任何配置下都有交代，诊断卡最近记录与导出文本里可读",
             "冷启动三打点复查通过：首帧（ContentView.onAppear，只记一次）、线路解析（.task 里后台解析完成记站数／解析耗时／启动后毫秒）、发现内容（缓存画出或无缓存首个 trending 落定，只记一次）三处调用点齐全；三段都带启动后毫秒对照；旧数据无影响（打点只写诊断日志，不进聚合结构）",

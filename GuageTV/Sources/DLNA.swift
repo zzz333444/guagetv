@@ -230,7 +230,7 @@ struct DLNACastView: View {
                 }
             }
             .animation(Theme.animStandard, value: searching)
-            .background(Theme.bg)
+            .background(AmbientBackground(imageURL: nil))
             .navigationTitle("DLNA 投屏")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
