@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.62 · 直播补缺"
+    static let buildLabel = "v2.63 · 播放器打点分桶"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.63", title: "播放器打点分桶", lines: [
+            "首帧耗时按引擎×内容分桶：此前原生与 mpv、直播与点播的首帧耗时混在一个平均数里（recordFirstFrame 的引擎/直播参数传了却被丢弃），慢到底是哪一路看不出来；现 TimingStats 新增四桶（原生·点播、原生·直播、mpv·点播、mpv·直播），各桶记平均耗时、样本数与慢次数（慢阈值仍是 >5 秒）",
+            "诊断卡与导出同步分桶：设置 → 关于的起播打点汇总行追加「首帧分桶：各桶平均…」一段，诊断导出文本顶部同一行同步带出，不用再猜慢的是直播还是 mpv",
+            "旧数据兼容：旧版已攒的首帧总汇总（次数/总耗时/慢次数）照常显示，分桶从本版起从零累计；新版首次升级后分桶行要播过片才出现，升级前播过的片只进总汇总、不回填分桶",
+        ]),
         Entry(version: "v2.62", title: "直播补缺", lines: [
             "播放列表级 catchup-days 默认值：#EXTM3U 头部声明的 catchup-days（如 catchup-days=\"7\"）现作为全列表默认值，未单独声明天数的频道按列表级生效；频道级声明仍优先（频道 3 天 > 列表 7 天），两者都没有时不限期（旧行为）；回看期校验（节目单「超出回看范围」与时移范围）直接复用生效天数，不用再改",
             "catchupType 落地：shift 模式此前只解析不使用——声明了 shift 却没有 catchup-source 的频道拿不到任何回看入口；现按 SIPTV 约定自动追加 ?utc={起}&lutc={止}（Unix 秒）到频道地址，不用模板也能回看；频道同时声明了模板时仍以模板为准（append／default 与既有展开口径一致：完整 URL 直接用、查询片段拼到频道地址后）；catchup-type 是 catchup 的同义别名，现同义解析",

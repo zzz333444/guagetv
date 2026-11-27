@@ -62,6 +62,15 @@ enum Diagnostics {
         var firstFrameCount = 0
         var firstFrameTotalMs = 0
         var firstFrameSlow = 0
+        /// v2.63 首帧分桶：引擎（原生/mpv）× 内容（点播/直播）。
+        /// 键形如 "原生·点播"；旧数据无此字段时解码取空字典，
+        /// 从零累计，不影响旧汇总字段（两者并行记）。
+        struct FirstFrameBucket: Codable {
+            var count = 0
+            var totalMs = 0
+            var slow = 0
+        }
+        var firstFrameBuckets: [String: FirstFrameBucket] = [:]
         var playlistCount = 0
         var playlistTotalMs = 0
         var playlistSlow = 0
@@ -109,14 +118,36 @@ enum Diagnostics {
     }
 
     /// 引擎段：打开播放器到首次进入播放状态（首帧近似值）。
+    /// v2.63：engine/isLive 不再丢弃——按引擎（原生/mpv）×
+    /// 内容（点播/直播）进分桶；总汇总字段仍并行记，旧数据
+    /// 与旧口径（慢阈值 >5s）不变。
     static func recordFirstFrame(ms: Int, engine: String, isLive: Bool) {
+        let engineLabel = engine == "mpv" ? "mpv" : "原生"
+        let bucketKey = engineLabel + "·" + (isLive ? "直播" : "点播")
         updateTiming { stats in
             stats.firstFrameCount += 1
             stats.firstFrameTotalMs += ms
             if ms > 5000 { stats.firstFrameSlow += 1 }
+            var bucket = stats.firstFrameBuckets[bucketKey] ?? TimingStats.FirstFrameBucket()
+            bucket.count += 1
+            bucket.totalMs += ms
+            if ms > 5000 { bucket.slow += 1 }
+            stats.firstFrameBuckets[bucketKey] = bucket
         }
-        _ = engine
-        _ = isLive
+    }
+
+    /// 首帧分桶汇总（固定桶序：原生·点播、原生·直播、
+    /// mpv·点播、mpv·直播；只列有样本的桶）。诊断卡与导出
+    /// 文本共用 timingSummary()，分桶行由其一并带出。
+    static func firstFrameBucketSummary() -> String {
+        let s = timingStats()
+        let order = ["原生·点播", "原生·直播", "mpv·点播", "mpv·直播"]
+        let parts = order.compactMap { key -> String? in
+            guard let b = s.firstFrameBuckets[key], b.count > 0 else { return nil }
+            return "\(key)平均 \(b.totalMs / b.count)ms（\(b.count) 次，慢 \(b.slow) 次）"
+        }
+        guard !parts.isEmpty else { return "" }
+        return "首帧分桶：" + parts.joined(separator: " · ")
     }
 
     /// 代理段：HLS 播放列表上游取回耗时（去广告代理内）。
@@ -173,6 +204,8 @@ enum Diagnostics {
             + " · HLS 播放列表平均 \(avg(s.playlistTotalMs, s.playlistCount))ms（\(s.playlistCount) 次，缓存命中 \(s.playlistCacheHits) 次）"
             + " · 分片平均 \(avg(s.segmentTotalMs, s.segmentCount))ms（\(s.segmentCount) 次，缓存命中 \(s.segmentCacheHits) 次）"
             + " · 最慢一段：\(slowest)"
+        let buckets = firstFrameBucketSummary()
+        if !buckets.isEmpty { out += " · " + buckets }
         if s.failoverAttempts > 0 {
             let reasons = s.failoverByReason
                 .sorted(by: { $0.value > $1.value })
