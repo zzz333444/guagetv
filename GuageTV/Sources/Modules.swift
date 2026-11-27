@@ -1417,10 +1417,12 @@ final class FWDRuntime {
         }
         // v2.29 (guide i18n 章): the module's translation table
         // and the host's locale fallback list, read by the
-        // shim's Widget.i18n at call time. Set AFTER the module
-        // source runs (the table lives on WidgetMetadata) but
-        // BEFORE any entry function is invoked, so entry code
-        // always sees the real table.
+        // shim's Widget.i18n at call time. __fwdLocales is set
+        // BEFORE the module source runs; the table itself lives
+        // on WidgetMetadata, which the shim now reads live (v2.65
+        // — top-level code after the metadata statement sees it),
+        // and the snapshot below is only a fallback, set after
+        // the source runs but before any entry function is invoked.
         if let localesData = try? JSONSerialization.data(withJSONObject: fwdLocaleCandidates()),
            let localesText = String(data: localesData, encoding: .utf8) {
             ctx.evaluateScript("globalThis.__fwdLocales = \(localesText);")
@@ -1824,11 +1826,19 @@ final class FWDRuntime {
                 // as the host's fwdLocalized — exact locale code,
                 // then script system, then base language — and
                 // returns the original text when nothing matches.
-                // __fwdI18nTable / __fwdLocales are set by the
-                // host right after the module source is evaluated.
+                // v2.65: read the table live from WidgetMetadata
+                // at call time (it exists from the moment the
+                // module's metadata statement has run), falling
+                // back to the host-set snapshot. The snapshot
+                // alone is set only AFTER the module source
+                // finishes evaluating, so top-level code calling
+                // Widget.i18n before then saw an empty table.
+                // __fwdLocales is set by the host before the
+                // module source is evaluated.
                 i18n: function(s) {
                     var text = String(s == null ? '' : s);
-                    var table = globalThis.__fwdI18nTable || {};
+                    var table = (globalThis.WidgetMetadata && globalThis.WidgetMetadata.i18n)
+                        || globalThis.__fwdI18nTable || {};
                     var locales = globalThis.__fwdLocales || [];
                     function norm(k) { return String(k).toLowerCase().replace(/_/g, '-'); }
                     var byNorm = {};
@@ -2072,7 +2082,12 @@ final class FWDRuntime {
 ///      module may answer with danmu directly instead.
 ///   2. getDetail(params + animeId) → [{episodeId,
 ///      episodeTitle, episodeNumber}]; match by episode
-///      number, else take the first episode. The episodeId
+///      number, else take the first episode — unless NO
+///      episode carries episodeNumber at all (v2.65: the
+///      official danmu example never returns it, and even
+///      strips it in findEpisodes), in which case match by
+///      list position instead, or every episode past the
+///      first plays episode 1's danmaku. The episodeId
 ///      (a string or integer, never a list index) becomes
 ///      commentId — the old code passed the ANIME id as
 ///      commentId, so episode matching never happened.
@@ -2146,11 +2161,20 @@ enum FWDDanmu {
             if let result = try? await runtime.call(function: detail.functionName,
                                                     params: p2, source: source),
                let episodes = result as? [[String: Any]], !episodes.isEmpty {
+                func epNumber(of e: [String: Any]) -> String {
+                    (e["episodeNumber"] as? String) ?? ((e["episodeNumber"] as? NSNumber)?.stringValue ?? "")
+                }
                 let wanted = String(epNo)
-                let pick = episodes.first {
-                    let n = ($0["episodeNumber"] as? String) ?? (($0["episodeNumber"] as? NSNumber)?.stringValue ?? "")
-                    return n == wanted
-                } ?? episodes[0]
+                let pick: [String: Any]
+                if episodes.contains(where: { !epNumber(of: $0).isEmpty }) {
+                    pick = episodes.first { epNumber(of: $0) == wanted } ?? episodes[0]
+                } else {
+                    // v2.65: no episode carries a number, so the
+                    // number match above can never hit — take the
+                    // episode at the wanted position (lists are in
+                    // broadcast order) instead of always the first.
+                    pick = episodes[min(max(epNo - 1, 0), episodes.count - 1)]
+                }
                 if let s = pick["episodeId"] as? String, !s.isEmpty { commentID = s }
                 else if let n = pick["episodeId"] as? NSNumber { commentID = n.stringValue }
             }

@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.64 · 搜索补缺"
+    static let buildLabel = "v2.65 · 模块深挖"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.65", title: "模块深挖", lines: [
+            "官方示例模块全量自测复跑（shim 从当前 Modules.swift 现抽）：bangumi 5/5 栏目真数据（6/22/47/41/47 条）、music-demo 7 栏＋搜索全通、rex-tmdb 4 个纯 HTTP 栏目出数据（40/40/20/20 条）；其余 7 栏无 TMDB Key 按预期报缺 key、片单栏仍是 TMDB 官网 Cloudflare 挑战 0 条（11-17 已定性）、tmdb 示例 1 栏同样无 Key；danmu 示例无真实弹幕服务，链路另用桩服务实测",
+            "Widget.i18n 顶层注入修好：词典快照以前只在模块源码求值完后才设，顶层代码调 Widget.i18n 拿到的是原文（入口函数内一直正常）；现 shim 改为调用时实时读 WidgetMetadata.i18n、快照只作兜底，顶层调用与入口调用一致。限制：写在 WidgetMetadata 字面量里面的 Widget.i18n(...) 仍拿不到词典（字面量求值时元数据对象还没挂到全局）——但宿主展示文案本来就走 meta.localized 翻译，模块作者无需在字面量里调 i18n；5 个官方模块目前没有一个调用 Widget.i18n，tmdb 示例只带 en 词典不用它",
+            "弹幕三段链按集匹配兜底修好：官方 danmu 示例的 findEpisodes 根本不返回 episodeNumber（还主动丢掉该字段），现行「匹配不到取首集」等于第 2 集起全播第 1 集的弹幕；现全集无编号时按集号索引取集（分集按播出顺序排列），有编号时沿用按号匹配、匹配不到仍取首集，超范围集号 clamp 到末集。桩服务实测：第 5 集拿到第 5 集弹幕、有编号回归不变",
+            "动态封面（albumMotionArtwork）surface 结论：仍只标注不播。PosterImage 管线是纯图片（取数＋磁盘缓存＋降采样），接不进视频帧；网格卡内联播等于每个可见 cell 一个播放器（流量／电量／生命周期成本都大），唯一可行的形态是详情 hero 单点静音循环（需新组件＋失败回退静态海报＋与环境光取帧冲突待定）；且 5 个官方模块全查过、没有一个返回该字段，现在建 surface 没有真实内容可验，等有真实模块返回该字段时再做 hero 单点版",
+        ]),
         Entry(version: "v2.64", title: "搜索补缺", lines: [
             "搜索失败不再裸露英文：shortError 非 URLError 的尾巴以前直接返回 localizedDescription，桥接／POSIX／解码类失败的原文是英文（\"Connection reset by peer\"、\"The certificate for this server is invalid\"）；现常见英文形态先翻中文（超时／连接被断开／被拒绝／证书或安全连接失败／已取消／域名解析失败／请求过于频繁／未授权／访问被拒绝／资源不存在／服务器错误／返回内容无法解析／网络连接中断），CFNetwork 域名错误按同套错误码直判，已是中文的原文原样过，认不出的保留原文、前面加「搜索失败：」前缀",
             "同名同年电影 vs 电视剧拆卡：同名同年、但一边高置信是电影、另一边高置信是剧集时，现拆成两张卡；只有组内每一条的类型都能高置信归一才拆，任一条缺类型或含糊（无类型、综艺／动漫／纪录片／短剧、裸体裁词「剧情」「动作」「喜剧」）都否决拆分、仍合并。归一化词表写进代码注释：电影类含「电影」／「影片」／movie／film 与「片」尾体裁词（纪录片、动画片单列排除），剧集类为 tv／series／「剧集」与「剧」尾词（短剧／话剧／喜剧／悲剧／正剧／歌剧／舞剧／闹剧单列排除）",
