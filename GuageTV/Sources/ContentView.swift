@@ -116,6 +116,14 @@ struct ContentView: View {
                     if cfg.sites.contains(where: { $0.kind == .spiderPY }) {
                         PythonRuntime.shared.prewarm()
                     }
+                } else {
+                    // v2.68: 无配置时以前整段打点直接缺席——
+                    // 首启（未导入任何线路）用户的冷启动日志
+                    // 里只有首帧，查「线路解析」段时像解析卡
+                    // 住了；现记一行失败，说明是无可用配置而
+                    // 非解析耗时。loadActive 只在一条线路都没
+                    // 有时才回 nil（有线路时首条自动激活）。
+                    Diagnostics.log("冷启动", "线路解析失败 · 无可用配置 · 启动后 \(StartupTiming.msSinceStart())ms")
                 }
             }
         }

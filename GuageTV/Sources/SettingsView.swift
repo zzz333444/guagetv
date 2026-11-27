@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.67 · 发现页深挖"
+    static let buildLabel = "v2.68 · 性能深挖"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.68", title: "性能深挖", lines: [
+            "冷启动三打点补齐两处静默缺段（真缺口）：无配置时「线路解析」段整段缺席——首启（未导入任何线路）用户的日志里只有首帧，查该段时像解析卡住了；现 cfg 为 nil 时记一行「线路解析失败 · 无可用配置 · 启动后 Xms」。TMDB 未开时「发现内容」段永不触发；现 load() 的 TMDB 未开分支记一行「发现内容未启用（TMDB 未开）」，说明该段不适用而非加载失败。三段（首帧／线路解析／发现内容）现任何配置下都有交代，诊断卡最近记录与导出文本里可读",
+            "冷启动三打点复查通过：首帧（ContentView.onAppear，只记一次）、线路解析（.task 里后台解析完成记站数／解析耗时／启动后毫秒）、发现内容（缓存画出或无缓存首个 trending 落定，只记一次）三处调用点齐全；三段都带启动后毫秒对照；旧数据无影响（打点只写诊断日志，不进聚合结构）",
+            "滚动与图片复查通过：海报解码仍走 Task.detached 并行（v2.57，磁盘命中与网络取回两路都经 decodeOffActor，串行瓶颈未回归）；in-flight 表按 URL 去重、预取可取消（滚过站停下未开始的下载）；内存告警减半兜底触发路径核对通过——PosterCache 在主队列监听内存告警，每次告警清内存缓存并把上限减半（160→80→40→20→12MB 下限，本轮启动内不回升），磁盘层不受影响",
+            "py 冷启复查通过：预热与配置解析并行（v2.57）无重复预热、无竞态——prewarm 只触发一次的守卫在运行时串行队列块内判定＋置位，两次并发 prewarm 只 boot 一次；首个 py 站打开时 invoke 用 queue.sync 排队等在途 boot 完成，不重复 boot；原始字节扫描（\".py\"，不分大小写）与 Site.kind 判定同口径，解析完成后的精确判定保留作兜底",
+        ]),
         Entry(version: "v2.67", title: "发现页深挖", lines: [
             "hero 换榜错位修好（真缺口）：后台刷新把 trending 换成新榜单后，分页锚点 heroScrollID 仍指旧榜的 id——以前只在锚点为 nil 时钉一次；scrollPosition 收到不存在的 id 可能把轮播弹回第 0 页，而 heroIndex／圆点／环境光仍指另一页，三处错位。现每次榜单落定都校验锚点，不在榜内就重钉到当前 hero 页（不是第 0 页，保住用户正在看的那一页）；heroIndex 越界改按 hero 前 8 项夹回（以前按整榜长度夹，超 8 的下标漏网）；旧榜的标题美术字缓存一并清掉",
             "hero／logo／评分行按 Rex 口径代码级复查通过：540pt 全幅 hero、GeometryReader 显式页宽（v2.50 错位根因已修）、logo 上限 250×64 带阴影、无 logo 回退 30pt 重标题、元信息行（类型·年份·类型）＋TMDB 玻璃评分胶囊（非实色块、0 分不显示）、简介两行、圆点（当前页拉长成 18×7 胶囊）、6.5 秒自动轮播＋0.45 秒缓动（既定例外）、封面无播放钮（v2.50 用户定稿）、点按进 TMDB 详情、长按跨线搜索；海报行 112×168、年份＋★评分、右箭头进三列整页网格，均无改动",

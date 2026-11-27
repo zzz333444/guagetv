@@ -118,7 +118,14 @@ struct DiscoverView: View {
     /// a cold disk read. It now runs detached; the paint still
     /// lands on the main actor.
     private func load() async {
-        guard TMDBClient.isOn else { loading = false; return }
+        guard TMDBClient.isOn else {
+            loading = false
+            // v2.68: TMDB 未开时「发现内容已出」打点永不触发，
+            // 三段对照缺一段且无说明——看日志像发现页卡住
+            // 了；记一行未启用，说明该段不适用而非加载失败。
+            StartupTiming.mark("发现内容未启用（TMDB 未开）")
+            return
+        }
         let cache = await Task.detached(priority: .userInitiated) {
             TMDBClient.loadDiscoverCache()
         }.value
