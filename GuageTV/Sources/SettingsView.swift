@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.60 · 收官·全量复查与更新日志"
+    static let buildLabel = "v2.61 · Emby 电影详情页"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.61", title: "Emby 电影详情页", lines: [
+            "Emby 电影终于有详情页了：之前点电影卡直接进播放器、连简介都看不到；现与剧集页同规格——环境光海报底、Emby 评分星条、简介、媒体信息卡（来源／类型／年份／评分／分级／片长）、演职员横滑行；入口不变（首页各行与媒体库电影卡点按），剧集页与 Episode／Video 不动",
+            "播放钮走现有取流链路（streamURL → 单集播放器），并把服务器的续播位置经 PlayerView resumeAt 接上：看到一半的电影显示「继续播放 · 还剩 X 分钟」并带进度条，剧集页此前没接续播位置",
+            "收藏／下载复查结论：剧集页本身两者都不展示（无收藏控件、下载只走单集右键菜单）；电影无集列表可挂动作，故详情页直接补上——收藏走首页收藏行同款 setFavorite（状态取自全条目 UserData.IsFavorite，客户端新增解析），下载走剧集页同款 DownloadManager 入队（片名归档），已下载显示「已下载」不再重复入队",
+        ]),
         Entry(version: "v2.60", title: "收官·全量复查与更新日志", lines: [
             "更新日志补齐第十次通宵全部 11 轮（v2.50–v2.60）：发现页三修、更新日志与版本口径复查、模块深挖、播放器深挖、搜索深挖、Emby 深挖、直播深挖、性能深挖、UI 核查、稳定扫荡、收官，全仓共 81 条、严格降序、无重复，当前版本置顶高亮",
             "Rex 差距清单二版定稿（已对齐/平台限制/仍欠，结论记计划文件）：自一版后新对齐——预告片播放入口（v2.39）、全局参数设置入口（v2.39）、模块超时点名四条可见链路（v2.39/v2.54）、栏目缓存（v2.06）、模块 HTTP 真实状态码与响应头（v2.00）、超时分层与错误分类（v2.01）、官方模块目录预置（v2.02）、fetch 兼容加固（v2.07）、tmdb 错误中文直抛与转发兜底（v2.06/v1.76）、模块卡作者·版本·栏目数与自检留卡（v1.94）；平台限制仍在——动态封面只解码不播、userId/configId 无应用级标识可注、栏目缓存默认 TTL 30 分钟（有意偏差）、Widget.i18n 顶层代码取不到词典、rex-tmdb 官方 validate 静态校验跑不起来、TMDB 片单栏目 0 条（官网 Cloudflare 挑战）、danmu 示例无 episodeNumber 只能按首集匹配、音乐模块无原生音乐播放器页；仍欠——Emby 电影无详情页、播放列表级 catchup-days 默认值未解析、首帧打点未按直播/点播与引擎分桶、同名同年电影与电视剧仍合一张卡",

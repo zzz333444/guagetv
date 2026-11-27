@@ -131,6 +131,10 @@ enum EmbyClient {
         var positionTicks: Int64 = 0   // resume position (UserData)
         var runTimeTicks: Int64 = 0
         var rating: Double = 0         // CommunityRating
+        /// v2.61: starred on the server (UserData.IsFavorite).
+        /// List endpoints may omit UserData — the movie detail
+        /// page re-reads it from the full-item fetch.
+        var isFavorite: Bool = false
         /// v2.12 detail alignment: only the full-item fetch carries
         /// these (list endpoints don't return People), so they stay
         /// empty until itemDetail() fills them in.
@@ -241,6 +245,9 @@ enum EmbyClient {
         if let ud = raw["UserData"] as? [String: Any],
            let pos = (ud["PlaybackPositionTicks"] as? NSNumber)?.int64Value {
             item.positionTicks = pos
+        }
+        if let ud = raw["UserData"] as? [String: Any] {
+            item.isFavorite = (ud["IsFavorite"] as? Bool) ?? false
         }
         return item
     }
@@ -824,7 +831,9 @@ struct EmbyItemDestination: View {
         switch item.type {
         case "Series":
             EmbySeriesView(series: item)
-        case "Movie", "Episode", "Video":
+        case "Movie":
+            EmbyMovieView(movie: item)
+        case "Episode", "Video":
             EmbyPlayLoader(item: item)
         default:
             EmbyLibraryView(library: item)
@@ -1402,8 +1411,328 @@ struct EmbySeriesView: View {
     }
 }
 
-/// One-shot loader for a movie: resolve its stream URL, then
-/// swap itself for the player.
+/// Movie detail page (v2.61): movies used to go straight into
+/// EmbyPlayLoader — no synopsis, no cast, no media-info card,
+/// no favourite/download state. This mirrors EmbySeriesView
+/// (same StarBar / MediaInfoCard / CastRowView / ambient glow)
+/// and DetailView's white-capsule play + glass action capsule.
+/// The play button reuses the EmbyPlayLoader chain (streamURL
+/// → single-episode PlayerView) and passes the server's resume
+/// position via PlayerView resumeAt, which the series page
+/// never did. All movie entries (home rows, library grid)
+/// route through EmbyItemDestination, so this page is the
+/// single new entry point.
+struct EmbyMovieView: View {
+    let movie: EmbyClient.Item
+    /// v2.12 pattern, same as the series page: the full-item
+    /// fetch fills People/Genres/OfficialRating/IsFavorite;
+    /// nil until it lands or when it fails — the page works
+    /// off `movie` either way.
+    @State private var detailItem: EmbyClient.Item?
+    @State private var playSelection: MoviePlaySelection?
+    @State private var isFavorite: Bool
+    @State private var favoriteBusy = false
+    @State private var note: String?
+    @State private var downloadNote: String?
+    @ObservedObject private var downloads = DownloadManager.shared
+    @State private var pendingDownloadID: String?
+
+    init(movie: EmbyClient.Item) {
+        self.movie = movie
+        _isFavorite = State(initialValue: movie.isFavorite)
+    }
+
+    /// Media-info rows (v2.12 spec, same as the series page):
+    /// only fields the server actually sent; empty ones dropped.
+    private var mediaInfoRows: [(label: String, value: String)] {
+        let detail = detailItem ?? movie
+        return [
+            ("来源", "Emby · \(EmbyClient.activeServerName)"),
+            ("类型", detail.genres.joined(separator: " / ")),
+            ("年份", movie.year),
+            ("评分", movie.rating > 0 ? String(format: "%.1f", movie.rating) : ""),
+            ("分级", detail.officialRating),
+            ("片长", movie.runtimeText),
+        ].filter { !$0.value.isEmpty }
+    }
+
+    /// Server resume position in seconds; the player only
+    /// honours it past 5 seconds (its own resumeAt guard).
+    private var resumeSeconds: Double {
+        Double(movie.positionTicks) / 10_000_000
+    }
+
+    private var hasResume: Bool { resumeSeconds > 5 }
+
+    private var remainingMinutes: Int {
+        guard movie.runTimeTicks > movie.positionTicks else { return 0 }
+        return Int((movie.runTimeTicks - movie.positionTicks) / 10_000_000 / 60)
+    }
+
+    /// v2.61 review — favourite/download parity with the
+    /// series page: the series page shows NEITHER (no
+    /// favourite control at all; downloads only per episode
+    /// via context menu). A movie has no episode list to
+    /// carry actions, so this page adds both, on the same
+    /// APIs the home favourites row (setFavorite) and the
+    /// series page (DownloadManager.enqueue) already use.
+    /// Downloaded = a done DownloadManager item filed under
+    /// this movie's name (vodName == movie.name).
+    private var isDownloaded: Bool {
+        downloads.items.contains {
+            $0.vodName == movie.name && $0.state == "done"
+        }
+    }
+
+    private struct MoviePlaySelection: Identifiable {
+        var initial: (url: String, header: [String: String])?
+        var resumeAt: Double
+        var resolver: PlayerView.Resolver?
+        var id: String { movieID }
+        var movieID: String
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                if movie.rating > 0 {
+                    HStack(spacing: 8) {
+                        StarBarView(value: movie.rating)
+                        Text(String(format: "%.1f", movie.rating))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Text("Emby 评分")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                    }
+                }
+                if !movie.overview.isEmpty {
+                    Text(movie.overview)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.text.opacity(0.75))
+                        .lineSpacing(4)
+                }
+                actionRow
+                if hasResume, movie.runTimeTicks > 0 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(Color.white.opacity(0.2))
+                                    .frame(height: 4)
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(Theme.accent)
+                                    .frame(width: geo.size.width * CGFloat(movie.positionTicks) / CGFloat(movie.runTimeTicks), height: 4)
+                            }
+                        }
+                        .frame(height: 4)
+                        Text("已看到 \(Int(resumeSeconds / 60)) 分钟"
+                             + (remainingMinutes > 0 ? " · 还剩 \(remainingMinutes) 分钟" : ""))
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                    }
+                }
+                MediaInfoCard(rows: mediaInfoRows)
+                CastRowView(people: (detailItem ?? movie).people.map { (name: $0.name, role: $0.role, avatar: "") })
+                if let note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let downloadNote {
+                    Text(downloadNote)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 110)
+        }
+        .background(AmbientBackground(
+            imageURL: EmbyClient.imageURL(itemID: movie.id),
+            intensity: 0.65,
+            cacheKey: EmbyClient.imageCacheKey(itemID: movie.id)))
+        .navigationTitle(movie.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: downloads.items.map { $0.id + "|" + $0.state }) { _ in
+            updateDownloadNote()
+        }
+        .fullScreenCover(item: $playSelection) { sel in
+            PlayerView(episodes: [PlayerView.EpisodeRef(name: movie.name, url: movie.id)],
+                       startIndex: 0, header: [:], title: movie.name,
+                       resumeAt: sel.resumeAt,
+                       initialResolved: sel.initial,
+                       resolver: sel.resolver)
+        }
+        .task {
+            if let detail = try? await EmbyClient.itemDetail(id: movie.id) {
+                detailItem = detail
+                isFavorite = detail.isFavorite
+            }
+        }
+    }
+
+    /// DetailView actionRow, Emby edition: white play capsule
+    /// (two lines: 播放/继续播放 + 还剩 X 分钟/片长) + one
+    /// glass capsule holding 收藏 / 下载. No 追剧 — that is
+    /// the series page's concept; a movie only has 收藏.
+    private var actionRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                Haptics.tap()
+                Task { await play() }
+            } label: {
+                VStack(spacing: 1) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                        Text(hasResume ? "继续播放" : "播放")
+                    }
+                    .font(.headline)
+                    let subline = hasResume
+                        ? (remainingMinutes > 0 ? "还剩 \(remainingMinutes) 分钟" : "")
+                        : movie.runtimeText
+                    if !subline.isEmpty {
+                        Text(subline)
+                            .font(.caption.weight(.medium))
+                            .opacity(0.65)
+                            .lineLimit(1)
+                    }
+                }
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(.white, in: Capsule())
+                .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+            }
+            .buttonStyle(.plain)
+            HStack(spacing: 2) {
+                movieActionItem(
+                    icon: isFavorite ? "star.fill" : "star",
+                    label: isFavorite ? "已收藏" : "收藏",
+                    active: isFavorite) {
+                        Haptics.tap()
+                        Task { await toggleFavorite() }
+                    }
+                    .disabled(favoriteBusy)
+                movieActionItem(
+                    icon: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle",
+                    label: isDownloaded ? "已下载" : "下载",
+                    active: isDownloaded) {
+                        Haptics.tap()
+                        Task { await downloadMovie() }
+                    }
+                    .disabled(isDownloaded)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(Theme.glass, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.glassStroke, lineWidth: 1))
+        }
+    }
+
+    /// DetailView.actionCapsuleItem, local copy (that one is
+    /// private to DetailView): 46pt labeled mini-action.
+    private func movieActionItem(icon: String, label: String, active: Bool,
+                                 action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 17))
+                Text(label).font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(active ? Theme.accent : Theme.text)
+            .frame(width: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Same shape as the series page's playSingle: pre-resolve
+    /// once for instant start; the resolver re-resolves on
+    /// demand (line switches / retries) by item id.
+    private func play() async {
+        let firstURL = try? await EmbyClient.streamURL(itemID: movie.id)
+        playSelection = MoviePlaySelection(
+            initial: firstURL.map { ($0, [:]) },
+            resumeAt: hasResume ? resumeSeconds : 0,
+            resolver: { _, _ in
+                do {
+                    return .ok(url: try await EmbyClient.streamURL(itemID: movie.id), header: [:])
+                } catch {
+                    return .failed(error.localizedDescription)
+                }
+            },
+            movieID: movie.id)
+    }
+
+    private func toggleFavorite() async {
+        guard !favoriteBusy else { return }
+        favoriteBusy = true
+        defer { favoriteBusy = false }
+        let target = !isFavorite
+        do {
+            try await EmbyClient.setFavorite(itemID: movie.id, favorite: target)
+            isFavorite = target
+            note = target ? "已收藏，可在 Emby 首页收藏行看到" : "已取消收藏"
+        } catch {
+            note = "收藏失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Series page's downloadEpisode, single-item edition:
+    /// resolve → probe → enqueue under vodName/episodeName =
+    /// the movie's name, then track the item id so the note
+    /// reports the real finish (v2.55 pattern).
+    private func downloadMovie() async {
+        guard !isDownloaded else { return }
+        downloadNote = "正在取下载地址…"
+        guard let url = try? await EmbyClient.streamURL(itemID: movie.id) else {
+            downloadNote = "取不到播放地址，下载不了"
+            return
+        }
+        guard await DownloadManager.probeDownloadable(url: url, header: [:]) else {
+            downloadNote = "这个地址下载不了"
+            return
+        }
+        guard let item = DownloadManager.shared.enqueue(
+            vodName: movie.name, episodeName: movie.name,
+            pic: EmbyClient.imageURL(itemID: movie.id),
+            picCacheKey: EmbyClient.imageCacheKey(itemID: movie.id),
+            url: url, header: [:]) else {
+            downloadNote = "这个地址下载不了"
+            return
+        }
+        if item.state == "done" {
+            downloadNote = "已经下载好了"
+            return
+        }
+        pendingDownloadID = item.id
+        downloadNote = "已加入下载"
+    }
+
+    private func updateDownloadNote() {
+        guard let id = pendingDownloadID else { return }
+        guard let item = downloads.items.first(where: { $0.id == id }) else {
+            pendingDownloadID = nil
+            return
+        }
+        switch item.state {
+        case "done":
+            pendingDownloadID = nil
+            downloadNote = "已下载完成"
+        case "failed":
+            pendingDownloadID = nil
+            downloadNote = "下载失败，可去下载页重试"
+        default:
+            break
+        }
+    }
+}
+
+/// One-shot loader for an episode / Video: resolve its stream
+/// URL, then swap itself for the player. (Movies got their own
+/// detail page in v2.61 and no longer come through here.)
 struct EmbyPlayLoader: View {
     let item: EmbyClient.Item
     @State private var selection: SinglePlay?
