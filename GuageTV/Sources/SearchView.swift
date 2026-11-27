@@ -538,6 +538,15 @@ struct SearchView: View {
     /// ("2024", "2024年", "2024-01-01" all occur), and the
     /// unnormalised key split one film into two cards when two
     /// sites spelled its year differently.
+    /// v2.64: same name + same year, but one side is confidently
+    /// a film and the other confidently a series, splits into two
+    /// cards (see titleTypeClass) — and only when every entry in
+    /// the group classifies confidently. Any entry with a missing
+    /// or ambiguous type vetoes the split, so an untyped hit can
+    /// never strand a card on the wrong side. Known residual
+    /// risk: a lone mislabelled entry (one site calls a film
+    /// "电视剧") forms its own singleton card; the veto rule keeps
+    /// that rare, and the card still opens the film.
     private var titleGroups: [TitleGroup] {
         var order: [String] = []
         var map: [String: TitleGroup] = [:]
@@ -551,7 +560,70 @@ struct SearchView: View {
                 map[key]?.entries.append((group.site, item))
             }
         }
-        return order.compactMap { map[$0] }
+        var split: [TitleGroup] = []
+        for group in order.compactMap({ map[$0] }) {
+            let classes = group.entries.map { Self.titleTypeClass($0.item.typeName) }
+            guard classes.contains(.movie), classes.contains(.series),
+                  !classes.contains(.unknown) else {
+                split.append(group)
+                continue
+            }
+            let movieEntries = zip(group.entries, classes).filter { $0.1 == .movie }.map(\.0)
+            let seriesEntries = zip(group.entries, classes).filter { $0.1 == .series }.map(\.0)
+            split.append(TitleGroup(key: group.key + "|电影", title: group.title,
+                                    year: group.year, entries: movieEntries))
+            split.append(TitleGroup(key: group.key + "|剧集", title: group.title,
+                                    year: group.year, entries: seriesEntries))
+        }
+        return split
+    }
+
+    /// v2.64: high-confidence movie / series classes for the
+    /// same-name-same-year split in titleGroups. The table is
+    /// deliberately narrow — only spellings that cannot be the
+    /// other class:
+    ///
+    /// 电影类：含"电影"/"影片"（"电影版" "电影解说"同理）、
+    ///   "movie"/"film"，以及带"片"尾的体裁词（"动作片" "喜剧片"
+    ///   "剧情片" "科幻片" "恐怖片" "爱情片" "战争片" "悬疑片"
+    ///   "动画电影"……）。
+    /// 剧集类："tv"/含 "series"（"tv series" "miniseries"）、
+    ///   "剧集"，以及带"剧"尾的词（"电视剧" "连续剧" "网剧"
+    ///   "国产剧" "欧美剧" "日韩剧" "韩剧" "美剧" "港台剧"……）。
+    ///   但"剧"尾有例外——"喜剧" "悲剧" "正剧" "歌剧" "舞剧"
+    ///   "闹剧"是体裁词不是剧集，单列排除（自测抓到的真坑：
+    ///   "喜剧"以"剧"结尾，裸后缀规则会把它误判成剧集）。
+    /// 含糊（unknown，不参与拆分、仍合并）："（无类型）；
+    ///   "综艺" "动漫" "纪录片"（"纪录片"虽以"片"结尾、但与
+    ///   电影不是一类，单列排除）；"动画片"（口语里电影与剧集
+    ///   都叫动画片）；"短剧" "话剧"（以"剧"结尾但不是剧集）；
+    ///   裸体裁词（"剧情" "动作" "喜剧"——无片/剧后缀时分不
+    ///   清电影还是剧集）；"电影,电视剧"这类两边都沾的复合串
+    ///   （多值按 ,，、/｜| 切开逐个判，任一边沾上即含糊）。
+    /// 类型来源：站点结果取 type_name（回退 vod_class，纯体
+    ///   裁串多半落进含糊）；模块的 mediaType 已在
+    ///   moduleTypeName 里转成"电影"/"电视剧"，走同一张表。
+    enum TitleTypeClass { case movie, series, unknown }
+    static func titleTypeClass(_ typeName: String) -> TitleTypeClass {
+        let tokens = typeName.lowercased()
+            .split(whereSeparator: { ",，、/｜|".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return .unknown }
+        var sawMovie = false, sawSeries = false
+        for token in tokens {
+            let movie = token.contains("电影") || token.contains("影片")
+                || ["movie", "film"].contains(token)
+                || (token.hasSuffix("片") && token != "纪录片" && token != "动画片")
+            let series = token == "tv" || token == "剧集" || token.contains("series")
+                || (token.hasSuffix("剧") && !["短剧", "话剧", "喜剧", "悲剧", "正剧", "歌剧", "舞剧", "闹剧"].contains(token))
+            if movie { sawMovie = true }
+            if series { sawSeries = true }
+        }
+        if sawMovie && sawSeries { return .unknown }
+        if sawMovie { return .movie }
+        if sawSeries { return .series }
+        return .unknown
     }
 
     /// The first 19xx/20xx run inside a raw year string is the
@@ -959,8 +1031,62 @@ struct SearchView: View {
             default: return "网络错误"
             }
         }
+        // v2.64: CFNetwork 报错有时走自己的域名、不进上面的
+        // URLError 分支，但错误码与 URLError 是同一套数字。
+        if ns.domain.contains("CFNetwork") {
+            switch ns.code {
+            case -1001: return "请求超时"
+            case -1009: return "网络不通"
+            case -1005: return "网络连接中断"
+            case -1003: return "域名解析失败"
+            case -1200, -1201, -1202: return "证书或安全连接失败"
+            case -1011: return "服务器返回错误状态"
+            default: break
+            }
+        }
+        // v2.64: 这条尾巴以前直接返回 localizedDescription，
+        // 桥接 / POSIX / 解码类失败的原文是英文（"Connection
+        // reset by peer"、"The certificate for this server is
+        // invalid"），直接露在搜索失败汇总里。先把常见英文形
+        // 态翻成中文；已经是中文的原文原样过；认不出的保留原
+        // 文、前面加中文前缀——失败行不再裸露英文。
         let text = ns.localizedDescription
-        return text.count > 42 ? String(text.prefix(42)) + "…" : text
+        if text.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
+            return text.count > 42 ? String(text.prefix(42)) + "…" : text
+        }
+        let lower = text.lowercased()
+        if lower.contains("timed out") || lower.contains("timeout") { return "请求超时" }
+        if lower.contains("connection reset") || lower.contains("broken pipe") { return "连接被对方断开" }
+        if lower.contains("connection refused") { return "连接被拒绝" }
+        if lower.contains("certificate") || lower.contains("ssl") || lower.contains("secure connection") {
+            return "证书或安全连接失败"
+        }
+        if lower.contains("cancelled") || lower.contains("canceled") { return "已取消" }
+        if lower.contains("not connected") || lower.contains("no internet") || lower.contains("offline") {
+            return "网络不通"
+        }
+        if lower.contains("cannot find host") || lower.contains("dns") || lower.contains("host not found")
+            || lower.contains("name or service not known") {
+            return "域名解析失败"
+        }
+        if lower.contains("too many requests") || lower.contains(" 429") { return "请求过于频繁" }
+        if lower.contains("unauthorized") || lower.contains(" 401") { return "未授权（需登录）" }
+        if lower.contains("forbidden") || lower.contains(" 403") { return "访问被拒绝" }
+        if lower.contains("not found") || lower.contains(" 404") { return "资源不存在" }
+        if lower.contains("server error") || lower.contains("bad gateway") || lower.contains("service unavailable")
+            || lower.contains(" 500") || lower.contains(" 502") || lower.contains(" 503") {
+            return "服务器错误"
+        }
+        if lower.contains("decod") || lower.contains("isn't in the correct format")
+            || lower.contains("couldn't be read") || lower.contains("invalid data") {
+            return "返回内容无法解析"
+        }
+        if lower.contains("interrupted") || lower.contains("connection was lost")
+            || lower.contains("lost connection") {
+            return "网络连接中断"
+        }
+        let kept = text.count > 34 ? String(text.prefix(34)) + "…" : text
+        return "搜索失败：" + kept
     }
 
     /// A deadline a blocked bridge call cannot ignore: task-group

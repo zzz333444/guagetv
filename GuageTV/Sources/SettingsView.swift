@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.63 · 播放器打点分桶"
+    static let buildLabel = "v2.64 · 搜索补缺"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.64", title: "搜索补缺", lines: [
+            "搜索失败不再裸露英文：shortError 非 URLError 的尾巴以前直接返回 localizedDescription，桥接／POSIX／解码类失败的原文是英文（\"Connection reset by peer\"、\"The certificate for this server is invalid\"）；现常见英文形态先翻中文（超时／连接被断开／被拒绝／证书或安全连接失败／已取消／域名解析失败／请求过于频繁／未授权／访问被拒绝／资源不存在／服务器错误／返回内容无法解析／网络连接中断），CFNetwork 域名错误按同套错误码直判，已是中文的原文原样过，认不出的保留原文、前面加「搜索失败：」前缀",
+            "同名同年电影 vs 电视剧拆卡：同名同年、但一边高置信是电影、另一边高置信是剧集时，现拆成两张卡；只有组内每一条的类型都能高置信归一才拆，任一条缺类型或含糊（无类型、综艺／动漫／纪录片／短剧、裸体裁词「剧情」「动作」「喜剧」）都否决拆分、仍合并。归一化词表写进代码注释：电影类含「电影」／「影片」／movie／film 与「片」尾体裁词（纪录片、动画片单列排除），剧集类为 tv／series／「剧集」与「剧」尾词（短剧／话剧／喜剧／悲剧／正剧／歌剧／舞剧／闹剧单列排除）",
+            "自测抓到的真坑已修：第一版「剧」尾裸后缀规则把体裁词「喜剧」误判成剧集、又漏了「剧集」本身不以「剧」结尾；自测脚本 73 项全过后才推仓。残留风险：单个站点把电影错标成「电视剧」时，该条会单独成一张卡（仍能点开播），否决规则已把这种情况压到最少",
+        ]),
         Entry(version: "v2.63", title: "播放器打点分桶", lines: [
             "首帧耗时按引擎×内容分桶：此前原生与 mpv、直播与点播的首帧耗时混在一个平均数里（recordFirstFrame 的引擎/直播参数传了却被丢弃），慢到底是哪一路看不出来；现 TimingStats 新增四桶（原生·点播、原生·直播、mpv·点播、mpv·直播），各桶记平均耗时、样本数与慢次数（慢阈值仍是 >5 秒）",
             "诊断卡与导出同步分桶：设置 → 关于的起播打点汇总行追加「首帧分桶：各桶平均…」一段，诊断导出文本顶部同一行同步带出，不用再猜慢的是直播还是 mpv",
