@@ -48,8 +48,8 @@ targets:
       path: GuageTV/Info.plist
       properties:
         CFBundleDisplayName: 呱壳
-        CFBundleShortVersionString: "2.63"
-        CFBundleVersion: "263"
+        CFBundleShortVersionString: "2.64"
+        CFBundleVersion: "264"
         UIBackgroundModes:
           - audio
         NSPhotoLibraryAddUsageDescription: 保存播放截图到相册
