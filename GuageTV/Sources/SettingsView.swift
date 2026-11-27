@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.61 · Emby 电影详情页"
+    static let buildLabel = "v2.62 · 直播补缺"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,11 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.62", title: "直播补缺", lines: [
+            "播放列表级 catchup-days 默认值：#EXTM3U 头部声明的 catchup-days（如 catchup-days=\"7\"）现作为全列表默认值，未单独声明天数的频道按列表级生效；频道级声明仍优先（频道 3 天 > 列表 7 天），两者都没有时不限期（旧行为）；回看期校验（节目单「超出回看范围」与时移范围）直接复用生效天数，不用再改",
+            "catchupType 落地：shift 模式此前只解析不使用——声明了 shift 却没有 catchup-source 的频道拿不到任何回看入口；现按 SIPTV 约定自动追加 ?utc={起}&lutc={止}（Unix 秒）到频道地址，不用模板也能回看；频道同时声明了模板时仍以模板为准（append／default 与既有展开口径一致：完整 URL 直接用、查询片段拼到频道地址后）；catchup-type 是 catchup 的同义别名，现同义解析",
+            "根因修复（回看链路本是死的）：真实线路 16 条 catchup 模板全是 ${(b)…}／${(e)…} 带括号写法，而 expand 与 hasPlaceholder 的正则只认不带括号的 ${b…}——占位符一个都匹配不上，buildURL 原样返回 nil，角标、节目单回看钮、时移钮全都不出；现两种写法都展开（分组序号不变），并用真实模板原文自测通过；线路级 catchup 的 type 字段与列表级 catchup／catchup-source 默认值本轮未动",
+        ]),
         Entry(version: "v2.61", title: "Emby 电影详情页", lines: [
             "Emby 电影终于有详情页了：之前点电影卡直接进播放器、连简介都看不到；现与剧集页同规格——环境光海报底、Emby 评分星条、简介、媒体信息卡（来源／类型／年份／评分／分级／片长）、演职员横滑行；入口不变（首页各行与媒体库电影卡点按），剧集页与 Episode／Video 不动",
             "播放钮走现有取流链路（streamURL → 单集播放器），并把服务器的续播位置经 PlayerView resumeAt 接上：看到一半的电影显示「继续播放 · 还剩 X 分钟」并带进度条，剧集页此前没接续播位置",

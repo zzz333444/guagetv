@@ -16,6 +16,9 @@ enum LiveListParser {
         /// v2.43: M3U 频道级回看属性（#EXTINF 行的 catchup /
         /// catchup-source / catchup-days）。有值时优先于线路级
         /// catchup；全空时回落到线路级。
+        /// v2.62: catchupDays 未声明时取 #EXTM3U 头部的列表级
+        /// 默认值（仍无则 nil = 不限期）；catchupType 存小写
+        /// 归一值，shift 无源时由 LiveView 合成 utc/lutc 模板。
         var catchupSource: String = ""
         var catchupType: String = ""
         var catchupDays: Int? = nil
@@ -36,11 +39,19 @@ enum LiveListParser {
     private static func parseM3U(_ text: String) -> [(name: String, channels: [Channel])] {
         var groups: [String: [Channel]] = [:]
         var order: [String] = []
+        // v2.62: 播放列表级回看默认值（#EXTM3U 头部属性，与
+        // 频道级同名属性是同一约定：频道级优先、列表级兜底）。
+        // 本轮只接 catchup-days；catchup / catchup-source 的
+        // 列表级默认值未接（见更新日志 v2.62）。
+        var playlistCatchupDays: Int? = nil
         var pending: (name: String, group: String, logo: String, tvgId: String,
                       catchupSource: String, catchupType: String, catchupDays: Int?)?
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("#EXTINF") {
+            if line.hasPrefix("#EXTM3U") {
+                playlistCatchupDays = capture("catchup-days=\"?(\\d+)\"?", in: line)
+                    .flatMap(Int.init)
+            } else if line.hasPrefix("#EXTINF") {
                 let name = line.components(separatedBy: ",").last?
                     .trimmingCharacters(in: .whitespaces) ?? ""
                 let group = capture("group-title=\"([^\"]+)\"", in: line) ?? "未分组"
@@ -52,8 +63,14 @@ enum LiveListParser {
                 let catchupSource = capture("catchup-source=\"([^\"]+)\"", in: line)
                     ?? capture("catchup-source='([^']+)'", in: line)
                     ?? capture("catchup-source=([^\\s,]+)", in: line) ?? ""
-                let catchupType = capture("catchup=\"([^\"]+)\"", in: line)
-                    ?? capture("catchup='([^']+)'", in: line) ?? ""
+                // v2.62: catchup-type 是 catchup 的同义别名
+                // （UniPlayer/Kodi 口径）；值归一成小写再存，
+                // 调用方直接按 "shift"/"append"/"default" 比对。
+                let catchupType = (capture("catchup=\"([^\"]+)\"", in: line)
+                    ?? capture("catchup='([^']+)'", in: line)
+                    ?? capture("catchup-type=\"([^\"]+)\"", in: line)
+                    ?? capture("catchup-type='([^']+)'", in: line) ?? "")
+                    .trimmingCharacters(in: .whitespaces).lowercased()
                 let catchupDays = capture("catchup-days=\"?(\\d+)\"?", in: line)
                     .flatMap(Int.init)
                 pending = (name, group, logo, tvgId, catchupSource, catchupType, catchupDays)
@@ -62,7 +79,9 @@ enum LiveListParser {
                 groups[p.group, default: []].append(
                     Channel(name: p.name, url: line, group: p.group, logo: p.logo, tvgId: p.tvgId,
                             catchupSource: p.catchupSource, catchupType: p.catchupType,
-                            catchupDays: p.catchupDays))
+                            // v2.62: 天数优先级：频道级 > 列表级
+                            // #EXTM3U 默认值 > 不声明（nil = 不限期）。
+                            catchupDays: p.catchupDays ?? playlistCatchupDays))
                 pending = nil
             }
         }

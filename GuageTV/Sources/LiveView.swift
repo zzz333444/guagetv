@@ -133,6 +133,18 @@ struct LiveView: View {
            TVBoxConfig.CatchupTemplate.hasPlaceholder(channel.catchupSource) {
             return (channel.catchupSource, channel.catchupDays)
         }
+        // v2.62: shift 模式（SIPTV 约定）不需要 catchup-source——
+        // 回看地址就是频道地址自动追加 ?utc={起}&lutc={止}
+        // （Unix 秒）。此前 shift 只解析不使用，声明了 shift
+        // 却没有模板的频道拿不到任何回看入口；现合成模板走
+        // 同一展开口（{utc}/{lutc} 由 CatchupTemplate.expand
+        // 展开，?/& 接头由 buildURL 按频道地址现状处理）。
+        // 频道同时声明了 catchup-source 时仍以模板为准
+        // （append/default 与既有展开口径一致：完整 URL 直接
+        // 用、查询片段拼到频道地址后）；线路级 catchup 不动。
+        if channel.catchupType == "shift" {
+            return ("?utc={utc}&lutc={lutc}", channel.catchupDays)
+        }
         if let source = live.catchup?.source, !source.isEmpty,
            TVBoxConfig.CatchupTemplate.hasPlaceholder(source) {
             return (source, nil)

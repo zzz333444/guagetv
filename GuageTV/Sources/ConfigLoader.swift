@@ -101,6 +101,12 @@ struct TVBoxConfig: Decodable {
         /// append（或缺失）时把展开后的 source 拼到频道地址后；
         /// source 为空或模板里没有任何占位符时返回 nil——没有
         /// 起止时间的回看地址拼出来也是错的，不如不显示入口。
+        /// v2.62: 占位符两种写法都接受——带括号的 ${(b)…} /
+        /// ${(e)…}（真实线路 16 条 catchup 模板全是此形态，
+        /// 旧正则 \$\{(b|e)…\} 根本匹配不上，expand 原样返回、
+        /// buildURL 返 nil，等于整条回看链路是死的）与不带
+        /// 括号的 ${b…} / ${e…}；分组序号不变（1=起止标志、
+        /// 2=格式串）。
         func catchupURL(channelURL: String, start: Date, end: Date) -> String? {
             guard let source = catchup?.source, !source.isEmpty else { return nil }
             return CatchupTemplate.buildURL(template: source, channelURL: channelURL,
@@ -166,7 +172,8 @@ struct TVBoxConfig: Decodable {
                                            with: String(Int(start.timeIntervalSince1970)))
             out = out.replacingOccurrences(of: "{lutc}",
                                            with: String(Int(end.timeIntervalSince1970)))
-            guard let re = try? NSRegularExpression(pattern: #"\$\{(b|e)([^}]*)\}"#) else {
+            // v2.62: \(? / \)? 容纳 ${(b)…} 带括号写法（见上）。
+            guard let re = try? NSRegularExpression(pattern: #"\$\{\(?(b|e)\)?([^}]*)\}"#) else {
                 return out
             }
             let range = NSRange(out.startIndex..., in: out)
@@ -185,12 +192,13 @@ struct TVBoxConfig: Decodable {
         }
 
         /// v2.56: 模板是否含任一起止时间占位符（expand 能展开的
-        /// 四种：${(b)…}/${(e)…}、{utc}/{lutc}）。无占位符的模板
-        /// 拼不出回看地址（buildURL 返回 nil），调用方不应再亮
-        /// 「可回看」角标或时移入口——展开本身仍是唯一真凭据。
+        /// 四种：${(b)…}/${(e)…}（带括号与不带括号两种写法均可）、
+        /// {utc}/{lutc}）。无占位符的模板拼不出回看地址（buildURL
+        /// 返回 nil），调用方不应再亮「可回看」角标或时移入口——
+        /// 展开本身仍是唯一真凭据。
         static func hasPlaceholder(_ template: String) -> Bool {
             if template.contains("{utc}") || template.contains("{lutc}") { return true }
-            guard let re = try? NSRegularExpression(pattern: #"\$\{(b|e)[^}]*\}"#) else { return false }
+            guard let re = try? NSRegularExpression(pattern: #"\$\{\(?(b|e)\)?[^}]*\}"#) else { return false }
             return re.firstMatch(in: template,
                                  range: NSRange(template.startIndex..., in: template)) != nil
         }
