@@ -1873,6 +1873,16 @@ struct PlayerView: View {
 
     private func togglePlay() { Haptics.tap(); isMPV ? mpv.togglePlay() : native.toggle() }
 
+    /// v2.66: 睡眠定时停播后释放后台音频会话——只暂停不释放时，
+    /// 控制中心仍挂着本 App 的播放卡、其他 App 的音频也被一直
+    /// 压住。原生引擎且未开画中画时才停用（.notifyOthersOnDeactivation
+    /// 让别的音频恢复）；mpv 自管音频会话、画中画期间播放器归
+    /// 画中画窗口所有，动会话会断续播，故不动。
+    private func releaseAudioSessionForSleepTimer() {
+        guard !isMPV, !native.isPiPActive else { return }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     /// P4 音频中断恢复（来电 / 闹钟 / Siri 打断时系统暂停音频会话）：
     /// 中断开始记下当时是否在播；中断结束且系统建议恢复（shouldResume）
     /// 时，若中断前在播就续播。只对原生引擎续播；mpv 引擎仅记录
@@ -1958,6 +1968,7 @@ struct PlayerView: View {
         if sleepAtEpisodeEnd {
             sleepAtEpisodeEnd = false
             if isPlaying { togglePlay() }
+            releaseAudioSessionForSleepTimer()
             showToast("睡眠定时：本集播完，已暂停")
             return
         }
@@ -2282,8 +2293,11 @@ struct PlayerView: View {
             } else {
                 // v2.21: the ladder is exhausted — this is a real
                 // failure, not a retry, so it gets the error buzz.
+                // v2.66: the raw engine message is English for mpv
+                // (file-error) — show the classified Chinese cause
+                // and how many lines were tried instead.
                 Haptics.error()
-                showToast("播放失败：" + message)
+                showToast("播放失败：\(classifyFailure(message))（已试 \(triedLines.count) 条线路）")
             }
         }
     }
@@ -2499,6 +2513,7 @@ struct PlayerView: View {
             if let sleepDeadline, Date() >= sleepDeadline {
                 self.sleepDeadline = nil
                 if isPlaying { togglePlay() }
+                releaseAudioSessionForSleepTimer()
                 showToast("睡眠定时到，已暂停")
             }
         }

@@ -288,6 +288,9 @@ final class LocalProxyServer {
         if result.removed > 0 {
             Diagnostics.log("去广告", "移除 \(result.removed) 段（约 \(Int(result.removedSeconds)) 秒）：\(target)")
         }
+        if result.valveTripped {
+            Diagnostics.log("去广告", "安全阀触发：拟移除 \(result.valveSegments) 段（约 \(Int(result.valveSeconds)) 秒）超总时长一半，已放行原片：\(target)")
+        }
         let isLive = !text.contains("#EXT-X-ENDLIST")
         storePlaylist(key: cacheKey, text: result.text, isLive: isLive)
         // Master playlists list variants, not segments — only

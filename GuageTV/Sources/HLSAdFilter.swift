@@ -118,8 +118,12 @@ enum HLSAdFilter {
     }
 
     /// Returns the rewritten playlist plus how much was removed.
+    /// v2.66: the safety-valve trip is reported too (valveTripped
+    /// + what it would have removed) — before this the trip was
+    /// invisible: the counts were zeroed and nothing was logged.
     static func rewrite(playlist: String, base: URL, root: String,
-                        headersB64: String?) -> (text: String, removed: Int, removedSeconds: Double) {
+                        headersB64: String?) -> (text: String, removed: Int, removedSeconds: Double,
+                                                 valveTripped: Bool, valveSegments: Int, valveSeconds: Double) {
         let header = decodeHeaders(headersB64)
         let lines = playlist
             .components(separatedBy: "\n")
@@ -154,7 +158,7 @@ enum HLSAdFilter {
                 }
                 return line
             }
-            return (out.joined(separator: "\n"), 0, 0)
+            return (out.joined(separator: "\n"), 0, 0, false, 0, 0)
         }
 
         // Media playlist: split header / segments.
@@ -224,7 +228,15 @@ enum HLSAdFilter {
         let totalDuration = segments.reduce(0) { $0 + $1.duration }
         var removedSegments = segments.filter { adGroups.contains($0.group) }
         var removedDuration = removedSegments.reduce(0) { $0 + $1.duration }
+        // v2.66: 安全阀触发时留痕——此前拟移除量被清零后无任何
+        // 记录，诊断里看不出「广告段太多、整片被放行」。
+        var valveTripped = false
+        var valveSegments = 0
+        var valveSeconds = 0.0
         if totalDuration > 0, removedDuration > totalDuration * 0.5 {
+            valveTripped = true
+            valveSegments = removedSegments.count
+            valveSeconds = removedDuration
             adGroups.removeAll()
             removedSegments = []
             removedDuration = 0
@@ -269,6 +281,7 @@ enum HLSAdFilter {
             recordRemoval(segments: removedSegments.count, seconds: removedDuration)
         }
         return (out.joined(separator: "\n"),
-                removedSegments.count, removedDuration)
+                removedSegments.count, removedDuration,
+                valveTripped, valveSegments, valveSeconds)
     }
 }

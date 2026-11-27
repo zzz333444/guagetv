@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.65 · 模块深挖"
+    static let buildLabel = "v2.66 · 播放器深挖"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.66", title: "播放器深挖", lines: [
+            "横滑快进六参数双引擎复查通过：设置页与播放器内设置 sheet 共用 player.scrub* 六个 AppStorage 键（范围/封顶/逐格粗细/逐格震动/原生预览/mpv 跟手），PlayerView 直读绑定、播放中改档立即生效；横滑手势与底部进度条拖动同走 handleDrag/scrubMoved，范围与震动对原生与 mpv 两引擎都生效，预览开关各管各引擎；逐格倍率只有细/标准/粗三档（0.5/1.0/2.0），不会出现 0 步长",
+            "HLS 去广告安全阀触发留痕：此前拟移除时长超总时长一半时整片放行、拟移除量被清零后无任何记录，诊断里看不出「广告段太多、整片被放行」；现 rewrite 回值多带阀值三字段（触发与否/拟移除段数/秒数），代理在诊断日志记「安全阀触发：拟移除 N 段（约 M 秒）超总时长一半，已放行原片」。统计口径复查通过：段数与秒数（EXTINF 求和）与诊断日志、设置页「上次过滤」行同源，都是同一份移除清单；直播与主播放列表本来就不过滤",
+            "睡眠定时到点释放音频会话：此前定时只调 pause、会话一直占着——控制中心仍挂着本 App 的播放卡、其他 App 的音频也被一直压住；现定时到点与播完本集两条分支停播后，原生引擎且未开画中画时停用会话（.notifyOthersOnDeactivation，让别的音频恢复）。mpv 自管音频会话、画中画期间播放器归画中画窗口所有，动会话会断续播，故这两路不动",
+            "多线全灭最终报错改中文点名：此前梯子走完（重建→切引擎→逐线接力）后 toast 直接拼引擎原文，mpv 的 file-error 是英文；现按 classifyFailure 词表翻成中文原因桶（加载超时/网络/解码/引擎报错），并点名已试线路数，如「播放失败：网络（已试 3 条线路）」。解析失败分支的 reason 本身多为中文常量、其余走系统语言的 localizedDescription，本轮未动",
+        ]),
         Entry(version: "v2.65", title: "模块深挖", lines: [
             "官方示例模块全量自测复跑（shim 从当前 Modules.swift 现抽）：bangumi 5/5 栏目真数据（6/22/47/41/47 条）、music-demo 7 栏＋搜索全通、rex-tmdb 4 个纯 HTTP 栏目出数据（40/40/20/20 条）；其余 7 栏无 TMDB Key 按预期报缺 key、片单栏仍是 TMDB 官网 Cloudflare 挑战 0 条（11-17 已定性）、tmdb 示例 1 栏同样无 Key；danmu 示例无真实弹幕服务，链路另用桩服务实测",
             "Widget.i18n 顶层注入修好：词典快照以前只在模块源码求值完后才设，顶层代码调 Widget.i18n 拿到的是原文（入口函数内一直正常）；现 shim 改为调用时实时读 WidgetMetadata.i18n、快照只作兜底，顶层调用与入口调用一致。限制：写在 WidgetMetadata 字面量里面的 Widget.i18n(...) 仍拿不到词典（字面量求值时元数据对象还没挂到全局）——但宿主展示文案本来就走 meta.localized 翻译，模块作者无需在字面量里调 i18n；5 个官方模块目前没有一个调用 Widget.i18n，tmdb 示例只带 en 词典不用它",
