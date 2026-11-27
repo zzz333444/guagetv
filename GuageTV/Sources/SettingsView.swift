@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     /// Bump on every shipped build so screenshots self-identify.
-    static let buildLabel = "v2.66 · 播放器深挖"
+    static let buildLabel = "v2.67 · 发现页深挖"
 
     var body: some View {
         NavigationStack {
@@ -1086,6 +1086,12 @@ struct ChangelogView: View {
     }
 
     private static let entries: [Entry] = [
+        Entry(version: "v2.67", title: "发现页深挖", lines: [
+            "hero 换榜错位修好（真缺口）：后台刷新把 trending 换成新榜单后，分页锚点 heroScrollID 仍指旧榜的 id——以前只在锚点为 nil 时钉一次；scrollPosition 收到不存在的 id 可能把轮播弹回第 0 页，而 heroIndex／圆点／环境光仍指另一页，三处错位。现每次榜单落定都校验锚点，不在榜内就重钉到当前 hero 页（不是第 0 页，保住用户正在看的那一页）；heroIndex 越界改按 hero 前 8 项夹回（以前按整榜长度夹，超 8 的下标漏网）；旧榜的标题美术字缓存一并清掉",
+            "hero／logo／评分行按 Rex 口径代码级复查通过：540pt 全幅 hero、GeometryReader 显式页宽（v2.50 错位根因已修）、logo 上限 250×64 带阴影、无 logo 回退 30pt 重标题、元信息行（类型·年份·类型）＋TMDB 玻璃评分胶囊（非实色块、0 分不显示）、简介两行、圆点（当前页拉长成 18×7 胶囊）、6.5 秒自动轮播＋0.45 秒缓动（既定例外）、封面无播放钮（v2.50 用户定稿）、点按进 TMDB 详情、长按跨线搜索；海报行 112×168、年份＋★评分、右箭头进三列整页网格，均无改动",
+            "TMDB 三级链路沙箱复测（无 Key、无 401 以外的断言，结论只作参考、不作真机结论）：直连 api.themoviedb.org 401、短域名 api.tmdb.org 401、JarProxy 转发 401，三路都在 1–3 秒内回了 TMDB 原文错误体（Invalid API key），说明三路都通到 TMDB、转发链路本身没断；图片直连 image.tmdb.org 200、经 /tmdbimg 转发 200。代码侧兜底仍是两级自动（配置地址 → JarProxy 转发），api.tmdb.org 是设置页可手动填的地址选项，不走自动切换",
+            "发现缓存新鲜度复查通过：缓存（磁盘，12 小时分级画出逻辑仍在）先画出、后台六榜逐个落定即替换、generation 守卫拦住过期刷新、失败行保留已画缓存行（不弹重试、不闪空态）、缓存只在 trending 非空时重存。换榜时 hero 位置由本轮修好的 syncHeroPosition 钉住，自动轮播 6.5 秒节拍与数据替换不打架：替换只改榜单内容，不碰 lastHeroTouch，轮播按原节拍继续走",
+        ]),
         Entry(version: "v2.66", title: "播放器深挖", lines: [
             "横滑快进六参数双引擎复查通过：设置页与播放器内设置 sheet 共用 player.scrub* 六个 AppStorage 键（范围/封顶/逐格粗细/逐格震动/原生预览/mpv 跟手），PlayerView 直读绑定、播放中改档立即生效；横滑手势与底部进度条拖动同走 handleDrag/scrubMoved，范围与震动对原生与 mpv 两引擎都生效，预览开关各管各引擎；逐格倍率只有细/标准/粗三档（0.5/1.0/2.0），不会出现 0 步长",
             "HLS 去广告安全阀触发留痕：此前拟移除时长超总时长一半时整片放行、拟移除量被清零后无任何记录，诊断里看不出「广告段太多、整片被放行」；现 rewrite 回值多带阀值三字段（触发与否/拟移除段数/秒数），代理在诊断日志记「安全阀触发：拟移除 N 段（约 M 秒）超总时长一半，已放行原片」。统计口径复查通过：段数与秒数（EXTINF 求和）与诊断日志、设置页「上次过滤」行同源，都是同一份移除清单；直播与主播放列表本来就不过滤",

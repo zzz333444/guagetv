@@ -147,9 +147,24 @@ struct DiscoverView: View {
 
     /// v2.50: trending 落定后把分页位置钉在合法页上（见 hero）——
     /// 首到即指到第一页，刷新后越界的 heroIndex 夹回 0。
+    /// v2.67: 后台刷新会把 trending 换成新榜单，旧的分页锚点
+    /// 可能指向新榜单里不存在的 id——以前只在锚点为 nil 时钉
+    /// 一次，换榜后锚点一直是 stale 的；scrollPosition 收到不
+    /// 存在的 id 可能把轮播弹回第 0 页，而 heroIndex／圆点／环
+    /// 境光仍指另一页，三处错位。现每次榜单落定都校验锚点，
+    /// 不在榜内就重钉到当前 hero 页（不是第 0 页，保住用户正
+    /// 在看的那一页）；旧榜的标题美术字缓存一并清掉。
     private func syncHeroPosition() {
-        if heroScrollID == nil { heroScrollID = trending.first?.id }
-        if heroIndex >= trending.count { heroIndex = 0 }
+        if heroIndex >= heroItems.count { heroIndex = 0 }
+        let currentID = heroItems.indices.contains(heroIndex)
+            ? heroItems[heroIndex].id : trending.first?.id
+        if heroScrollID == nil
+            || !heroItems.contains(where: { $0.id == heroScrollID }) {
+            heroScrollID = currentID
+        }
+        logos = logos.filter { entry in
+            heroItems.contains { $0.id == entry.key }
+        }
     }
 
     /// v2.15 incremental refresh: the old version awaited all six
